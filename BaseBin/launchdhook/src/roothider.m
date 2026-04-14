@@ -172,6 +172,43 @@ void roothide_launchd_postinit(bool firstLoad)
 	assert(initJailbreakd(firstLoad) == 0);
 }
 
+#include <dlfcn.h>
+#include <IOKit/IOKitLib.h>
+void fix__iosConnect()
+{
+    MSImageRef IOSurfaceImage = MSGetImageByName("/System/Library/Frameworks/IOSurface.framework/IOSurface");
+    JBLogDebug("IOSurfaceImage=%p\n", IOSurfaceImage);
+    assert(IOSurfaceImage != NULL);
+
+    io_service_t* __iosService = MSFindSymbol(IOSurfaceImage, "__iosService");
+    io_connect_t* __iosConnect = MSFindSymbol(IOSurfaceImage, "__iosConnect");
+    assert(__iosService != NULL && __iosConnect != NULL);
+
+    JBLogDebug("__iosService=%p __iosConnect=%p\n", __iosService, __iosConnect);
+    JBLogDebug("*__iosService=%d *__iosConnect=%d\n", *__iosService, *__iosConnect);
+
+    kern_return_t (*IOServiceClose)(io_connect_t connect);
+    kern_return_t (*IOServiceOpen)(io_service_t service, task_port_t owningTask, uint32_t type, io_connect_t* connect);
+
+    *(void **)&IOServiceOpen = dlsym(RTLD_DEFAULT, "IOServiceOpen");
+    *(void **)&IOServiceClose = dlsym(RTLD_DEFAULT, "IOServiceClose");
+    assert(IOServiceOpen != NULL && IOServiceClose != NULL);
+    
+    io_connect_t old__iosConnect = *__iosConnect;
+
+    if(old__iosConnect) {
+
+        assert(*__iosService != 0);
+
+        kern_return_t kr = IOServiceOpen(*__iosService, mach_task_self(), 0, __iosConnect);
+        JBLogDebug("IOServiceOpen kr=%x, new iosConnect=%d\n", kr, *__iosConnect);
+        assert(kr == KERN_SUCCESS);
+
+        kr = IOServiceClose(old__iosConnect);
+        assert(kr == KERN_SUCCESS);
+    }
+}
+
 int roothide_trust_executable_recurse(const char *executablePath, const char *processWorkingDir, xpc_object_t preferredArchsArray);
 int roothide_launchd_trust_executable(const char* path)
 {
@@ -283,6 +320,13 @@ int roothide_launchd___posix_spawn_prehook(pid_t *restrict pidp, const char *res
 
 	if(!path) {
 		return __posix_spawn_hook(pidp, path, desc, argv, envp);
+	}
+
+	if(isRemovableBundlePath(path)) {
+		static dispatch_once_t onceToken = {0};
+		dispatch_once(&onceToken, ^{
+			fix__iosConnect();
+		});
 	}
 
 	if(strcmp(path, "/sbin/launchd") == 0) {
