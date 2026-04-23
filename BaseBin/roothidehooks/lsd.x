@@ -155,6 +155,7 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 	%orig(identifier, options, useClientProcessHandle, newcallback);
 }
 
+//16.2(?)+
 -(void)openURL:(NSURL*)url fileHandle:(id)fileHandle options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
 {
 	BOOL blocked = NO;
@@ -189,6 +190,43 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 	};
 
 	%orig(url, fileHandle, options, newcallback);
+}
+
+//15.0~16.0(?)
+- (void)openURL:(NSURL*)url options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
+{
+	BOOL blocked = NO;
+
+	if(self.XPCConnection)
+	{
+		pid_t pid = self.XPCConnection.processIdentifier;
+
+		NSLog(@"_LSDOpenClient openURL:%@ options:%@ completionHandler:%p XPCConnection=%p proc:%d,%s", url, options, completionHandler, self.XPCConnection, pid, proc_get_path(pid,NULL));
+
+		if(jbclient_blacklist_check_pid(pid)==true)
+		{
+			if(isJailbreakURLScheme(url.scheme))
+			{
+				NSLog(@"_LSDOpenClient: block openURL:%@", url);
+
+				objc_setAssociatedObject(url, kBlockSchemeTagKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+				blocked = YES;
+			}
+		}
+	}
+
+	id newcallback = ^(BOOL success, NSError* error) {
+		NSLog(@"_LSDOpenClient completionHandler(%@) success:%d result:%@", url, success, error);
+		
+		if(blocked) {
+			assert(success == NO);
+		}
+
+		return completionHandler(success, error);
+	};
+
+	%orig(url, options, newcallback);
 }
 
 %end
