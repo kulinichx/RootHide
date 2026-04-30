@@ -41,6 +41,14 @@ body:
       placeholder: Yes or No
     validations:
       required: true
+  - type: input
+    id: disable-injection
+    attributes:
+      label: Disable Injection
+      description: Have you tried disabling tweak injection in the Settings of Dopamine then rebooting userspace?
+      placeholder: Yes or No
+    validations:
+      required: true
   - type: textarea
     id: bugs
     attributes:
