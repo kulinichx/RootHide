@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include "physrw.h"
 #include "physrw_pte.h"
-#include "kalloc_pt.h"
 #include "primitives_IOSurface.h"
 #include "info.h"
 #include "translation.h"
@@ -26,14 +25,8 @@ int jbclient_initialize_primitives_internal(bool physrwPTE)
 			else {
 				libjailbreak_physrw_init(true);
 			}
-				libjailbreak_translation_init();
-				libjailbreak_IOSurface_primitives_init();
-				// Prefer the upstream iOS 16+ IOSurface allocator. The page-table
-				// allocator remains a fallback for environments where IOSurface
-				// primitives cannot be initialized.
-				if (__builtin_available(iOS 16.0, *) && !gPrimitives.kalloc_global) {
-					libjailbreak_kalloc_pt_init();
-				}
+			libjailbreak_translation_init();
+			libjailbreak_IOSurface_primitives_init();
 			if (gPrimitives.kalloc_local) {
 #ifdef __arm64e__
 				if (jbinfo(usesPACBypass)) {
