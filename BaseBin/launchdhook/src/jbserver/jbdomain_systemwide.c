@@ -391,10 +391,33 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 		if (xpc_get_type(customTrustObj) == XPC_TYPE_STRING) {
 			const char *customTrustStr = xpc_string_get_string_ptr(customTrustObj);
 			uint32_t customTrust = pmap_cs_trust_string_to_int(customTrustStr);
-			if (customTrust >= 2) {
-				uint64_t mainCodeDir = proc_find_main_binary_code_dir(proc);
-				if (mainCodeDir) {
-					kwrite32(mainCodeDir + koffsetof(pmap_cs_code_directory, trust), customTrust);
+			if (host_is_arm64e()) {
+				if (customTrust >= 2) {
+					uint64_t mainCodeDir = proc_find_main_binary_code_dir(proc);
+					if (mainCodeDir) {
+						kwrite32(mainCodeDir + koffsetof(pmap_cs_code_directory, trust), customTrust);
+					}
+				}
+			}
+
+			if (__builtin_available(iOS 17.0, *)) {
+				if (customTrust <= pmap_cs_trust_string_to_int("PMAP_CS_APP_STORE")) {
+					proc_csflags_clear(proc, CS_PLATFORM_BINARY);
+
+					uint64_t proc_ro = kread_ptr(proc + koffsetof(proc, proc_ro));
+					uint32_t t_flags = kread32(proc_ro + koffsetof(proc_ro, t_flags_ro));
+					
+					t_flags &= ~(kconstant(TFRO_PLATFORM));
+					if (kconstant(TFRO_HARDENED)) {
+						t_flags &= ~(kconstant(TFRO_HARDENED));
+					}
+
+					kwrite32(proc_ro + koffsetof(proc_ro, t_flags_ro), t_flags);
+
+					if (koffsetof(task, security_config)) {
+						uint64_t task = proc_task(proc);
+						kwrite8(task + koffsetof(task, security_config), kread8(task + koffsetof(task, security_config)) & ~(0b111 << 3));
+					}
 				}
 			}
 		}
