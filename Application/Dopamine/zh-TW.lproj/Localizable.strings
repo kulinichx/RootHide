@@ -13,7 +13,6 @@
 "Menu_Settings_Title" = "設定";
 "Menu_Restart_SpringBoard_Title" = "重新啟動主畫面";
 "Menu_Reboot_Userspace_Title" = "重新啟動使用者空間";
-"Menu_Reboot_Device_Title" = "重新啟動裝置";
 "Menu_Credits_Title" = "致謝";
 
 // Updating
@@ -78,7 +77,6 @@
 "Button_Change" = "更改";
 "Button_Cancel" = "取消";
 "Button_Continue" = "繼續";
-"Alert_Reboot_Device_Body" = "裝置將重新啟動，越獄會暫時失效，需再次執行越獄才能恢復。是否繼續？";
 
 // Duplicate Apps Errors
 "Duplicate_Apps_Error_Dopamine_App" = "Dopamines 應用程式目錄 (\"%@\") 內有多個識別碼為 \"%@\" 的應用程式。無法繼續。";
@@ -89,9 +87,17 @@
 "Theme" = "主題";
 "Kernel Exploit" = "核心漏洞";
 "PPL Bypass" = "繞過 PPL";
+"SPTM Bypass" = "繞過 SPTM";
 "PAC Bypass" = "繞過 PAC";
 "None" = "無";
 "Recommended" = "建議";
+
+// DarkSword Workaround
+/*Respring_Required*/
+/*Respring_Required_Message*/
+/*Respring_Required_Notice_A8*/
+/*Apply_Workaround*/
+/*Respring_Cancel*/
 
 // Credits
 "Credits_Button_Discord" = "Discord";
@@ -112,8 +118,13 @@
 "Exploiting Kernel (%@)" = "正在利用核心漏洞 (%@)";
 "Bypassing PAC (%@)" = "正在繞過 PAC 防護 (%@)";
 "Bypassing PPL (%@)" = "正在繞過 PPL 防護 (%@)";
+"Bypassing SPTM (%@)" = "正在繞過 SPTM 防護 (%@)";
 
 // Package Manager selection
 "Status_Title_Select_Package_Managers" = "選擇套件管理器";
 "Select_Package_Managers_Install_Message" = "請於不確定時選擇 Sileo";
 "Continue" = "繼續";
+
+// RootHide actions
+"Menu_Reboot_Device_Title" = "重新啟動裝置";
+"Alert_Reboot_Device_Body" = "裝置將重新啟動，越獄會暫時失效，需再次執行越獄才能恢復。是否繼續？";

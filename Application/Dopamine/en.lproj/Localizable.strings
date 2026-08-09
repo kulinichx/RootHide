@@ -13,7 +13,6 @@
 "Menu_Settings_Title" = "Settings";
 "Menu_Restart_SpringBoard_Title" = "Restart SpringBoard";
 "Menu_Reboot_Userspace_Title" = "Reboot Userspace";
-"Menu_Reboot_Device_Title" = "Reboot Device";
 "Menu_Credits_Title" = "Credits";
 
 // Updating
@@ -82,7 +81,6 @@
 "Button_Change" = "Change";
 "Button_Cancel" = "Cancel";
 "Button_Continue" = "Continue";
-"Alert_Reboot_Device_Body" = "The device will restart and the jailbreak will be disabled until you jailbreak again. Continue?";
 
 // Duplicate Apps Errors
 "Duplicate_Apps_Error_Dopamine_App" = "There are multiple apps with the identifier \"%@\" inside Dopamines application directory (\"%@\"). Cannot continue.";
@@ -93,9 +91,17 @@
 "Theme" = "Theme";
 "Kernel Exploit" = "Kernel Exploit";
 "PPL Bypass" = "PPL Bypass";
+"SPTM Bypass" = "SPTM Bypass";
 "PAC Bypass" = "PAC Bypass";
 "None" = "None";
 "Recommended" = "Recommended";
+
+// DarkSword Workaround
+"Respring_Required" = "Respring Required";
+"Respring_Required_Message" = "The selected Kernel exploit requires creating a contiguous memory mapping which on this device is only possible with a special workaround that performs a respring. After the respring is done, reopen the Dopamine app and press \"Jailbreak\" again.";
+"Respring_Required_Notice_A8" = "On your device the workaround does not work every time and you may need to apply it multiple times until this alert no longer appears.";
+"Apply_Workaround" = "Apply Workaround";
+"Respring_Cancel" = "Cancel";
 
 // Credits
 "Credits_Button_Discord" = "Discord";
@@ -116,13 +122,16 @@
 "Exploiting Kernel (%@)" = "Exploiting Kernel (%@)";
 "Bypassing PAC (%@)" = "Bypassing PAC (%@)";
 "Bypassing PPL (%@)" = "Bypassing PPL (%@)";
+"Bypassing SPTM (%@)" = "Bypassing SPTM (%@)";
 
 // Package Manager selection
 "Status_Title_Select_Package_Managers" = "Select Package Manager(s)";
 "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
 "Continue" = "Continue";
 
-// Fake mounts
+// RootHide actions
+"Menu_Reboot_Device_Title" = "Reboot Device";
+"Alert_Reboot_Device_Body" = "The device will restart and the jailbreak will be disabled until you jailbreak again. Continue?";
 "Mount_Title" = "Mounts";
 "Mount_Add_Title" = "Add Mount";
 "Mount_Manage_Title" = "Manage Mounts";
