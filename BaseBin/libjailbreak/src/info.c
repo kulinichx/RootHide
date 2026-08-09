@@ -490,8 +490,8 @@ void jbinfo_initialize_hardcoded_offsets(void)
 													gSystemInfo.kernelStruct.task.task_can_transfer_memory_ownership = 0x548;
 												}
 												
-												// iOS 18.1+
-												if (strcmp(darwinVersion, "24.1.0") >= 0) {
+												// iOS 18.1+ (beta 5 and up)
+												if (strcmp(darwinVersion, "24.1.0") >= 0 && xnu_version_compare(xnuVersion, (struct xnu_version){11215, 40, 59}) >= 0) {
 													// No more size
 													gSystemInfo.kernelStruct.trustcache.size        = 0x0;
 													gSystemInfo.kernelStruct.trustcache.fileptr     = 0x18;
