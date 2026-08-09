@@ -617,7 +617,10 @@ void *boomerang_server(struct boomerang_info *info)
     }
     
     *errOut = [[DOEnvironmentManager sharedManager] prepareBootstrap];
-    if (*errOut) return;
+    if (*errOut) {
+        [self cleanUpPostExploitation];
+        return;
+    }
     setenv("PATH", "/sbin:/bin:/usr/sbin:/usr/bin:/rootfs/sbin:/rootfs/bin:/rootfs/usr/sbin:/rootfs/usr/bin", 1);
     setenv("TERM", "xterm-256color", 1);
 
@@ -638,13 +641,15 @@ void *boomerang_server(struct boomerang_info *info)
         [self cleanUpPostExploitation];
         return;
     }
-    
+
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Initializing Environment") debug:NO];
     *errOut = [self injectLaunchdHook];
     if (*errOut) {
         [self cleanUpPostExploitation];
         return;
     }
+    // After the launchd hook is initialized, we need to make the app believe the device is jailbroken
+    [[DOEnvironmentManager sharedManager] setJailbroken:YES];
     
 /*
     // Now that we can, protect important system files by bind mounting on top of them
@@ -652,7 +657,10 @@ void *boomerang_server(struct boomerang_info *info)
     // We also do it now though in case there is a failure between the now step and the userspace reboot
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Initializing Protection") debug:NO];
     *errOut = [self applyProtection];
-    if (*errOut) return;
+    if (*errOut) {
+        [self cleanUpPostExploitation];
+        return;
+    }
     
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Applying Bind Mount") debug:NO];
     *errOut = [self createFakeLib];
@@ -665,12 +673,14 @@ void *boomerang_server(struct boomerang_info *info)
 int ret = basebin_generate(false);
 if (ret != 0) {
     *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedInitFakeLib userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Creating fakelib failed with error: %d", ret]}];
+    [self cleanUpPostExploitation];
     return;
 }
 
 ret = ensure_dyld_trustcache(JBROOT_PATH("/basebin/.fakelib/dyld"));
 if (ret != 0) {
     *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedInitFakeLib userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to upload dyld trustcache: %d", ret]}];
+    [self cleanUpPostExploitation];
     return;
 }
 
@@ -685,7 +695,6 @@ setenv("DISABLE_TWEAKS", "1", 1);
 setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
 
 /******************************** roothide specific *************************/
-
     
     // Unsandbox iconservicesagent so that app icons can work
     exec_cmd_trusted(JBROOT_PATH("/usr/bin/killall"), "-9", "iconservicesagent", NULL);
@@ -695,7 +704,6 @@ setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
         [self cleanUpPostExploitation];
         return;
     }
-
     [[DOEnvironmentManager sharedManager] restoreFakeMounts];
     
     [[DOEnvironmentManager sharedManager] setIDownloadEnabled:idownloadEnabled needsUnsandbox:NO];
@@ -704,10 +712,14 @@ setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Checking For Duplicate Apps") debug:NO];
     *errOut = [self ensureNoDuplicateApps];
     if (*errOut) {
+        [self cleanUpPostExploitation];
         *showLogs = NO;
         return;
     }
 */
+
+    *errOut = [self cleanUpPostExploitation];
+    if (*errOut) return;
     
     //printf("Starting launch daemons...\n");
     //exec_cmd_trusted(JBROOT_PATH("/usr/bin/launchctl"), "bootstrap", "system", JBROOT_PATH("/Library/LaunchDaemons"), NULL);
