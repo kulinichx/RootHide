@@ -72,6 +72,7 @@
     return updates;
 }
 
+/*
 - (NSArray *)getLatestReleases
 {
     static dispatch_once_t onceToken;
@@ -91,6 +92,13 @@
     });
     return releases;
 }
+*/
+/*****************lishaowen 禁止更新，替换上面注释的方法******************/
+- (NSArray *)getLatestReleases
+{
+    return @[];
+}
+/*****************lishaowen 禁止更新，替换上面注释的方法******************/
 
 - (BOOL)environmentUpdateAvailable
 {

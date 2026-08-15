@@ -17,7 +17,7 @@ in-app update screen reads release notes from the same location.
 
 - iPhone 14 Pro Max (iPhone15,3)
 - iOS 16.6
-- Dopamine 3.0.4 base
+- Dopamine 3.0.6 base
 
 Other devices and versions supported by Dopamine 3 may work, but should be
 treated as unverified until they have been tested with this RootHide port.
