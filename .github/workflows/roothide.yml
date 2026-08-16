@@ -154,7 +154,7 @@ jobs:
           make -j"$(sysctl -n hw.logicalcpu)" NIGHTLY=1
 
           version="$(cat BaseBin/_external/basebin/.version)-$(git rev-parse --short HEAD)"
-          artifact="roothide-Dopamine-${version}.tipa"
+          artifact="Dopamine_${version}_roothide.tipa"
           cp Application/Dopamine.tipa "Application/${artifact}"
           echo "artifact=${artifact}" >> "$GITHUB_ENV"
 
