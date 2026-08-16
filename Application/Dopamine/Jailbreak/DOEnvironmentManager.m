@@ -384,7 +384,7 @@ extern char **environ;
 {
     bool needsLegacySolution = false;
     if (self.jailbrokenVersion) {
-        needsLegacySolution = (strcmp(self.jailbrokenVersion.UTF8String, "3.0.6") < 0);
+        needsLegacySolution = (strcmp(self.jailbrokenVersion.UTF8String, "3.0.7") < 0);
     }
 
     char **argBuf = malloc((args.count + 4) * sizeof(char *));
@@ -423,7 +423,7 @@ extern char **environ;
             r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, (char *const *)environ);
             if (needsLegacySolution) {
                 // Legacy solution is a gamble, which is why it was removed and superseeded by --waitfor
-                // But if jailbroken with <3.0.6, jbctl doesn't support --waitfor yet
+                // But if jailbroken with <3.0.7, jbctl doesn't support --waitfor yet
                 kill(pid, SIGCONT);
             }
         }];
