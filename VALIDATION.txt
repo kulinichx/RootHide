@@ -1,0 +1,9 @@
+PASS Phase 1 patch applies to freshly extracted P013 source
+PASS Phase 2 patch applies to freshly extracted P013 source
+PASS Phase 2 patch supersedes Phase 1; workflow applies only one variant patch
+PASS workflow uses recursive submodules
+PASS workflow preserves existing XPF/opainject submodule patches
+PASS workflow uses macos-14 / Xcode 15.4 / Theos commit from uploaded P013 workflow
+PASS workflow performs git apply --check and git diff --check before build
+PASS B2 invariant checks enforce read-only state-machine markers
+PASS both build variants upload separate TIPA/evidence artifacts

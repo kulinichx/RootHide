@@ -1,42 +1,32 @@
-# RootHide on Dopamine 3
+# RootHide PID1 A/B CI v1
 
-RootHide on Dopamine 3 ports the RootHide jailbreak environment to the
-Dopamine 3 codebase. It keeps Dopamine's device and exploit support while
-providing RootHide's randomized jailbreak root and package environment.
+This bundle builds two isolated stability candidates from the same P013onEr RootHide
+repository revision:
 
-This project is experimental. Back up important data before testing, and
-remove incompatible tweaks if SpringBoard enters a respring loop.
+- **B1-phase1-dedup** — only the one-file live-trustcache duplicate-upload fix.
+- **B2-phase2-readonly** — supersedes B1 and includes read-only-first signature
+  preparation plus final-cdhash trustcache de-duplication.
 
-## Downloads and changelog
+B2 must **not** apply the B1 patch first; its patch was generated against the clean
+P013 source and already contains the collector correction in its final Phase 2 form.
+The workflow matrix therefore applies exactly one patch per build.
 
-Download signed builds and read the changelog on the
-[GitHub Releases](https://github.com/P013onEr/RootHide/releases) page. The
-in-app update screen reads release notes from the same location.
+## Install into a real repository
 
-## Tested configuration
+Copy the included `.github/` tree into a recursive checkout of the P013onEr RootHide
+repository, commit it to a test branch, then run:
 
-- iPhone 14 Pro Max (iPhone15,3)
-- iOS 16.6
-- Dopamine 3.0.4 base
+`Actions -> RootHide PID1 stability A-B -> Run workflow`
 
-Other devices and versions supported by Dopamine 3 may work, but should be
-treated as unverified until they have been tested with this RootHide port.
+The run should produce two artifacts, one for B1 and one for B2, from the same source
+revision and toolchain.
 
-## Community
+## Recommended device order
 
-- Telegram: https://t.me/+WtnN67BeOsA1MGM5
-- RootHide developer documentation: https://github.com/roothide/Developer
+1. Keep unmodified 7a07400 as A/reference.
+2. Test B1 to isolate duplicate trustcache publication.
+3. Test B2 to add the read-only-first signature preparation change.
+4. Use the same app set and launch-count checkpoints for all three.
 
-## Building
-
-See [BUILD.md](BUILD.md) for GitHub Actions instructions. The workflow used by
-this repository is available at [.github/workflows/roothide.yml](.github/workflows/roothide.yml).
-
-## Credits
-
-- Dopamine: https://github.com/opa334/Dopamine
-- RootHide: https://github.com/roothide
-- Dopamine2-roothide: https://github.com/roothide/Dopamine2-roothide
-
-This repository retains the licenses and attribution of its upstream
-components.
+Do not change tweaks/bootstrap contents between the short A/B measurement windows if
+you want trustcache-entry growth to be comparable.
