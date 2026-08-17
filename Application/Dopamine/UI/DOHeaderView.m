@@ -51,6 +51,9 @@
             label.attributedText = formatedText;
             label.translatesAutoresizingMaskIntoConstraints = NO;
             [stackView addArrangedSubview:label];
+            if (idx == 4) {
+                self.timerLabel = label;
+            }
         }];
 
         self.translatesAutoresizingMaskIntoConstraints = NO;
