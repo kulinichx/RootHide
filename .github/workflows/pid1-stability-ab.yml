@@ -1,4 +1,4 @@
-name: RootHide PID1 stability A-B
+name: RootHide PID1 C1-C2 safety A-B
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pid1-stability-ab-${{ github.ref }}
+  group: pid1-c1c2-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -25,10 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: B1-phase1-dedup
-            patch: .github/patches/PID1-B1-phase1-dedup.patch
-          - variant: B2-phase2-readonly
-            patch: .github/patches/PID1-B2-phase2-readonly.patch
+          - variant: C1-p013304-307tc-dedup
+            patch: .github/patches/PID1-C1-phase1-dedup.patch
+          - variant: C2-p013304-307tc-readonly
+            patch: .github/patches/PID1-C2-phase2-readonly.patch
 
     steps:
       - name: Checkout
@@ -49,32 +49,44 @@ jobs:
           git -C BaseBin/XPF apply "$GITHUB_WORKSPACE/.github/patches/XPF-roothide.patch"
           git -C BaseBin/opainject apply "$GITHUB_WORKSPACE/.github/patches/opainject-build.patch"
 
-      - name: Apply PID1 stability variant
+      - name: Apply common Dopamine 3.0.7 trustcache safety
+        run: |
+          set -euo pipefail
+          p=.github/patches/PID1-P0-Dopamine307-trustcache-safety.patch
+          git apply --check "$p"
+          git apply "$p"
+
+      - name: Apply PID1 variant
         run: |
           set -euo pipefail
           patch_file="${{ matrix.patch }}"
           git apply --check "$patch_file"
           git apply "$patch_file"
           git diff --check
-          echo "variant=${{ matrix.variant }}"
           git diff --stat
 
-      - name: Verify variant invariants
+      - name: Verify safety invariants
         run: |
           set -euo pipefail
+          tc=BaseBin/libjailbreak/src/trustcache.c
           sig=BaseBin/libjailbreak/src/roothider/signatures.m
           rec=BaseBin/libjailbreak/src/roothider/recdhash.m
 
-          # Both variants must stop re-uploading a live-trustcached cdhash.
+          grep -Fq 'kwritebuf(prevTcFile, tc, tcSize - ksizeof(trustcache));' "$tc"
+          grep -Fq 'kalloc is not guaranteed to be zeroed' "$tc"
+          grep -Fq 'kwritebuf(tcKaddr, nullBuf, sizeof(nullBuf));' "$tc"
           grep -q 'is_cdhash_trustcached' "$sig"
 
-          if [ "${{ matrix.variant }}" = "B2-phase2-readonly" ]; then
+          if [ "${{ matrix.variant }}" = "C2-p013304-307tc-readonly" ]; then
             test -f BaseBin/libjailbreak/src/roothider/signature_policy.c
             test -f BaseBin/libjailbreak/src/roothider/signature_policy.h
             grep -q 'SIGNATURE_PREPARATION_NEEDS_WRITE' "$rec"
             grep -q 'ksymbol(SPTMArgs)' "$rec"
             ! grep -q 'system_info_uses_sptm' "$rec"
             ! grep -q 'memory_stream_get_size' "$rec"
+            grep -q '#include "log.h"' "$rec"
+            ! grep -q '#include "../log.h"' "$rec"
+            grep -q 'extern bool csd_superblob_is_adhoc_signed' "$rec"
           fi
 
       - name: Select Xcode
@@ -165,7 +177,9 @@ jobs:
           {
             echo "variant=${{ matrix.variant }}"
             echo "repo_head=$(git rev-parse HEAD)"
-            echo "patch_sha256=$(shasum -a 256 '${{ matrix.patch }}' | awk '{print $1}')"
+            echo "phase0_sha256=$(shasum -a 256 .github/patches/PID1-P0-Dopamine307-trustcache-safety.patch | awk '{print $1}')"
+            echo "variant_patch_sha256=$(shasum -a 256 '${{ matrix.patch }}' | awk '{print $1}')"
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Application/Dopamine/Dopamine/Info.plist 2>/dev/null || true
             git submodule status --recursive
             shasum -a 256 "Application/${artifact}"
           } > artifacts/BUILD-EVIDENCE.txt
