@@ -1,0 +1,25 @@
+diff --git a/BaseBin/libjailbreak/src/trustcache.c b/BaseBin/libjailbreak/src/trustcache.c
+index dc5dcf0..fc81609 100644
+--- a/BaseBin/libjailbreak/src/trustcache.c
++++ b/BaseBin/libjailbreak/src/trustcache.c
+@@ -335,7 +335,7 @@ int trustcache_file_upload(trustcache_file_v1 *tc)
+ 		uint64_t prevTcSize = ksizeof(trustcache) + sizeof(trustcache_file_v1) + (prevTcLength * sizeof(trustcache_entry_v1));
+ 		if (prevTcSize == tcSize) {
+ 			// If size is the same this is simple, just replace the file data
+-			kwritebuf(prevTcFile, tc, tcSize);
++			kwritebuf(prevTcFile, tc, tcSize - ksizeof(trustcache));
+ 			return 0;
+ 		}
+ 		else {
+@@ -355,6 +355,11 @@ int trustcache_file_upload(trustcache_file_v1 *tc)
+ 	uint64_t tcKaddr = 0;
+ 	if (kalloc(&tcKaddr, tcSize) != 0) return -1;
+ 
++	// kalloc is not guaranteed to be zeroed, make sure trustcache head is zeroed
++	char nullBuf[ksizeof(trustcache)];
++	memset(nullBuf, 0, sizeof(nullBuf));
++	kwritebuf(tcKaddr, nullBuf, sizeof(nullBuf));
++
+ 	uint64_t tcFileKaddr = tcKaddr + ksizeof(trustcache);
+ 	kwritebuf(tcFileKaddr, tc, tcSize - ksizeof(trustcache));
+ 

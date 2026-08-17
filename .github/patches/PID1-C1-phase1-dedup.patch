@@ -1,0 +1,49 @@
+diff --git a/BaseBin/libjailbreak/src/roothider/signatures.m b/BaseBin/libjailbreak/src/roothider/signatures.m
+index 3ebbced..0a1885a 100644
+--- a/BaseBin/libjailbreak/src/roothider/signatures.m
++++ b/BaseBin/libjailbreak/src/roothider/signatures.m
+@@ -257,31 +257,30 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
+ 				cdhash_t cdhash = {0};
+ 				if (csd_superblob_calculate_best_cdhash(decodedSuperblob, cdhash, NULL) == 0) {
+ 					if (!cdhashesContains(cdhash)) {
+-						bool shouldAdd = is_cdhash_trustcached(cdhash);
++						bool alreadyTrusted = is_cdhash_trustcached(cdhash);
+ 						if (trace) {
+-							os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] cdhash path=%{public}s cached=%d", realLoadPath.fileSystemRepresentation, shouldAdd);
++							os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] cdhash path=%{public}s cached=%d", realLoadPath.fileSystemRepresentation, alreadyTrusted);
+ 						}
+-						if (!shouldAdd) {
++
++						// The collector is called for every relevant spawn/dlopen. Re-uploading a
++						// hash that is already in the kernel trustcache makes the dynamic cache
++						// grow on every repeated launch. Only prepare and upload hashes that are
++						// genuinely missing; dependency traversal below still runs even when the
++						// parent image is already trusted.
++						if (!alreadyTrusted) {
+ 							int ret = ensure_randomized_cdhash_for_slice(realLoadPath.fileSystemRepresentation, macho->archDescriptor.offset, cdhash);
+ 							if (trace) {
+ 								os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] randomize result=%d path=%{public}s", ret, realLoadPath.fileSystemRepresentation);
+ 							}
+ 							if (ret == 0) {
+-								shouldAdd = true;
++								cdhashesAdd(cdhash);
++								if (trace) {
++									os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] collected path=%{public}s total=%u", realLoadPath.fileSystemRepresentation, *cdhashCountOut);
++								}
+ 							} else {
+ 								JBLogError("ensure_randomized_cdhash_for_slice(%llx) failed: %s -> (%d)", macho->archDescriptor.offset, realLoadPath.fileSystemRepresentation, ret);
+ 							}
+ 						}
+-
+-						// Include hashes already reported as trusted in this request too. This
+-						// makes the dynamic upload self-contained when an older or malformed
+-						// trustcache produced a stale positive lookup.
+-						if (shouldAdd) {
+-							cdhashesAdd(cdhash);
+-							if (trace) {
+-								os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] collected path=%{public}s total=%u", realLoadPath.fileSystemRepresentation, *cdhashCountOut);
+-							}
+-						}
+ 					}
+ 				}
+ 			}
