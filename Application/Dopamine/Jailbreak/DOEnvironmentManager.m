@@ -413,6 +413,9 @@ extern char **environ;
         }
     }
 
+    __block pid_t pid = -1;
+    __block int spawnResult = -1;
+
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attr;
     int r = posix_spawn_file_actions_init(&actions);
@@ -434,8 +437,6 @@ extern char **environ;
         if (r != 0) goto out_attr;
     }
 
-    __block pid_t pid = -1;
-    __block int spawnResult = -1;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
