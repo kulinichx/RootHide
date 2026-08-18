@@ -1,0 +1,582 @@
+diff --git a/Application/Dopamine/Jailbreak/DOEnvironmentManager.m b/Application/Dopamine/Jailbreak/DOEnvironmentManager.m
+index 648bb08..37eb87a 100644
+--- a/Application/Dopamine/Jailbreak/DOEnvironmentManager.m
++++ b/Application/Dopamine/Jailbreak/DOEnvironmentManager.m
+@@ -14,6 +14,7 @@
+ #import <sys/stat.h>
+ #import <errno.h>
+ #import <unistd.h>
++#import <spawn.h>
+ #import <mach-o/dyld.h>
+ #import <libgrabkernel2/libgrabkernel2.h>
+ #import <libjailbreak/info.h>
+@@ -32,6 +33,7 @@
+ 
+ int reboot3(uint64_t flags, ...);
+ CFPropertyListRef MGCopyAnswer(CFStringRef);
++extern char **environ;
+ 
+ @implementation DOEnvironmentManager
+ 
+@@ -373,6 +375,62 @@ CFPropertyListRef MGCopyAnswer(CFStringRef);
+     if (ur == 0 && orgUser != 0) seteuid(orgUser);
+ }
+ 
++
++- (int)spawnJbctlAsRootWithArgs:(NSArray<NSString *> *)args
++{
++    // This deliberately keeps RootHide's existing runAsRoot/runUnsandboxed
++    // implementation.  Only the child sequencing is forward-ported.
++    size_t argc = args.count + 4;
++    char **argBuf = calloc(argc, sizeof(char *));
++    if (!argBuf) return ENOMEM;
++
++    int i = 0;
++    argBuf[i++] = strdup(JBROOT_PATH("/basebin/jbctl"));
++    for (NSString *arg in args) argBuf[i++] = strdup(arg.UTF8String);
++    argBuf[i++] = strdup("--waitfor");
++    argBuf[i++] = strdup("3");
++    argBuf[i] = NULL;
++
++    int waitPipe[2] = {-1, -1};
++    int r = pipe(waitPipe);
++    if (r != 0) goto out;
++
++    posix_spawn_file_actions_t actions;
++    posix_spawn_file_actions_init(&actions);
++    posix_spawn_file_actions_adddup2(&actions, waitPipe[0], 3);
++
++    __block pid_t pid = -1;
++    __block int spawnResult = -1;
++    [self runAsRoot:^{
++        [self runUnsandboxed:^{
++            spawnResult = posix_spawn(&pid, argBuf[0], &actions, NULL, argBuf, environ);
++        }];
++        // runUnsandboxed has restored the original MAC label here, and
++        // runAsRoot will restore the application's temporary credentials
++        // before control returns to the child below.
++    }];
++
++    posix_spawn_file_actions_destroy(&actions);
++
++    if (spawnResult == 0) {
++        char token = 'w';
++        (void)write(waitPipe[1], &token, sizeof(token));
++    }
++    close(waitPipe[0]);
++    close(waitPipe[1]);
++    waitPipe[0] = waitPipe[1] = -1;
++
++    if (spawnResult != 0) { r = spawnResult; goto out; }
++    r = cmd_wait_for_exit(pid);
++
++out:
++    if (waitPipe[0] >= 0) close(waitPipe[0]);
++    if (waitPipe[1] >= 0) close(waitPipe[1]);
++    for (int n = 0; n < i; n++) free(argBuf[n]);
++    free(argBuf);
++    return r;
++}
++
+ - (int)runTrollStoreAction:(NSString *)action
+ {
+     if (![self isInstalledThroughTrollStore]) return -1;
+@@ -385,47 +443,12 @@ CFPropertyListRef MGCopyAnswer(CFStringRef);
+ 
+ - (void)respring
+ {
+-    [self runAsRoot:^{
+-        __block int pid = 0;
+-        __block int r = 0;
+-        [self runUnsandboxed:^{
+-            r = exec_cmd_suspended(&pid, JBROOT_PATH("/usr/bin/sbreload"), NULL);
+-            if (r == 0) {
+-                kill(pid, SIGCONT);
+-            }
+-        }];
+-        if (r == 0) {
+-            if (cmd_wait_for_exit(pid) != 0) {
+-                // Fallback
+-                [self runUnsandboxed:^{
+-                    killall("/usr/libexec/backboardd", SIGTERM);
+-                }];
+-            }
+-        }
+-    }];
++    [self spawnJbctlAsRootWithArgs:@[@"respring"]];
+ }
+ 
+ - (void)rebootUserspace
+ {
+-    [self runAsRoot:^{
+-        __block int pid = 0;
+-        __block int r = 0;
+-        [self runUnsandboxed:^{
+-            r = exec_cmd_suspended(&pid, JBROOT_PATH("/basebin/jbctl"), "reboot_userspace", NULL);
+-            if (r == 0) {
+-                // the original plan was to have the process continue outside of this block
+-                // unfortunately sandbox blocks kill aswell, so it's a bit racy but works
+-
+-                // we assume we leave this unsandbox block before the userspace reboot starts
+-                // to avoid leaking the label, this seems to work in practice
+-                // and even if it doesn't work, leaking the label is no big deal
+-                kill(pid, SIGCONT);
+-            }
+-        }];
+-        if (r == 0) {
+-            cmd_wait_for_exit(pid);
+-        }
+-    }];
++    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+ }
+ 
+ - (void)refreshJailbreakApps
+@@ -485,14 +508,7 @@ CFPropertyListRef MGCopyAnswer(CFStringRef);
+ 
+ - (void)updateJailbreakFromTIPA:(NSString *)tipaPath
+ {
+-    [self runAsRoot:^{
+-        [self runUnsandboxed:^{
+-            pid_t pid = 0;
+-            if (exec_cmd_suspended(&pid, JBROOT_PATH("/basebin/jbctl"), "update", "tipa", tipaPath.fileSystemRepresentation, NULL) == 0) {
+-                kill(pid, SIGCONT);
+-            }
+-        }];
+-    }];
++    [self spawnJbctlAsRootWithArgs:@[@"update", @"tipa", tipaPath]];
+ }
+ 
+ - (BOOL)isTweakInjectionEnabled
+diff --git a/BaseBin/MachOMerger/Sources/MachOMerger/RelocInfo.swift b/BaseBin/MachOMerger/Sources/MachOMerger/RelocInfo.swift
+index 6c338f8..970f0cd 100644
+--- a/BaseBin/MachOMerger/Sources/MachOMerger/RelocInfo.swift
++++ b/BaseBin/MachOMerger/Sources/MachOMerger/RelocInfo.swift
+@@ -154,8 +154,26 @@ class RelocInfo {
+                     // This is what we want
+                     let off  = Int(sect.address) - Int(s!.origCommand.vmAddr)
+                     let size = Int(sect.size)
++
++                    // Zero-fill sections have no bytes in the Mach-O file.
++                    let sectionType = sect.flags.rawValue & 0xFF
++                    if sectionType == 0x1 /* S_ZEROFILL */ || sectionType == 0xC /* S_GB_ZEROFILL */ {
++                        return (Data(count: size), sect.address, sect.address &+ s!.offset)
++                    }
++
++                    // Defensive handling for BSS-like sections extending beyond file data.
++                    guard off >= 0 && off + size <= s!.data.count else {
++                        let available = max(0, min(size, s!.data.count - max(0, off)))
++                        let fileData: Data
++                        if available > 0 && off >= 0 {
++                            fileData = s!.data.subdata(in: off..<(off + available))
++                        } else {
++                            fileData = Data()
++                        }
++                        return (fileData + Data(count: size - available), sect.address, sect.address &+ s!.offset)
++                    }
++
+                     let data = s!.data.subdata(in: off..<(off + size))
+-                    
+                     return (data, sect.address, sect.address &+ s!.offset)
+                 }
+                 
+diff --git a/BaseBin/jbctl/src/main.m b/BaseBin/jbctl/src/main.m
+index 292f1ef..82217a7 100644
+--- a/BaseBin/jbctl/src/main.m
++++ b/BaseBin/jbctl/src/main.m
+@@ -23,6 +23,11 @@ Available commands:\n\
+ 
+ int main(int argc, char* argv[])
+ {
++	if (argc < 2) {
++		print_usage();
++		return 1;
++	}
++
+ 	if (!strcmp(argv[argc-1], "earlyboot")) {
+ 		// If jbctl is spawned in "early boot" state, the jbserver port needs to be obtained from registeredPorts[0] instead
+ 		mach_port_t *registeredPorts;
+@@ -38,17 +43,22 @@ int main(int argc, char* argv[])
+ 	}
+ 
+ 	setvbuf(stdout, NULL, _IOLBF, 0);
+-	if (argc < 2) {
+-		print_usage();
+-		return 1;
+-	}
+-
+ 	if (getuid() != 0 && geteuid() == 0) {
+ 		// When jailbroken the Dopamine app cannot have uid 0 because it can't drop it anymore without loosing it
+ 		// So in some cases (e.g. for spawning dpkg) we need to use jbctl to get it
+ 		setuid(0);
+ 	}
+ 
++	// The app may spawn jbctl while it temporarily owns elevated credentials /
++	// a relaxed MAC label.  Do not execute the requested action until the app
++	// has left those critical sections and explicitly releases us through fd.
++	if (argc > 2 && !strcmp(argv[argc-2], "--waitfor")) {
++		int fd = atoi(argv[argc-1]);
++		char token = 0;
++		(void)read(fd, &token, sizeof(token));
++		close(fd);
++	}
++
+ 	const char *rootPath = jbclient_get_jbroot();
+ 	if (rootPath) {
+ 		gSystemInfo.jailbreakInfo.rootPath = strdup(rootPath);
+@@ -144,8 +154,19 @@ int main(int argc, char* argv[])
+ 		}
+ 	}
+ 	else if (!strcmp(cmd, "reboot_userspace")) {
++		// Give the spawning app a final scheduling window after releasing the
++		// wait pipe before launchd is asked to tear userspace down.
++		usleep(10000);
+ 		return reboot3(RB2_USERREBOOT);
+ 	}
++	else if (!strcmp(cmd, "respring")) {
++		usleep(10000);
++		const char *sbreloadPath = JBROOT_PATH("/usr/bin/sbreload");
++		if (execve(sbreloadPath, (char *[]){ (char *)sbreloadPath, NULL }, environ) != 0) {
++			killall("/usr/libexec/backboardd", SIGTERM);
++		}
++		return 0;
++	}
+ 	else if (!strcmp(cmd, "update")) {
+ 		if (argc < 4) {
+ 			print_usage();
+diff --git a/BaseBin/launchdhook/src/jbserver/jbdomain_systemwide.c b/BaseBin/launchdhook/src/jbserver/jbdomain_systemwide.c
+index 8f39440..45ef93b 100644
+--- a/BaseBin/launchdhook/src/jbserver/jbdomain_systemwide.c
++++ b/BaseBin/launchdhook/src/jbserver/jbdomain_systemwide.c
+@@ -393,7 +393,7 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
+ 			uint64_t parentEntry    = kread_ptr(parentHeader + koffsetof(vm_map_header, first));
+ 
+ 			uint64_t childHeader   = childVmMap + koffsetof(vm_map, hdr);
+-			uint32_t childNentries = kread32(parentHeader + koffsetof(vm_map_header, nentries));
++			uint32_t childNentries = kread32(childHeader + koffsetof(vm_map_header, nentries));
+ 			uint64_t childEntry    = kread_ptr(childHeader + koffsetof(vm_map_header, first));
+ 
+ 			uint64_t childFirstEntry = childEntry, parentFirstEntry = parentEntry;
+@@ -419,9 +419,24 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
+ 					uint8_t parentProt = VM_FLAGS_GET_PROT(parentFlags), parentMaxProt = VM_FLAGS_GET_MAXPROT(parentFlags);
+ 					uint8_t childProt  = VM_FLAGS_GET_PROT(childFlags),  childMaxProt  = VM_FLAGS_GET_MAXPROT(childFlags);
+ 
++					bool childFlagsNeedUpdate = false;
++
+ 					if (parentProt != childProt || parentMaxProt != childMaxProt) {
+ 						VM_FLAGS_SET_PROT(childFlags, parentProt);
+ 						VM_FLAGS_SET_MAXPROT(childFlags, parentMaxProt);
++						childFlagsNeedUpdate = true;
++					}
++
++					if (__builtin_available(iOS 16.0, *)) {
++						bool parentUserDebugFlag = VM_FLAGS_GET_XNU_USER_DEBUG(parentFlags);
++						bool childUserDebugFlag  = VM_FLAGS_GET_XNU_USER_DEBUG(childFlags);
++						if (parentUserDebugFlag != childUserDebugFlag) {
++							VM_FLAGS_SET_XNU_USER_DEBUG(childFlags, parentUserDebugFlag);
++							childFlagsNeedUpdate = true;
++						}
++					}
++
++					if (childFlagsNeedUpdate) {
+ 						kwrite64(childEntry + koffsetof(vm_map_entry, flags), childFlags);
+ 					}
+ 
+diff --git a/BaseBin/launchdhook/src/jbserver/jbsettings.c b/BaseBin/launchdhook/src/jbserver/jbsettings.c
+index 39ba5dd..4bc31bf 100644
+--- a/BaseBin/launchdhook/src/jbserver/jbsettings.c
++++ b/BaseBin/launchdhook/src/jbserver/jbsettings.c
+@@ -3,6 +3,8 @@
+ 
+ int jbsettings_get(const char *key, xpc_object_t *valueOut)
+ {
++	if (!key) return -1;
++
+ 	if (!strcmp(key, "markAppsAsDebugged")) {
+ 		*valueOut = xpc_bool_create(jbsetting(markAppsAsDebugged));
+ 		return 0;
+diff --git a/BaseBin/libjailbreak/src/roothider/signatures.m b/BaseBin/libjailbreak/src/roothider/signatures.m
+index 3ebbced..0a1885a 100644
+--- a/BaseBin/libjailbreak/src/roothider/signatures.m
++++ b/BaseBin/libjailbreak/src/roothider/signatures.m
+@@ -257,31 +257,30 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
+ 				cdhash_t cdhash = {0};
+ 				if (csd_superblob_calculate_best_cdhash(decodedSuperblob, cdhash, NULL) == 0) {
+ 					if (!cdhashesContains(cdhash)) {
+-						bool shouldAdd = is_cdhash_trustcached(cdhash);
++						bool alreadyTrusted = is_cdhash_trustcached(cdhash);
+ 						if (trace) {
+-							os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] cdhash path=%{public}s cached=%d", realLoadPath.fileSystemRepresentation, shouldAdd);
++							os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] cdhash path=%{public}s cached=%d", realLoadPath.fileSystemRepresentation, alreadyTrusted);
+ 						}
+-						if (!shouldAdd) {
++
++						// The collector is called for every relevant spawn/dlopen. Re-uploading a
++						// hash that is already in the kernel trustcache makes the dynamic cache
++						// grow on every repeated launch. Only prepare and upload hashes that are
++						// genuinely missing; dependency traversal below still runs even when the
++						// parent image is already trusted.
++						if (!alreadyTrusted) {
+ 							int ret = ensure_randomized_cdhash_for_slice(realLoadPath.fileSystemRepresentation, macho->archDescriptor.offset, cdhash);
+ 							if (trace) {
+ 								os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] randomize result=%d path=%{public}s", ret, realLoadPath.fileSystemRepresentation);
+ 							}
+ 							if (ret == 0) {
+-								shouldAdd = true;
++								cdhashesAdd(cdhash);
++								if (trace) {
++									os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] collected path=%{public}s total=%u", realLoadPath.fileSystemRepresentation, *cdhashCountOut);
++								}
+ 							} else {
+ 								JBLogError("ensure_randomized_cdhash_for_slice(%llx) failed: %s -> (%d)", macho->archDescriptor.offset, realLoadPath.fileSystemRepresentation, ret);
+ 							}
+ 						}
+-
+-						// Include hashes already reported as trusted in this request too. This
+-						// makes the dynamic upload self-contained when an older or malformed
+-						// trustcache produced a stale positive lookup.
+-						if (shouldAdd) {
+-							cdhashesAdd(cdhash);
+-							if (trace) {
+-								os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] collected path=%{public}s total=%u", realLoadPath.fileSystemRepresentation, *cdhashCountOut);
+-							}
+-						}
+ 					}
+ 				}
+ 			}
+diff --git a/BaseBin/libjailbreak/src/trustcache.c b/BaseBin/libjailbreak/src/trustcache.c
+index dc5dcf0..e6d55c5 100644
+--- a/BaseBin/libjailbreak/src/trustcache.c
++++ b/BaseBin/libjailbreak/src/trustcache.c
+@@ -3,10 +3,14 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
++#include <pthread.h>
+ #include "kernel.h"
+ #include "info.h"
+ #include "primitives.h"
+ 
++static pthread_mutex_t gJbTrustcacheLock = PTHREAD_MUTEX_INITIALIZER;
++static bool _jb_trustcache_contains_cdhash_locked(cdhash_t hash);
++
+ void _trustcache_file_init(trustcache_file_v1 *file)
+ {
+ 	memset(file, 0, sizeof(*file));
+@@ -139,13 +143,17 @@ void _jb_trustcache_enumerate(void (^enumerateBlock)(uint64_t jbTcKaddr, bool *s
+ 	});
+ }
+ 
++
+ void jb_trustcache_clear(void)
+ {
+-	_jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
+-		kwrite64(jbTcKaddr + offsetof(jb_trustcache, file.length), 0);
+-	});
++    pthread_mutex_lock(&gJbTrustcacheLock);
++    _jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
++        kwrite64(jbTcKaddr + offsetof(jb_trustcache, file.length), 0);
++    });
++    pthread_mutex_unlock(&gJbTrustcacheLock);
+ }
+ 
++
+ uint64_t _jb_trustcache_grow(void)
+ {
+ 	uint64_t jbTcKern = 0;
+@@ -167,42 +175,105 @@ uint64_t _jb_trustcache_grow(void)
+ 	return jbTcKern;
+ }
+ 
++
+ int jb_trustcache_add_entries(struct trustcache_entry_v1 *entries, uint32_t entryCount)
+ {
+-	uint32_t remainingEntryCount = entryCount;
+-	while (remainingEntryCount > 0) {
+-		__block uint64_t freeJbTcKaddr = 0;
+-		__block uint32_t freeJbTcCurrentLength = 0;
+-		_jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
+-			uint32_t length = kread32(jbTcKaddr + offsetof(jb_trustcache, file.length));
+-			if (length < JB_TRUSTCACHE_ENTRY_COUNT) {
+-				freeJbTcKaddr = jbTcKaddr;
+-				freeJbTcCurrentLength = length;
+-				*stop = true;
+-			}
+-		});
+-		if (freeJbTcKaddr == 0) {
+-			freeJbTcKaddr = _jb_trustcache_grow();
+-		}
+-
+-		uint32_t entryCountToInsert = JB_TRUSTCACHE_ENTRY_COUNT - freeJbTcCurrentLength;
+-		if (remainingEntryCount < entryCountToInsert) {
+-			entryCountToInsert = remainingEntryCount;
+-		}
+-
+-		jb_trustcache *jbTc = alloca(JB_TRUSTCACHE_SIZE);
+-		kreadbuf(freeJbTcKaddr, jbTc, JB_TRUSTCACHE_SIZE);
+-		for (uint32_t i = 0; i < entryCountToInsert; i++) {
+-			jbTc->file.entries[freeJbTcCurrentLength+i] = entries[i];
+-		}
+-		jbTc->file.length += entryCountToInsert;
+-		_trustcache_file_sort(&jbTc->file);
+-		kwritebuf(freeJbTcKaddr, jbTc, JB_TRUSTCACHE_SIZE);
+-		remainingEntryCount -= entryCountToInsert;
+-	}
+-	return 0;
++    if (!entries || entryCount == 0) return 0;
++
++    int result = 0;
++    trustcache_entry_v1 *filtered = NULL;
++    jb_trustcache *page = NULL;
++
++    pthread_mutex_lock(&gJbTrustcacheLock);
++
++    filtered = calloc(entryCount, sizeof(*filtered));
++    if (!filtered) {
++        result = -1;
++        goto out;
++    }
++
++    uint32_t filteredCount = 0;
++    for (uint32_t i = 0; i < entryCount; i++) {
++        bool duplicateInBatch = false;
++        for (uint32_t j = 0; j < filteredCount; j++) {
++            if (memcmp(filtered[j].hash, entries[i].hash, sizeof(cdhash_t)) == 0) {
++                duplicateInBatch = true;
++                break;
++            }
++        }
++        if (duplicateInBatch) continue;
++
++        /*
++         * Keep RootHide's stale-positive recovery semantics, but do not append
++         * the same cdhash to RootHide's own dynamic JB trustcaches repeatedly.
++         */
++        if (_jb_trustcache_contains_cdhash_locked(entries[i].hash)) continue;
++
++        filtered[filteredCount++] = entries[i];
++    }
++
++    if (filteredCount == 0) goto out;
++
++    page = malloc(JB_TRUSTCACHE_SIZE);
++    if (!page) {
++        result = -1;
++        goto out;
++    }
++
++    uint32_t consumed = 0;
++    while (consumed < filteredCount) {
++        __block uint64_t freeJbTcKaddr = 0;
++        __block uint32_t freeJbTcCurrentLength = 0;
++
++        _jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
++            uint32_t length =
++                kread32(jbTcKaddr + offsetof(jb_trustcache, file.length));
++            if (length < JB_TRUSTCACHE_ENTRY_COUNT) {
++                freeJbTcKaddr = jbTcKaddr;
++                freeJbTcCurrentLength = length;
++                *stop = true;
++            }
++        });
++
++        if (freeJbTcKaddr == 0) {
++            freeJbTcKaddr = _jb_trustcache_grow();
++            freeJbTcCurrentLength = 0;
++            if (freeJbTcKaddr == 0) {
++                result = -1;
++                break;
++            }
++        }
++
++        uint32_t capacity = JB_TRUSTCACHE_ENTRY_COUNT - freeJbTcCurrentLength;
++        if (capacity == 0) {
++            result = -1;
++            break;
++        }
++
++        uint32_t remaining = filteredCount - consumed;
++        uint32_t chunk = remaining < capacity ? remaining : capacity;
++
++        kreadbuf(freeJbTcKaddr, page, JB_TRUSTCACHE_SIZE);
++        for (uint32_t i = 0; i < chunk; i++) {
++            page->file.entries[freeJbTcCurrentLength + i] =
++                filtered[consumed + i];
++        }
++
++        page->file.length = freeJbTcCurrentLength + chunk;
++        _trustcache_file_sort(&page->file);
++        kwritebuf(freeJbTcKaddr, page, JB_TRUSTCACHE_SIZE);
++
++        consumed += chunk;
++    }
++
++out:
++    free(page);
++    free(filtered);
++    pthread_mutex_unlock(&gJbTrustcacheLock);
++    return result;
+ }
+ 
++
+ int jb_trustcache_add_cdhashes(cdhash_t *hashes, uint32_t hashCount)
+ {
+ 	struct trustcache_entry_v1 entries[hashCount];
+@@ -334,8 +405,9 @@ int trustcache_file_upload(trustcache_file_v1 *tc)
+ 		uint32_t prevTcLength = kread32(prevTcFile + offsetof(trustcache_file_v1, length));
+ 		uint64_t prevTcSize = ksizeof(trustcache) + sizeof(trustcache_file_v1) + (prevTcLength * sizeof(trustcache_entry_v1));
+ 		if (prevTcSize == tcSize) {
+-			// If size is the same this is simple, just replace the file data
+-			kwritebuf(prevTcFile, tc, tcSize);
++			// If size is the same this is simple, just replace the file data.
++			// prevTcFile points after the in-kernel trustcache header.
++			kwritebuf(prevTcFile, tc, tcSize - ksizeof(trustcache));
+ 			return 0;
+ 		}
+ 		else {
+@@ -355,6 +427,12 @@ int trustcache_file_upload(trustcache_file_v1 *tc)
+ 	uint64_t tcKaddr = 0;
+ 	if (kalloc(&tcKaddr, tcSize) != 0) return -1;
+ 
++	// kalloc is not guaranteed to return zeroed memory.  In particular,
++	// stale next/prev/file pointers in the trustcache head are unsafe.
++	char nullBuf[ksizeof(trustcache)];
++	memset(nullBuf, 0, sizeof(nullBuf));
++	kwritebuf(tcKaddr, nullBuf, sizeof(nullBuf));
++
+ 	uint64_t tcFileKaddr = tcKaddr + ksizeof(trustcache);
+ 	kwritebuf(tcFileKaddr, tc, tcSize - ksizeof(trustcache));
+ 
+@@ -449,6 +527,20 @@ bool trustcache_contains_cdhash(uint64_t tcKaddr, cdhash_t CDHash)
+ 	return false;
+ }
+ 
++
++static bool _jb_trustcache_contains_cdhash_locked(cdhash_t hash)
++{
++    __block bool found = false;
++    _jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
++        if (trustcache_contains_cdhash(jbTcKaddr, hash)) {
++            found = true;
++            *stop = true;
++        }
++    });
++    return found;
++}
++
++
+ bool is_cdhash_trustcached(cdhash_t CDHash)
+ {
+ 	__block bool inTrustCache = false;
+diff --git a/BaseBin/libjailbreak/src/util.h b/BaseBin/libjailbreak/src/util.h
+index cb825ef..f6f5621 100644
+--- a/BaseBin/libjailbreak/src/util.h
++++ b/BaseBin/libjailbreak/src/util.h
+@@ -92,6 +92,8 @@ char *boot_manifest_hash(void);
+ #define VM_FLAGS_GET_MAXPROT(x) ((x >> 11) & 0xFULL);
+ #define VM_FLAGS_SET_PROT(x, p)    x = ((x & ~(0xFULL <<  7)) | (((uint64_t)p) <<  7))
+ #define VM_FLAGS_SET_MAXPROT(x, p) x = ((x & ~(0xFULL << 11)) | (((uint64_t)p) << 11))
++#define VM_FLAGS_GET_XNU_USER_DEBUG(x) ((bool)((x >> koffsetof(vm_map_entry, flags_xnu_user_debug)) & 0x1))
++#define VM_FLAGS_SET_XNU_USER_DEBUG(x, b) x = (x & ~(0x1ULL << koffsetof(vm_map_entry, flags_xnu_user_debug))) | (((uint64_t)(b)) << koffsetof(vm_map_entry, flags_xnu_user_debug))
+ 
+ #ifdef __OBJC__
+ NSString *NSPrebootUUIDPath(NSString *relativePath);
