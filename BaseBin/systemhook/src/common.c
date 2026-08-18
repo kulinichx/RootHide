@@ -70,7 +70,6 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 	// APT transports are short-lived native helpers. Trust their dependency
 	// tree, but never inject systemhook or suspend them for patching.
 	if (is_apt_transport_path(path)) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C33] trust-only APT helper path=%{public}s", path);
 		return kSpawnConfigTrust;
 	}
 

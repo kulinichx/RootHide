@@ -46,6 +46,25 @@ jobs:
           git -C BaseBin/XPF apply "$GITHUB_WORKSPACE/.github/patches/XPF-roothide.patch"
           git -C BaseBin/opainject apply "$GITHUB_WORKSPACE/.github/patches/opainject-build.patch"
 
+      - name: Capture source provenance
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          {
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "ref=$GITHUB_REF"
+            echo "head=$(git rev-parse HEAD)"
+            echo "version=$(tr -d '\r\n' < BaseBin/_external/basebin/.version)"
+            echo "xcode_requested=15.4"
+            echo "theos_commit=$THEOS_COMMIT"
+            echo "trustcache_commit=$TRUSTCACHE_COMMIT"
+            echo "submodules:"
+            git submodule status --recursive
+            echo "roothide_patch_inputs:"
+            shasum -a 256 .github/patches/XPF-roothide.patch .github/patches/opainject-build.patch
+          } > artifacts/source-provenance.txt
+          cat artifacts/source-provenance.txt
+
       # Xcode 15.4 is the last toolchain used by the original Dopamine 3
       # project layout. Newer Xcodes treat some command-line targets as
       # macOS/Catalyst targets and fail to resolve their Swift packages.
@@ -143,7 +162,10 @@ jobs:
           mkdir -p artifacts
           cp BaseBin/systemhook/systemhook.dylib artifacts/systemhook.dylib
           file artifacts/systemhook.dylib
-          strings artifacts/systemhook.dylib | grep -F "TRUSTFLOW-8A10"
+          if strings artifacts/systemhook.dylib | grep -E "APTTRUST-|TRUSTFLOW-"; then
+            echo "unexpected experimental trust diagnostics in systemhook" >&2
+            exit 1
+          fi
 
       - name: Full build TIPA
         if: env.BUILD_MODE == 'full'
@@ -163,7 +185,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: roothide-systemhook-${{ github.sha }}
-          path: artifacts/systemhook.dylib
+          path: |
+            artifacts/systemhook.dylib
+            artifacts/source-provenance.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -172,6 +196,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.artifact }}
-          path: Application/${{ env.artifact }}
+          path: |
+            Application/${{ env.artifact }}
+            artifacts/source-provenance.txt
           if-no-files-found: error
           retention-days: 14

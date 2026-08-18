@@ -18,6 +18,9 @@
 #include <libkern/OSCacheControl.h>
 #include <os/log.h>
 
+// RootHide dynamic policy lives in domain 6; jbclient_roothide.c is linked into systemhook.
+extern bool jbclient_blacklist_check_path(const char *path);
+
 bool string_has_prefix(const char *str, const char* prefix)
 {
 	if (!str || !prefix) {
@@ -128,8 +131,14 @@ static bool is_apt_helper_path(const char *path)
 
 kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[restrict])
 {
+	// RootHide dynamic blacklist is stronger than the normal Dopamine policy:
+	// no trust, no systemhook injection, and no tweak propagation. Returning 0
+	// also makes spawn_exec_hook_common strip any inherited jailbreak env.
+	if (path && jbclient_blacklist_check_path(path)) {
+		return 0;
+	}
+
 	if (is_apt_helper_path(path)) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C36] trust-only APT transport path=%{public}s", path);
 		return kSpawnConfigTrust;
 	}
 
@@ -256,15 +265,6 @@ static int spawn_exec_hook_common(bool isExec,
 		}
 	} while (0);
 
-	if (strstr(path, "/.jbroot-")) {
-		os_log_error(OS_LOG_DEFAULT,
-			"[TRUSTFLOW-8A10] spawn path=%{public}s hook=%{public}s existing=%{public}s inject=%d config=%u",
-			path,
-			HOOK_DYLIB_PATH ?: "(null)",
-			existingLibraryInserts ?: "(none)",
-			shouldInsertJBEnv,
-			(unsigned int)spawnConfig);
-	}
 
 	uint8_t *attrStruct = (uint8_t *)attr;
 	if (attrStruct) {

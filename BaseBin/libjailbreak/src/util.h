@@ -92,6 +92,8 @@ char *boot_manifest_hash(void);
 #define VM_FLAGS_GET_MAXPROT(x) ((x >> 11) & 0xFULL);
 #define VM_FLAGS_SET_PROT(x, p)    x = ((x & ~(0xFULL <<  7)) | (((uint64_t)p) <<  7))
 #define VM_FLAGS_SET_MAXPROT(x, p) x = ((x & ~(0xFULL << 11)) | (((uint64_t)p) << 11))
+#define VM_FLAGS_GET_XNU_USER_DEBUG(x) ((bool)((x >> koffsetof(vm_map_entry, flags_xnu_user_debug)) & 0x1))
+#define VM_FLAGS_SET_XNU_USER_DEBUG(x, b) x = (x & ~(0x1ULL << koffsetof(vm_map_entry, flags_xnu_user_debug))) | (((uint64_t)(b)) << koffsetof(vm_map_entry, flags_xnu_user_debug))
 
 #ifdef __OBJC__
 NSString *NSPrebootUUIDPath(NSString *relativePath);

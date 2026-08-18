@@ -393,7 +393,7 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 			uint64_t parentEntry    = kread_ptr(parentHeader + koffsetof(vm_map_header, first));
 
 			uint64_t childHeader   = childVmMap + koffsetof(vm_map, hdr);
-			uint32_t childNentries = kread32(parentHeader + koffsetof(vm_map_header, nentries));
+			uint32_t childNentries = kread32(childHeader + koffsetof(vm_map_header, nentries));
 			uint64_t childEntry    = kread_ptr(childHeader + koffsetof(vm_map_header, first));
 
 			uint64_t childFirstEntry = childEntry, parentFirstEntry = parentEntry;
@@ -419,9 +419,24 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 					uint8_t parentProt = VM_FLAGS_GET_PROT(parentFlags), parentMaxProt = VM_FLAGS_GET_MAXPROT(parentFlags);
 					uint8_t childProt  = VM_FLAGS_GET_PROT(childFlags),  childMaxProt  = VM_FLAGS_GET_MAXPROT(childFlags);
 
+					bool childFlagsNeedUpdate = false;
+
 					if (parentProt != childProt || parentMaxProt != childMaxProt) {
 						VM_FLAGS_SET_PROT(childFlags, parentProt);
 						VM_FLAGS_SET_MAXPROT(childFlags, parentMaxProt);
+						childFlagsNeedUpdate = true;
+					}
+
+					if (__builtin_available(iOS 16.0, *)) {
+						bool parentUserDebugFlag = VM_FLAGS_GET_XNU_USER_DEBUG(parentFlags);
+						bool childUserDebugFlag = VM_FLAGS_GET_XNU_USER_DEBUG(childFlags);
+						if (parentUserDebugFlag != childUserDebugFlag) {
+							VM_FLAGS_SET_XNU_USER_DEBUG(childFlags, parentUserDebugFlag);
+							childFlagsNeedUpdate = true;
+						}
+					}
+
+					if (childFlagsNeedUpdate) {
 						kwrite64(childEntry + koffsetof(vm_map_entry, flags), childFlags);
 					}
 

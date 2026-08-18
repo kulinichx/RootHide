@@ -23,6 +23,12 @@ Available commands:\n\
 
 int main(int argc, char* argv[])
 {
+	// D1 guard: validate argc before any argv indexing.
+	if (argc < 2) {
+		print_usage();
+		return 1;
+	}
+
 	if (!strcmp(argv[argc-1], "earlyboot")) {
 		// If jbctl is spawned in "early boot" state, the jbserver port needs to be obtained from registeredPorts[0] instead
 		mach_port_t *registeredPorts;
@@ -38,10 +44,6 @@ int main(int argc, char* argv[])
 	}
 
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	if (argc < 2) {
-		print_usage();
-		return 1;
-	}
 
 	if (getuid() != 0 && geteuid() == 0) {
 		// When jailbroken the Dopamine app cannot have uid 0 because it can't drop it anymore without loosing it
@@ -54,8 +56,8 @@ int main(int argc, char* argv[])
 			// When the Dopamine app spawns jbctl it needs to clean up it's own ucred before jbctl does the requested action
 			// For this it will attach a pipe fd and write to it once the cleanup is done, so we need to wait until that write happens
 			int fd = atoi(argv[argc-1]);
-			int r = 0;
-			read(fd, &r, sizeof(r));
+			char token = 0;
+			(void)read(fd, &token, sizeof(token));
 			close(fd);
 		}
 	}
@@ -155,7 +157,18 @@ int main(int argc, char* argv[])
 		}
 	}
 	else if (!strcmp(cmd, "reboot_userspace")) {
+		// Give the app a final scheduling window after releasing --waitfor
+		// before launchd starts tearing userspace down.
+		usleep(10000);
 		return reboot3(RB2_USERREBOOT);
+	}
+	else if (!strcmp(cmd, "respring")) {
+		usleep(10000);
+		const char *sbreloadPath = JBROOT_PATH("/usr/bin/sbreload");
+		if (execve(sbreloadPath, (char *[]){ (char *)sbreloadPath, NULL }, environ) != 0) {
+			killall("/usr/libexec/backboardd", SIGTERM);
+		}
+		return 0;
 	}
 	else if (!strcmp(cmd, "update")) {
 		if (argc < 4) {

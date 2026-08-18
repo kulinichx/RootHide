@@ -4,7 +4,6 @@
 #include <limits.h>
 #include <os/log.h>
 
-static const char kTrustFlowBuildMarker[] __attribute__((used)) = "TRUSTFLOW-8A10";
 
 static bool path_has_suffix(const char *path, const char *suffix)
 {
@@ -18,7 +17,6 @@ static void trust_directory_entries(const char *directoryPath, const char *nameP
 {
 	DIR *directory = opendir(directoryPath);
 	if (!directory) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C41] directory open failed errno=%d path=%{public}s", errno, directoryPath);
 		return;
 	}
 
@@ -34,7 +32,7 @@ static void trust_directory_entries(const char *directoryPath, const char *nameP
 		char resolvedPath[PATH_MAX];
 		const char *trustPath = realpath(candidatePath, resolvedPath) ? resolvedPath : candidatePath;
 		int result = jbclient_trust_executable_recurse(trustPath, NULL);
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C41] pretrust result=%d path=%{public}s", result, trustPath);
+		(void)result;
 	}
 	closedir(directory);
 }
@@ -63,15 +61,8 @@ static void trust_apt_runtime(const char *aptGetPath)
 
 static int trust_executable_recurse_no_arch(const char *path)
 {
-	bool trace = path && strstr(path, "/.jbroot-");
-	if (trace) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C41] systemhook trust begin path=%{public}s", path);
-	}
 	int result = jbclient_trust_executable_recurse(path, NULL);
 	trust_apt_runtime(path);
-	if (trace) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C41] systemhook trust end result=%d path=%{public}s", result, path);
-	}
 	return result;
 }
 

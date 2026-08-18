@@ -14,6 +14,7 @@
 #import <sys/stat.h>
 #import <errno.h>
 #import <unistd.h>
+#import <spawn.h>
 #import <mach-o/dyld.h>
 #import <libgrabkernel2/libgrabkernel2.h>
 #import <libjailbreak/info.h>
@@ -382,73 +383,89 @@ extern char **environ;
 
 - (int)spawnJbctlAsRootWithArgs:(NSArray *)args
 {
+    // 3.0.7+ jbctl understands --waitfor.  Keep the suspended-spawn fallback
+    // only for an already-installed older jailbreak whose jbctl cannot parse it.
     bool needsLegacySolution = false;
     if (self.jailbrokenVersion) {
-        needsLegacySolution = (strcmp(self.jailbrokenVersion.UTF8String, "3.0.7") < 0);
+        needsLegacySolution = ([self.jailbrokenVersion compare:@"3.0.7" options:NSNumericSearch] == NSOrderedAscending);
     }
 
-    char **argBuf = malloc((args.count + 4) * sizeof(char *));
-    argBuf[0] = strdup(JBROOT_PATH("/basebin/jbctl"));
-    int i = 1;
+    size_t argCapacity = args.count + 4;
+    char **argBuf = calloc(argCapacity, sizeof(char *));
+    if (!argBuf) return ENOMEM;
+
+    int i = 0;
+    argBuf[i++] = strdup(JBROOT_PATH("/basebin/jbctl"));
     for (NSString *arg in args) {
         argBuf[i++] = strdup(arg.UTF8String);
     }
-
     if (!needsLegacySolution) {
         argBuf[i++] = strdup("--waitfor");
         argBuf[i++] = strdup("3");
     }
-    argBuf[i++] = NULL;
-    
-    posix_spawn_file_actions_t act = NULL;
-	posix_spawn_file_actions_init(&act);
-    posix_spawnattr_t attr = NULL;
-    posix_spawnattr_init(&attr);
-     
-    int waitPipe[2];
-    
+    argBuf[i] = NULL;
+
+    for (int n = 0; n < i; n++) {
+        if (!argBuf[n]) {
+            for (int y = 0; y < i; y++) free(argBuf[y]);
+            free(argBuf);
+            return ENOMEM;
+        }
+    }
+
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attr;
+    int r = posix_spawn_file_actions_init(&actions);
+    if (r != 0) goto out_args;
+    r = posix_spawnattr_init(&attr);
+    if (r != 0) goto out_actions;
+
+    int waitPipe[2] = {-1, -1};
     if (!needsLegacySolution) {
-        pipe(waitPipe);
-        posix_spawn_file_actions_adddup2(&act, waitPipe[0], 3);
+        if (pipe(waitPipe) != 0) {
+            r = errno;
+            goto out_attr;
+        }
+        r = posix_spawn_file_actions_adddup2(&actions, waitPipe[0], 3);
+        if (r != 0) goto out_pipe;
     }
     else {
-        posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+        r = posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+        if (r != 0) goto out_attr;
     }
 
-    __block int pid = 0;
-    __block int r = -1;
-
+    __block pid_t pid = -1;
+    __block int spawnResult = -1;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, (char *const *)environ);
-            if (needsLegacySolution) {
-                // Legacy solution is a gamble, which is why it was removed and superseeded by --waitfor
-                // But if jailbroken with <3.0.7, jbctl doesn't support --waitfor yet
+            spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
+            if (needsLegacySolution && spawnResult == 0) {
+                // Compatibility only: old jbctl has no --waitfor support.
                 kill(pid, SIGCONT);
             }
         }];
-        // We *NEED* to leave this block on iOS 17+ to avoid a panic, --waitfor ensures this always happens
+        // For the normal 3.0.7 path, the child remains blocked on fd 3 until
+        // both the temporary sandbox and credential changes have been restored.
     }];
 
+    if (!needsLegacySolution && spawnResult == 0) {
+        char token = 'w';
+        (void)write(waitPipe[1], &token, sizeof(token));
+    }
+
+    r = (spawnResult == 0) ? cmd_wait_for_exit(pid) : spawnResult;
+
+out_pipe:
+    if (waitPipe[0] >= 0) close(waitPipe[0]);
+    if (waitPipe[1] >= 0) close(waitPipe[1]);
+out_attr:
     posix_spawnattr_destroy(&attr);
-    posix_spawn_file_actions_destroy(&act);
-    for (int y = 0; y < i; y++) {
-        free(argBuf[y]);
-    }
+out_actions:
+    posix_spawn_file_actions_destroy(&actions);
+out_args:
+    for (int y = 0; y < i; y++) free(argBuf[y]);
     free(argBuf);
-
-    if (!needsLegacySolution) {
-        if (r == 0) {
-            // We left the root/unsandbox block, now resume jbctl by writing to pipe
-            char w = 'w';
-            write(waitPipe[1], &w, sizeof(w));
-        }
-
-        close(waitPipe[0]);
-        close(waitPipe[1]);
-    }
-
-    return cmd_wait_for_exit(pid);
+    return r;
 }
 
 - (int)runTrollStoreAction:(NSString *)action
@@ -463,51 +480,17 @@ extern char **environ;
 
 - (void)respring
 {
-    [self runAsRoot:^{
-        __block int pid = 0;
-        __block int r = 0;
-        [self runUnsandboxed:^{
-            r = exec_cmd_suspended(&pid, JBROOT_PATH("/usr/bin/sbreload"), NULL);
-            if (r == 0) {
-                kill(pid, SIGCONT);
-            }
-        }];
-        if (r == 0) {
-            if (cmd_wait_for_exit(pid) != 0) {
-                // Fallback
-                [self runUnsandboxed:^{
-                    killall("/usr/libexec/backboardd", SIGTERM);
-                }];
-            }
-        }
-    }];
-	// lishaowen 这是无根的代码
-    //[self spawnJbctlAsRootWithArgs:@[@"respring"]];
+    // D1 sequencing: let jbctl wait until the app has left the temporary
+    // root/unsandboxed critical sections before it performs the respring.
+    [self spawnJbctlAsRootWithArgs:@[@"respring"]];
 }
 
 - (void)rebootUserspace
 {
-    [self runAsRoot:^{
-        __block int pid = 0;
-        __block int r = 0;
-        [self runUnsandboxed:^{
-            r = exec_cmd_suspended(&pid, JBROOT_PATH("/basebin/jbctl"), "reboot_userspace", NULL);
-            if (r == 0) {
-                // the original plan was to have the process continue outside of this block
-                // unfortunately sandbox blocks kill aswell, so it's a bit racy but works
-
-                // we assume we leave this unsandbox block before the userspace reboot starts
-                // to avoid leaking the label, this seems to work in practice
-                // and even if it doesn't work, leaking the label is no big deal
-                kill(pid, SIGCONT);
-            }
-        }];
-        if (r == 0) {
-            cmd_wait_for_exit(pid);
-        }
-    }];
-	// lishaowen 这是无根的代码
-    //[self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+    // Same sequencing rule as respring. The --waitfor pipe is handled by
+    // spawnJbctlAsRootWithArgs:, while older installed jbctl versions keep
+    // using the compatibility path inside that helper.
+    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 
 - (void)refreshJailbreakApps

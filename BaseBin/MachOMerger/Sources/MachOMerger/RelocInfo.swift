@@ -154,8 +154,26 @@ class RelocInfo {
                     // This is what we want
                     let off  = Int(sect.address) - Int(s!.origCommand.vmAddr)
                     let size = Int(sect.size)
+
+                    // Zero-fill sections have no bytes in the Mach-O file.
+                    let sectionType = sect.flags.rawValue & 0xFF
+                    if sectionType == 0x1 /* S_ZEROFILL */ || sectionType == 0xC /* S_GB_ZEROFILL */ {
+                        return (Data(count: size), sect.address, sect.address &+ s!.offset)
+                    }
+
+                    // Defensive handling for BSS-like sections extending beyond file data.
+                    guard off >= 0 && off + size <= s!.data.count else {
+                        let available = max(0, min(size, s!.data.count - max(0, off)))
+                        let fileData: Data
+                        if available > 0 && off >= 0 {
+                            fileData = s!.data.subdata(in: off..<(off + available))
+                        } else {
+                            fileData = Data()
+                        }
+                        return (fileData + Data(count: size - available), sect.address, sect.address &+ s!.offset)
+                    }
+
                     let data = s!.data.subdata(in: off..<(off + size))
-                    
                     return (data, sect.address, sect.address &+ s!.offset)
                 }
                 

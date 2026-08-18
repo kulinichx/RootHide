@@ -33,10 +33,6 @@ void recurse_collect_untrusted_cdhashes(const char *path, const char *callerImag
 static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerImagePath, const char *dlopenCallerExecutablePath, const char *workingDir, xpc_object_t preferredArchsArray)
 {
 	if(!machoPath || !dlopenCallerExecutablePath) return -1;
-	bool trace = strstr(machoPath, "/.jbroot-") != NULL;
-	if (trace) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] jbserver recurse begin path=%{public}s cwd=%{public}s", machoPath, workingDir ?: "(null)");
-	}
 	
 	size_t preferredArchCount = 0;
 	if (preferredArchsArray) preferredArchCount = xpc_array_get_count(preferredArchsArray);
@@ -58,15 +54,9 @@ static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerIm
 	uint32_t cdhashesCount = 0;
 	recurse_collect_untrusted_cdhashes(machoPath, dlopenCallerImagePath, dlopenCallerExecutablePath, workingDir, &preferredArch, &cdhashes, &cdhashesCount);
 	int result = 0;
-	if (trace) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] jbserver collected count=%u path=%{public}s", cdhashesCount, machoPath);
-	}
 	if (cdhashes && cdhashesCount > 0) {
 		result = jb_trustcache_add_cdhashes(cdhashes, cdhashesCount);
 		free(cdhashes);
-	}
-	if (trace) {
-		os_log_error(OS_LOG_DEFAULT, "[APTTRUST-7C31] jbserver upload result=%d count=%u path=%{public}s", result, cdhashesCount, machoPath);
 	}
 	return result;
 }
@@ -192,7 +182,7 @@ static int roothide_set_dyld_patch(audit_token_t *callerToken, bool enabled)
 	uid_t uid = audit_token_to_euid(*callerToken);
 
     uint32_t csFlags = 0;
-    csops(getpid(), CS_OPS_STATUS, &csFlags, sizeof(csFlags));
+    csops(pid, CS_OPS_STATUS, &csFlags, sizeof(csFlags));
 
 	if(uid != 0 && (csFlags & CS_PLATFORM_BINARY)==0) {
 		JBLogError("roothide_set_dyld_patch: denying request from %d,%d", pid, uid);

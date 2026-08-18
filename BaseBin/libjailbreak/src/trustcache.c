@@ -3,9 +3,13 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "kernel.h"
 #include "info.h"
 #include "primitives.h"
+
+static pthread_mutex_t gJbTrustcacheLock = PTHREAD_MUTEX_INITIALIZER;
+static bool _jb_trustcache_contains_cdhash_locked(cdhash_t hash);
 
 void _trustcache_file_init(trustcache_file_v1 *file)
 {
@@ -160,9 +164,11 @@ void _jb_trustcache_enumerate(void (^enumerateBlock)(uint64_t jbTcKaddr, bool *s
 
 void jb_trustcache_clear(void)
 {
+	pthread_mutex_lock(&gJbTrustcacheLock);
 	_jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
 		kwrite64(jbTcKaddr + offsetof(jb_trustcache, file.length), 0);
 	});
+	pthread_mutex_unlock(&gJbTrustcacheLock);
 }
 
 uint64_t _jb_trustcache_grow(void)
@@ -188,10 +194,54 @@ uint64_t _jb_trustcache_grow(void)
 
 int jb_trustcache_add_entries(struct trustcache_entry_v1 *entries, uint32_t entryCount)
 {
-	uint32_t remainingEntryCount = entryCount;
-	while (remainingEntryCount > 0) {
+	if (!entries || entryCount == 0) return 0;
+
+	int result = 0;
+	trustcache_entry_v1 *filtered = NULL;
+	jb_trustcache *page = NULL;
+
+	pthread_mutex_lock(&gJbTrustcacheLock);
+
+	filtered = calloc(entryCount, sizeof(*filtered));
+	if (!filtered) {
+		result = -1;
+		goto out;
+	}
+
+	uint32_t filteredCount = 0;
+	for (uint32_t i = 0; i < entryCount; i++) {
+		bool duplicateInBatch = false;
+		for (uint32_t j = 0; j < filteredCount; j++) {
+			if (memcmp(filtered[j].hash, entries[i].hash, sizeof(cdhash_t)) == 0) {
+				duplicateInBatch = true;
+				break;
+			}
+		}
+		if (duplicateInBatch) continue;
+
+		/*
+		 * Recheck RootHide's dynamic trustcaches while holding the same lock
+		 * used for append/clear. This closes the concurrent add race without
+		 * depending on stale positives from unrelated trustcache sources.
+		 */
+		if (_jb_trustcache_contains_cdhash_locked(entries[i].hash)) continue;
+
+		filtered[filteredCount++] = entries[i];
+	}
+
+	if (filteredCount == 0) goto out;
+
+	page = malloc(JB_TRUSTCACHE_SIZE);
+	if (!page) {
+		result = -1;
+		goto out;
+	}
+
+	uint32_t consumed = 0;
+	while (consumed < filteredCount) {
 		__block uint64_t freeJbTcKaddr = 0;
 		__block uint32_t freeJbTcCurrentLength = 0;
+
 		_jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
 			uint32_t length = kread32(jbTcKaddr + offsetof(jb_trustcache, file.length));
 			if (length < JB_TRUSTCACHE_ENTRY_COUNT) {
@@ -200,26 +250,41 @@ int jb_trustcache_add_entries(struct trustcache_entry_v1 *entries, uint32_t entr
 				*stop = true;
 			}
 		});
+
 		if (freeJbTcKaddr == 0) {
 			freeJbTcKaddr = _jb_trustcache_grow();
+			freeJbTcCurrentLength = 0;
+			if (freeJbTcKaddr == 0) {
+				result = -1;
+				break;
+			}
 		}
 
-		uint32_t entryCountToInsert = JB_TRUSTCACHE_ENTRY_COUNT - freeJbTcCurrentLength;
-		if (remainingEntryCount < entryCountToInsert) {
-			entryCountToInsert = remainingEntryCount;
+		uint32_t capacity = JB_TRUSTCACHE_ENTRY_COUNT - freeJbTcCurrentLength;
+		if (capacity == 0) {
+			result = -1;
+			break;
 		}
 
-		jb_trustcache *jbTc = alloca(JB_TRUSTCACHE_SIZE);
-		kreadbuf(freeJbTcKaddr, jbTc, JB_TRUSTCACHE_SIZE);
-		for (uint32_t i = 0; i < entryCountToInsert; i++) {
-			jbTc->file.entries[freeJbTcCurrentLength+i] = entries[i];
+		uint32_t remaining = filteredCount - consumed;
+		uint32_t chunk = remaining < capacity ? remaining : capacity;
+
+		kreadbuf(freeJbTcKaddr, page, JB_TRUSTCACHE_SIZE);
+		for (uint32_t i = 0; i < chunk; i++) {
+			page->file.entries[freeJbTcCurrentLength + i] = filtered[consumed + i];
 		}
-		jbTc->file.length += entryCountToInsert;
-		_trustcache_file_sort(&jbTc->file);
-		kwritebuf(freeJbTcKaddr, jbTc, JB_TRUSTCACHE_SIZE);
-		remainingEntryCount -= entryCountToInsert;
+
+		page->file.length = freeJbTcCurrentLength + chunk;
+		_trustcache_file_sort(&page->file);
+		kwritebuf(freeJbTcKaddr, page, JB_TRUSTCACHE_SIZE);
+		consumed += chunk;
 	}
-	return 0;
+
+out:
+	free(page);
+	free(filtered);
+	pthread_mutex_unlock(&gJbTrustcacheLock);
+	return result;
 }
 
 int jb_trustcache_add_cdhashes(cdhash_t *hashes, uint32_t hashCount)
@@ -471,6 +536,18 @@ bool trustcache_contains_cdhash(uint64_t tcKaddr, cdhash_t CDHash)
 		}
 	}
 	return false;
+}
+
+static bool _jb_trustcache_contains_cdhash_locked(cdhash_t hash)
+{
+	__block bool found = false;
+	_jb_trustcache_enumerate(^(uint64_t jbTcKaddr, bool *stop) {
+		if (trustcache_contains_cdhash(jbTcKaddr, hash)) {
+			found = true;
+			*stop = true;
+		}
+	});
+	return found;
 }
 
 bool is_cdhash_trustcached(cdhash_t CDHash)
