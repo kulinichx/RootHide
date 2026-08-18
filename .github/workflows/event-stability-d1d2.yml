@@ -1,0 +1,210 @@
+name: RootHide A16 iOS16 event stability D1-D2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roothide-event-stability-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+  THEOS_COMMIT: 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
+  IOS_SDK_VERSION: "16.5"
+  TRUSTCACHE_COMMIT: aa0e8847529cf76576fce8d2dbc9e088c8f1a0df
+
+jobs:
+  build:
+    name: ${{ matrix.variant }}
+    runs-on: macos-14
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: D1-event-stability
+            patch: .github/patches/D1-event-stability.patch
+          - variant: D2-event-stability-readonly
+            patch: .github/patches/D2-event-stability-readonly.patch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Record source lineage
+        run: |
+          set -euo pipefail
+          echo "repo_head=$(git rev-parse HEAD)"
+          git submodule status --recursive
+
+      - name: Apply RootHide submodule patches
+        run: |
+          set -euo pipefail
+          git -C BaseBin/XPF apply "$GITHUB_WORKSPACE/.github/patches/XPF-roothide.patch"
+          git -C BaseBin/opainject apply "$GITHUB_WORKSPACE/.github/patches/opainject-build.patch"
+
+      - name: Apply stability variant
+        run: |
+          set -euo pipefail
+          p="${{ matrix.patch }}"
+          git apply --check "$p"
+          git apply "$p"
+          git diff --check
+          git diff --stat
+
+      - name: Verify stability invariants
+        run: |
+          set -euo pipefail
+          tc=BaseBin/libjailbreak/src/trustcache.c
+          sig=BaseBin/libjailbreak/src/roothider/signatures.m
+          rec=BaseBin/libjailbreak/src/roothider/recdhash.m
+          fork=BaseBin/launchdhook/src/jbserver/jbdomain_systemwide.c
+          util=BaseBin/libjailbreak/src/util.h
+          jbctl=BaseBin/jbctl/src/main.m
+          envm=Application/Dopamine/Jailbreak/DOEnvironmentManager.m
+
+          # Dopamine 3.0.7 trustcache corruption fixes
+          grep -Fq 'tcSize - ksizeof(trustcache)' "$tc"
+          grep -Fq 'kwritebuf(tcKaddr, nullBuf, sizeof(nullBuf));' "$tc"
+
+          # Mutation-layer idempotence / race / cross-page fixes
+          grep -Fq 'gJbTrustcacheLock' "$tc"
+          grep -Fq '_jb_trustcache_contains_cdhash_locked' "$tc"
+          grep -Fq 'uint32_t consumed = 0;' "$tc"
+          grep -Fq 'filtered[consumed + i]' "$tc"
+          grep -Fq 'if (freeJbTcKaddr == 0)' "$tc"
+
+          # Respring/userspace reboot ordering
+          grep -Fq -- '--waitfor' "$jbctl"
+          grep -Fq 'spawnJbctlAsRootWithArgs' "$envm"
+          grep -Fq 'usleep(10000)' "$jbctl"
+
+          # iOS16 fork correctness
+          grep -Fq 'kread32(childHeader + koffsetof(vm_map_header, nentries))' "$fork"
+          grep -Fq 'VM_FLAGS_GET_XNU_USER_DEBUG' "$fork"
+          grep -Fq 'VM_FLAGS_GET_XNU_USER_DEBUG' "$util"
+
+          # Defensive low-coupling fixes
+          grep -Fq 'if (!key) return -1;' BaseBin/launchdhook/src/jbserver/jbsettings.c
+          grep -Fq 'S_ZEROFILL' BaseBin/MachOMerger/Sources/MachOMerger/RelocInfo.swift
+
+          # Collector suppression exists in both variants
+          grep -Fq 'is_cdhash_trustcached' "$sig"
+
+          if [ "${{ matrix.variant }}" = "D2-event-stability-readonly" ]; then
+            test -f BaseBin/libjailbreak/src/roothider/signature_policy.c
+            test -f BaseBin/libjailbreak/src/roothider/signature_policy.h
+            grep -Fq 'SIGNATURE_PREPARATION_NEEDS_WRITE' "$rec"
+            grep -Fq '#include "log.h"' "$rec"
+            ! grep -Fq '#include "../log.h"' "$rec"
+            grep -Fq 'extern bool csd_superblob_is_adhoc_signed' "$rec"
+          fi
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "15.4"
+
+      - name: Install Procursus tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid findutils sed coreutils
+
+      - name: Install host dependencies
+        run: |
+          set -euo pipefail
+          brew install make libarchive openssl@3 xz
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Theos
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.THEOS }}
+          key: theos-${{ runner.os }}-${{ runner.arch }}-${{ env.THEOS_COMMIT }}-sdk${{ env.IOS_SDK_VERSION }}
+
+      - name: Install Theos and iOS SDK
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          git -C "$THEOS" checkout --detach "$THEOS_COMMIT"
+          git -C "$THEOS" submodule update --init --recursive
+          mkdir -p "$THEOS/sdks"
+          sdk_archive="$RUNNER_TEMP/iPhoneOS${IOS_SDK_VERSION}.sdk.tar.xz"
+          curl --fail --location --retry 3 \
+            "https://github.com/theos/sdks/releases/latest/download/iPhoneOS${IOS_SDK_VERSION}.sdk.tar.xz" \
+            --output "$sdk_archive"
+          tar -xJf "$sdk_archive" -C "$THEOS/sdks"
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-xcode15.4-${{ hashFiles('**/Package.swift', '**/project.pbxproj') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-xcode15.4-
+
+      - name: Build trustcache tool
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/trustcache"
+          git clone https://github.com/CRKatri/trustcache.git "$source_dir"
+          git -C "$source_dir" checkout --detach "$TRUSTCACHE_COMMIT"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          make -C "$source_dir" -j"$(sysctl -n hw.logicalcpu)" OPENSSL=1 \
+            CFLAGS="-DOPENSSL -I${openssl_prefix}/include" \
+            LDFLAGS="-L${openssl_prefix}/lib"
+          make -C "$source_dir" install PREFIX="$HOME/.local"
+
+      - name: Verify build environment
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "17.5"
+          test -d "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
+          command -v make ldid trustcache
+
+      - name: Full build TIPA
+        run: |
+          set -euo pipefail
+          export CLANG_MODULE_CACHE_PATH="$RUNNER_TEMP/clang-module-cache"
+          mkdir -p "$CLANG_MODULE_CACHE_PATH"
+          make -j"$(sysctl -n hw.logicalcpu)" NIGHTLY=1
+
+          shortsha="$(git rev-parse --short HEAD)"
+          artifact="roothide-Dopamine-${{ matrix.variant }}-${shortsha}.tipa"
+          cp Application/Dopamine.tipa "Application/${artifact}"
+          echo "artifact=${artifact}" >> "$GITHUB_ENV"
+
+      - name: Record build evidence
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp "Application/${artifact}" artifacts/
+          {
+            echo "variant=${{ matrix.variant }}"
+            echo "repo_head=$(git rev-parse HEAD)"
+            echo "patch_sha256=$(shasum -a 256 '${{ matrix.patch }}' | awk '{print $1}')"
+            echo -n "app_version="
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Application/Dopamine/Dopamine/Info.plist 2>/dev/null || true
+            git submodule status --recursive
+            shasum -a 256 "Application/${artifact}"
+          } > artifacts/BUILD-EVIDENCE.txt
+
+      - name: Upload TIPA and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
