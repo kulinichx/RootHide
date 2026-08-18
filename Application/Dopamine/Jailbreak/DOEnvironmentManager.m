@@ -418,23 +418,54 @@ extern char **environ;
 
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attr;
+
     int r = posix_spawn_file_actions_init(&actions);
-    if (r != 0) goto out_args;
+    if (r != 0) {
+        for (int y = 0; y < i; y++) free(argBuf[y]);
+        free(argBuf);
+        return r;
+    }
+
     r = posix_spawnattr_init(&attr);
-    if (r != 0) goto out_actions;
+    if (r != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        for (int y = 0; y < i; y++) free(argBuf[y]);
+        free(argBuf);
+        return r;
+    }
 
     int waitPipe[2] = {-1, -1};
+
     if (!needsLegacySolution) {
         if (pipe(waitPipe) != 0) {
             r = errno;
-            goto out_attr;
+            posix_spawnattr_destroy(&attr);
+            posix_spawn_file_actions_destroy(&actions);
+            for (int y = 0; y < i; y++) free(argBuf[y]);
+            free(argBuf);
+            return r;
         }
+
         r = posix_spawn_file_actions_adddup2(&actions, waitPipe[0], 3);
-        if (r != 0) goto out_pipe;
+        if (r != 0) {
+            close(waitPipe[0]);
+            close(waitPipe[1]);
+            posix_spawnattr_destroy(&attr);
+            posix_spawn_file_actions_destroy(&actions);
+            for (int y = 0; y < i; y++) free(argBuf[y]);
+            free(argBuf);
+            return r;
+        }
     }
     else {
         r = posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
-        if (r != 0) goto out_attr;
+        if (r != 0) {
+            posix_spawnattr_destroy(&attr);
+            posix_spawn_file_actions_destroy(&actions);
+            for (int y = 0; y < i; y++) free(argBuf[y]);
+            free(argBuf);
+            return r;
+        }
     }
 
     [self runAsRoot:^{
@@ -456,16 +487,15 @@ extern char **environ;
 
     r = (spawnResult == 0) ? cmd_wait_for_exit(pid) : spawnResult;
 
-out_pipe:
     if (waitPipe[0] >= 0) close(waitPipe[0]);
     if (waitPipe[1] >= 0) close(waitPipe[1]);
-out_attr:
+
     posix_spawnattr_destroy(&attr);
-out_actions:
     posix_spawn_file_actions_destroy(&actions);
-out_args:
+
     for (int y = 0; y < i; y++) free(argBuf[y]);
     free(argBuf);
+
     return r;
 }
 
