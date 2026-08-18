@@ -18,7 +18,7 @@ index 648bb08..37eb87a 100644
  
  @implementation DOEnvironmentManager
  
-@@ -373,6 +375,62 @@ CFPropertyListRef MGCopyAnswer(CFStringRef);
+@@ -373,6 +375,66 @@ CFPropertyListRef MGCopyAnswer(CFStringRef);
      if (ur == 0 && orgUser != 0) seteuid(orgUser);
  }
  
@@ -40,7 +40,11 @@ index 648bb08..37eb87a 100644
 +
 +    int waitPipe[2] = {-1, -1};
 +    int r = pipe(waitPipe);
-+    if (r != 0) goto out;
++    if (r != 0) {
++        for (int n = 0; n < i; n++) free(argBuf[n]);
++        free(argBuf);
++        return r;
++    }
 +
 +    posix_spawn_file_actions_t actions;
 +    posix_spawn_file_actions_init(&actions);
