@@ -157,9 +157,14 @@ void file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *c
 					JBLogError("Failed to ensure randomized cdhash for %s", filepath);
 					return;
 				}
+				cdhash_t *newCdhashes = realloc(cdhashes, (cdhashCount + 1) * sizeof(cdhash_t));
+				if (!newCdhashes) {
+					*stop = true;
+					return;
+				}
+				cdhashes = newCdhashes;
+				memcpy(cdhashes[cdhashCount], cdhash, sizeof(cdhash));
 				cdhashCount++;
-				cdhashes = realloc(cdhashes, cdhashCount * sizeof(cdhash_t));
-				memcpy(cdhashes[cdhashCount-1], cdhash, sizeof(cdhash));
 			}
 		}
 	});
