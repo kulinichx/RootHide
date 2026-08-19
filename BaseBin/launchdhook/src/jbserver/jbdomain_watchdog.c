@@ -40,6 +40,7 @@ static int watchdog_get_last_userspace_panic(char **panicMessage)
 	char *messageInEnv = getenv("WATCHDOG_PANIC_MESSAGE");
 	if (messageInEnv) {
 		*panicMessage = strdup(messageInEnv);
+		if (!*panicMessage) return 1;
 		unsetenv("WATCHDOG_PANIC_MESSAGE");
 		return 0;
 	}
