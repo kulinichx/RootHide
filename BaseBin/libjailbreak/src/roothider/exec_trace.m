@@ -217,7 +217,23 @@ send_reply:
 		reply.Head.msgh_local_port = MACH_PORT_NULL;
 		reply.Head.msgh_id = msg->msgh_id + 0x64;
 
-		mach_msg(&reply.Head, MACH_SEND_MSG | MACH_MSG_OPTION_NONE, reply.Head.msgh_size, 0, MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+		mach_msg_return_t send_ret = mach_msg(&reply.Head, MACH_SEND_MSG | MACH_MSG_OPTION_NONE, reply.Head.msgh_size, 0, MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+		if(send_ret != MACH_MSG_SUCCESS) {
+		    JBLogError("mach_msg reply error=%x\\n", send_ret);
+		}
+
+		// The reply owns the request reply right. Keep it out of request cleanup,
+		// then destroy the complex request to release task/thread rights.
+		msg->msgh_remote_port = MACH_PORT_NULL;
+		msg->msgh_bits &= ~MACH_MSGH_BITS_REMOTE_MASK;
+		mach_msg_destroy(msg);
+
+		// For recoverable send errors the reply right is still ours.
+		if(send_ret == MACH_SEND_INVALID_DEST ||
+		   send_ret == MACH_SEND_TIMED_OUT ||
+		   send_ret == MACH_SEND_INTERRUPTED) {
+		    mach_msg_destroy(&reply.Head);
+		}
 	}
 }
 
