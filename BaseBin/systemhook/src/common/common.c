@@ -1,3 +1,4 @@
+#include <errno.h>
 #include "common.h"
 #include <xpc/xpc.h>
 #include <xpc_private.h>
@@ -336,7 +337,9 @@ static int spawn_exec_hook_common(bool isExec,
 	else {
 		// the state we want to be in is not the state we are in right now
 
-		char **envc = envbuf_mutcopy((const char **)envp);
+		char **envc = NULL;
+		int envResult = envbuf_mutcopy((const char **)envp, &envc);
+		if (envResult != 0) return envResult;
 
 		if (shouldInsertJBEnv) {
 			if (!systemHookAlreadyInserted) {
@@ -346,7 +349,10 @@ static int spawn_exec_hook_common(bool isExec,
 					strcat(newLibraryInsert, ":");
 					strcat(newLibraryInsert, existingLibraryInserts);
 				}
-				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+				if (envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert) != 0) {
+					envbuf_free(envc);
+					return ENOMEM;
+				}
 			}
 		}
 		else {
@@ -356,6 +362,10 @@ static int spawn_exec_hook_common(bool isExec,
 				}
 				else {
 					char *newLibraryInsert = malloc(strlen(existingLibraryInserts)+1);
+					if (!newLibraryInsert) {
+						envbuf_free(envc);
+						return ENOMEM;
+					}
 					newLibraryInsert[0] = '\0';
 
 					__block bool first = true;
@@ -371,7 +381,11 @@ static int spawn_exec_hook_common(bool isExec,
 							}
 						}
 					});
-					envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+					if (envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert) != 0) {
+						free(newLibraryInsert);
+						envbuf_free(envc);
+						return ENOMEM;
+					}
 
 					free(newLibraryInsert);
 				}

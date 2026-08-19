@@ -1,3 +1,4 @@
+#include <errno.h>
 #import <Foundation/Foundation.h>
 
 #include <spawn.h>
@@ -253,16 +254,31 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 
 	// on some devices dyldhook may fail due to vm_protect(VM_PROT_READ|VM_PROT_WRITE), 2, (os/kern) protection failure in dsc::__DATA_CONST:__const, 
 	// so we need to disable dyld-in-cache here. (or we can use VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)
-	char **envc = envbuf_mutcopy((const char **)envp);
+	char **envc = NULL;
+	int envResult = envbuf_mutcopy((const char **)envp, &envc);
+	if (envResult != 0) {
+		posix_spawnattr_setflags(attrp, flags);
+		return envResult;
+	}
 	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
-		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+		envResult = envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+		if (envResult != 0) {
+			envbuf_free(envc);
+			posix_spawnattr_setflags(attrp, flags);
+			return envResult;
+		}
 	}
 
 #ifdef __arm64e__
 	if (!__builtin_available(iOS 16.0, *))
 	{
 		if(!dyld_patch_enabled() && process_force_dyld_patch(path, argv)) {
-			envbuf_setenv(&envc, "SPINLOCK_FIX_DISABLED", "1");
+			envResult = envbuf_setenv(&envc, "SPINLOCK_FIX_DISABLED", "1");
+			if (envResult != 0) {
+				envbuf_free(envc);
+				posix_spawnattr_setflags(attrp, flags);
+				return envResult;
+			}
 		}
 	}
 #endif
@@ -410,7 +426,12 @@ int roothide_launchd___posix_spawn_prehook(pid_t *restrict pidp, const char *res
 		}
 		else
 		{
-			char **envc = envbuf_mutcopy((const char **)envp);
+			char **envc = NULL;
+			int envResult = envbuf_mutcopy((const char **)envp, &envc);
+			if (envResult != 0) {
+				JBLogError("Failed to copy spawn environment: %d", envResult);
+				return envResult;
+			}
 
 			//choicy may set these 
 			envbuf_unsetenv(&envc, "_SafeMode");
