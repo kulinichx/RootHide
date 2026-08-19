@@ -90,6 +90,7 @@ bool systemwide_domain_allowed(audit_token_t clientToken)
 static int systemwide_get_jbroot(char **rootPathOut)
 {
 	*rootPathOut = strdup(jbinfo(rootPath));
+	if (!*rootPathOut) return -1;
 	return 0;
 }
 
@@ -97,6 +98,7 @@ static int systemwide_get_boot_uuid(char **bootUUIDOut)
 {
 	const char *launchdUUID = getenv("LAUNCHD_UUID");
 	*bootUUIDOut = launchdUUID ? strdup(launchdUUID) : NULL;
+	if (launchdUUID && !*bootUUIDOut) return -1;
 	return 0;
 }
 
@@ -200,8 +202,12 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 	}
 
 	// Get jbroot and boot uuid
-	systemwide_get_jbroot(rootPathOut);
-	systemwide_get_boot_uuid(bootUUIDOut);
+	if (systemwide_get_jbroot(rootPathOut) != 0) return -1;
+	if (systemwide_get_boot_uuid(bootUUIDOut) != 0) {
+		free(*rootPathOut);
+		*rootPathOut = NULL;
+		return -1;
+	}
 
 /*
 	// Generate sandbox extensions for the requesting process
