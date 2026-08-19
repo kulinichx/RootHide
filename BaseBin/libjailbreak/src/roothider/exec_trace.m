@@ -248,19 +248,29 @@ int execTraceProcess(pid_t pid, uint64_t traced)
         return -1;
     }
 
-    int ret = 0;
-    
-    trace_data_t* trace_data = (trace_data_t*)malloc(sizeof(trace_data_t));
-    memset(trace_data, 0, sizeof(trace_data_t));
+    int ret = -1;
+    bool exception_ports_replaced = false;
+    bool saved_exception_ports = false;
+
+    trace_data_t* trace_data = (trace_data_t*)calloc(1, sizeof(trace_data_t));
+    if(!trace_data) {
+        JBLogError("calloc trace_data failed");
+        goto out;
+    }
+
     trace_data->traced_flag_addr = traced;
     trace_data->pid = pid;
 
-    kr = task_get_exception_ports(task, EXC_MASK_SOFTWARE, trace_data->saved_masks, &trace_data->saved_exception_types_count, 
+    kr = task_get_exception_ports(task, EXC_MASK_SOFTWARE, trace_data->saved_masks, &trace_data->saved_exception_types_count,
                                             trace_data->saved_ports, trace_data->saved_behaviors, trace_data->saved_flavors);
     if(kr == KERN_SUCCESS) {
 
+        saved_exception_ports = true;
+
         kr = task_set_exception_ports(task, EXC_MASK_SOFTWARE, exception_port, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
         if(kr == KERN_SUCCESS) {
+
+            exception_ports_replaced = true;
 
             [trace_data_lock lock];
 
@@ -273,26 +283,57 @@ int execTraceProcess(pid_t pid, uint64_t traced)
 
             [trace_data_record setObject:[NSValue valueWithPointer:trace_data] forKey:@(pid)];
 
-            int ret = ptrace(PT_ATTACHEXC, pid, NULL, 0);
+            ret = ptrace(PT_ATTACHEXC, pid, NULL, 0);
             if(ret != 0) {
                 JBLogError("attach error: %d, %s", errno, strerror(errno));
                 [trace_data_record removeObjectForKey:@(pid)];
-                free(trace_data);
                 ret = -1;
             }
-            
+
             [trace_data_lock unlock];
-    
+
+            if(ret == 0) {
+                trace_data = NULL; // ownership transferred to trace_data_record
+                exception_ports_replaced = false;
+            }
+
         } else {
             JBLogError("task_set_exception_ports error: %x, %s", kr, mach_error_string(kr));
             ret = -1;
         }
-    
+
     } else {
         JBLogError("task_get_exception_ports error: %x, %s", kr, mach_error_string(kr));
         ret = -1;
     }
 
+    if(trace_data) {
+        if(exception_ports_replaced) {
+            for(uint32_t i = 0; i < trace_data->saved_exception_types_count; ++i) {
+                kern_return_t restore_kr = task_set_exception_ports(task,
+                                                                    trace_data->saved_masks[i],
+                                                                    trace_data->saved_ports[i],
+                                                                    trace_data->saved_behaviors[i],
+                                                                    trace_data->saved_flavors[i]);
+                if(restore_kr != KERN_SUCCESS) {
+                    JBLogError("task_set_exception_ports restore[%d] error: %x, %s",
+                               i, restore_kr, mach_error_string(restore_kr));
+                }
+            }
+        }
+
+        if(saved_exception_ports) {
+            for(uint32_t i = 0; i < trace_data->saved_exception_types_count; ++i) {
+                if(MACH_PORT_VALID(trace_data->saved_ports[i])) {
+                    mach_port_deallocate(mach_task_self(), trace_data->saved_ports[i]);
+                }
+            }
+        }
+
+        free(trace_data);
+    }
+
+out:
     mach_port_deallocate(mach_task_self(), task);
 
     return ret;
