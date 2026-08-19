@@ -288,7 +288,10 @@ int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfo
     uint32_t cdhashesCount = 0;
 
 	struct siginfo **sigInfosToAttach = malloc(sizeof(struct siginfo *) * sigInfoCount);
-	if (!sigInfosToAttach) return -2;
+	if (!sigInfosToAttach) {
+		free(cdhashes);
+		return -2;
+	}
 	uint32_t sigInfosToAttachCount = 0;
 
 	for (uint32_t i = 0; i < sigInfoCount; i++) {
