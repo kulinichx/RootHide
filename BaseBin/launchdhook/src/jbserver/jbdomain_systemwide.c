@@ -42,6 +42,7 @@ char *combine_strings(char separator, char **components, int count)
 
 	isFirst = true;
 	char *outString = malloc(outLength * sizeof(char));
+	if (!outString) return NULL;
 	*outString = 0;
 
 	for (int i = 0; i < count; i++) {
@@ -363,6 +364,7 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 			}
 		}
 	}
+	if (customTrustObj) xpc_release(customTrustObj);
 #endif
 
 	proc_rele(proc);

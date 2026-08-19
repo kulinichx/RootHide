@@ -62,6 +62,7 @@ int jbserver_received_mach_message(audit_token_t *auditToken, struct jbserver_ma
 
 		size_t replySize = sizeof(struct jbserver_mach_msg_checkin_reply);
 		replyData = malloc(replySize);
+		if (!replyData) return -1;
 		struct jbserver_mach_msg_checkin_reply *reply = (struct jbserver_mach_msg_checkin_reply *)replyData;
 		memset(reply, 0, replySize);
 		
@@ -95,6 +96,7 @@ int jbserver_received_mach_message(audit_token_t *auditToken, struct jbserver_ma
 
 		size_t replySize = sizeof(struct jbserver_mach_msg_forkfix_reply);
 		replyData = malloc(replySize);
+		if (!replyData) return -1;
 		struct jbserver_mach_msg_forkfix_reply *reply = (struct jbserver_mach_msg_forkfix_reply *)replyData;
 		memset(reply, 0, replySize);
 		
@@ -113,6 +115,7 @@ int jbserver_received_mach_message(audit_token_t *auditToken, struct jbserver_ma
 
 		size_t replySize = sizeof(struct jbserver_mach_msg_trust_fd_reply);
 		replyData = malloc(replySize);
+		if (!replyData) return -1;
 		struct jbserver_mach_msg_trust_fd_reply *reply = (struct jbserver_mach_msg_trust_fd_reply *)replyData;
 		memset(reply, 0, replySize);
 
