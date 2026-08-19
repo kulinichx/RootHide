@@ -191,9 +191,15 @@ void fat_collect_signatures(Fat *fat, struct siginfo **sigInfosOut, uint32_t *si
 		if (macho_is_mappable(macho)) {
 			CS_SuperBlob *superblob = macho_read_code_signature(macho);
 			if (superblob) {
+				struct siginfo *newSigInfos = realloc(sigInfos, (sigInfoCount + 1) * sizeof(struct siginfo));
+				if (!newSigInfos) {
+					free(superblob);
+					*stop = true;
+					return;
+				}
+				sigInfos = newSigInfos;
+				struct siginfo *curSigInfo = &sigInfos[sigInfoCount];
 				sigInfoCount++;
-				sigInfos = realloc(sigInfos, sigInfoCount * sizeof(struct siginfo));
-				struct siginfo *curSigInfo = &sigInfos[sigInfoCount-1];
 
 				curSigInfo->source = SIGNATURE_SOURCE_ALLOCATION;
 				curSigInfo->signature.fs_file_start = macho->archDescriptor.offset;
