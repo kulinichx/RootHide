@@ -59,9 +59,12 @@ static void* exception_server(void* arg)
 {
     mach_port_t port = (mach_port_t)(uintptr_t)arg;
 
-    int bufsize = 4096;
-    mach_msg_header_t* msg = (mach_msg_header_t*)malloc(bufsize);
-    
+    union {
+        mach_msg_header_t header;
+        char bytes[4096];
+    } msgbuf;
+    int bufsize = sizeof(msgbuf.bytes);
+    mach_msg_header_t* msg = (mach_msg_header_t*)msgbuf.bytes;
 	while (true) {
         
         memset(msg, 0, bufsize);
@@ -220,21 +223,47 @@ int execTraceProcess(pid_t pid, uint64_t traced)
 {
     static mach_port_t exception_port = MACH_PORT_NULL;
     
+    static bool exception_server_ready = false;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         trace_data_lock = [[NSLock alloc] init];
         trace_data_record = [[NSMutableDictionary alloc] init];
+        if(!trace_data_lock || !trace_data_record) {
+            JBLogError("failed to initialize exec trace state");
+            return;
+        }
 
-        mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &exception_port);
-        mach_port_insert_right(mach_task_self(), exception_port, exception_port, MACH_MSG_TYPE_MAKE_SEND);
-
+        kern_return_t init_kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &exception_port);
+        if(init_kr != KERN_SUCCESS) {
+            JBLogError("mach_port_allocate error: %x, %s", init_kr, mach_error_string(init_kr));
+            exception_port = MACH_PORT_NULL;
+            return;
+        }
+        init_kr = mach_port_insert_right(mach_task_self(), exception_port, exception_port, MACH_MSG_TYPE_MAKE_SEND);
+        if(init_kr != KERN_SUCCESS) {
+            JBLogError("mach_port_insert_right error: %x, %s", init_kr, mach_error_string(init_kr));
+            mach_port_destroy(mach_task_self(), exception_port);
+            exception_port = MACH_PORT_NULL;
+            return;
+        }
         pthread_t thread;
-        pthread_create(&thread, NULL, exception_server, (void*)(uintptr_t)exception_port);
-
+        int pthread_ret = pthread_create(&thread, NULL, exception_server, (void*)(uintptr_t)exception_port);
+        if(pthread_ret != 0) {
+            JBLogError("pthread_create error: %d, %s", pthread_ret, strerror(pthread_ret));
+            mach_port_destroy(mach_task_self(), exception_port);
+            exception_port = MACH_PORT_NULL;
+            return;
+        }
         __uint64_t tid = 0;
         pthread_threadid_np(thread, &tid);
         JBLogDebug("exception_server thread: %x tid=%d", thread, tid);
+        exception_server_ready = true;
     });
+
+    if(!exception_server_ready) {
+        JBLogError("exec trace exception server unavailable");
+        return -1;
+    }
 
     if(!proc_cantrace(pid)) {
         JBLogError("can't be able to trace process: %d", pid);
