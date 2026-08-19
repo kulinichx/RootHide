@@ -36,7 +36,7 @@ pid_t* allocBlacklistProcessId();
 void commitBlacklistProcessId(pid_t* pidp);
 
 bool isRemovableBundlePath(const char* path);
-bool isSubPathOf(const char* parent, const char* child);
+bool isSubPathOf(const char* child, const char* parent);
 
 bool string_has_prefix(const char *str, const char* prefix);
 bool string_has_suffix(const char* str, const char* suffix);

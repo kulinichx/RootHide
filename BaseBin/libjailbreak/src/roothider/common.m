@@ -115,11 +115,13 @@ char* proc_get_identifier(pid_t pid, char buffer[255])
     }
     
     result = csops(pid, CS_OPS_IDENTITY, csbuffer, bufferLen);
-    if (result == 0) {
-        char* identity = csbuffer + sizeof(struct csheader);
-        strlcpy(buffer, identity, 255);
+    if (result != 0) {
+        free(csbuffer);
+        return NULL;
     }
-    
+
+    char* identity = csbuffer + sizeof(struct csheader);
+    strlcpy(buffer, identity, 255);
     free(csbuffer);
 
     return buffer;
@@ -360,7 +362,10 @@ void ensure_jbroot_symlink(const char* filepath)
 		return;
 
 	char realfpath[PATH_MAX]={0};
-	assert(realpath(filepath, realfpath) != NULL);
+	if(!realpath(filepath, realfpath)) {
+        JBLogError("ensure_jbroot_symlink: realpath failed for %s: errno=%d", filepath, errno);
+        return;
+    }
 
 	char realdirpath[PATH_MAX+1]={0};
 	dirname_r(realfpath, realdirpath);
@@ -369,7 +374,10 @@ void ensure_jbroot_symlink(const char* filepath)
 	}
 
 	char jbrootpath[PATH_MAX+1]={0};
-	assert(realpath(JBROOT_PATH("/"), jbrootpath) != NULL);
+	if(!realpath(JBROOT_PATH("/"), jbrootpath)) {
+        JBLogError("ensure_jbroot_symlink: jbroot realpath failed: errno=%d", errno);
+        return;
+    }
 	if(jbrootpath[0] && jbrootpath[strlen(jbrootpath)-1] != '/') {
 		strlcat(jbrootpath, "/", sizeof(jbrootpath));
 	}
@@ -380,7 +388,10 @@ void ensure_jbroot_symlink(const char* filepath)
 	}
 
 	struct stat jbrootst;
-	assert(stat(jbrootpath, &jbrootst) == 0);
+	if(stat(jbrootpath, &jbrootst) != 0) {
+        JBLogError("ensure_jbroot_symlink: stat failed for %s: errno=%d", jbrootpath, errno);
+        return;
+    }
 	
 	char sympath[PATH_MAX];
 	snprintf(sympath,sizeof(sympath),"%s/.jbroot", realdirpath);
@@ -397,7 +408,10 @@ void ensure_jbroot_symlink(const char* filepath)
 					return;
 			}
 
-			assert(unlink(sympath) == 0);
+			if(unlink(sympath) != 0) {
+                JBLogError("ensure_jbroot_symlink: unlink failed for %s: errno=%d", sympath, errno);
+                return;
+            }
 			
 		} else {
 			//not a symlink? just let it go
@@ -564,7 +578,13 @@ int randomizeAndLoadBasebinTrustcache(const char* basebinPath)
 
         cdhash_t cdhash={0};
         if(ensure_randomized_cdhash(fileURL.path.fileSystemRepresentation, cdhash) == 0) {
-            basebins_cdhashes = realloc(basebins_cdhashes, (basebins_cdhashesCount+1) * sizeof(cdhash_t));
+            cdhash_t *new_cdhashes = realloc(basebins_cdhashes, (basebins_cdhashesCount+1) * sizeof(cdhash_t));
+            if(!new_cdhashes) {
+                JBLogError("Failed to grow BaseBin cdhash accumulator");
+                free(basebins_cdhashes);
+                return -2;
+            }
+            basebins_cdhashes = new_cdhashes;
             memcpy(&basebins_cdhashes[basebins_cdhashesCount], cdhash, sizeof(cdhash_t));
             basebins_cdhashesCount++;
         }
@@ -647,6 +667,9 @@ bool otherJailbreakActived(bool postexploit)
     mach_port_t port = MACH_PORT_NULL;
     kern_return_t kr = bootstrap_look_up(bootstrap_port, "com.opa334.jailbreakd", &port);
     if(kr == KERN_SUCCESS) {
+        if(MACH_PORT_VALID(port)) {
+            mach_port_deallocate(mach_task_self(), port);
+        }
         return true; // roothide dopamine 1.x
     }
 
@@ -709,6 +732,10 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
     if(need_patch_child && !dyld_patch_enabled()) {
         if(jbclient_trust_executable_recurse(path, NULL) != 0) {
             JBLogError("Failed to trust executable: %s", path);
+            if(attr) {
+                posix_spawnattr_destroy(&attr);
+                attrp = NULL;
+            }
             return 999;
         }
     }
@@ -738,6 +765,10 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
                 //jailbreak internal spawn, just let it hang forever so that we could get a panic log
                 //kill(pid, SIGQUIT); //core dump
                 //kill(pid, SIGKILL);
+                if(attr) {
+                    posix_spawnattr_destroy(&attr);
+                    attrp = NULL;
+                }
                 return 202;
             }
         } else {
@@ -797,9 +828,9 @@ void loadAppStoredIdentifiers()
     
     NSError *error = nil;
     NSArray *appContainers = [fileManager contentsOfDirectoryAtPath:applicationsPath error:&error];
-    if (error) {
-        JBLogError("Error reading Application directory: %s", error.description.UTF8String);
-        abort();
+    if (!appContainers) {
+        JBLogError("Error reading Application directory: %s", error ? error.description.UTF8String : "(unknown)");
+        return;
     }
     
     for (NSString *containerUUID in appContainers) 
@@ -949,8 +980,7 @@ bool is_safe_bundle_identifier(const char* identifier)
         return false;
     }
 
-    assert(StoredAppIdentifiers != nil);
-    if([StoredAppIdentifiers containsObject:@(identifier)]) {
+    if(StoredAppIdentifiers && [StoredAppIdentifiers containsObject:@(identifier)]) {
         return true;
     }
 

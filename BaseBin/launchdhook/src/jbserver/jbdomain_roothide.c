@@ -28,7 +28,7 @@ typedef struct {
 	uint32_t* Types;
 	uint32_t* Subtypes;
 } preferredArchInfo;
-void recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);
+int recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);
 
 static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerImagePath, const char *dlopenCallerExecutablePath, const char *workingDir, xpc_object_t preferredArchsArray)
 {
@@ -52,8 +52,14 @@ static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerIm
 
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashesCount = 0;
-	recurse_collect_untrusted_cdhashes(machoPath, dlopenCallerImagePath, dlopenCallerExecutablePath, workingDir, &preferredArch, &cdhashes, &cdhashesCount);
-	int result = 0;
+	int collectResult = recurse_collect_untrusted_cdhashes(machoPath, dlopenCallerImagePath, dlopenCallerExecutablePath, workingDir, &preferredArch, &cdhashes, &cdhashesCount);
+        if(collectResult != 0) {
+                free(cdhashes);
+                JBLogError("Failed to collect recursive trust cdhashes for %s", machoPath);
+                return collectResult;
+        }
+
+        int result = 0;
 	if (cdhashes && cdhashesCount > 0) {
 		result = jb_trustcache_add_cdhashes(cdhashes, cdhashesCount);
 		free(cdhashes);
@@ -150,24 +156,36 @@ static int roothide_blacklist_check(audit_token_t *callerToken, const char* chec
 	JBLogError("Failed to check blacklist for %s : %s", checktype, checkvalue ? xpc_type_get_name(xpc_get_type(checkvalue)) : "(null)");
 	return -1;
 }
-
 static int roothide_jailbreakd_lookup(audit_token_t *callerToken, xpc_object_t *portOut)
 {
-	*portOut = xpc_mach_send_create(jailbreakdClientPort());
-	return 0;
+    if(!portOut) return -1;
+    *portOut = NULL;
+    mach_port_t port = jailbreakdClientPort();
+    if(!MACH_PORT_VALID(port)) {
+        JBLogError("Invalid jailbreakd client port: %x", port);
+        return -1;
+    }
+    *portOut = xpc_mach_send_create(port);
+    return 0;
 }
-
 static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t *portOut)
 {
-	pid_t pid = audit_token_to_pid(*callerToken);
-	uid_t uid = audit_token_to_euid(*callerToken);
+    if(!callerToken || !portOut) return -1;
+    *portOut = NULL;
 
-	if(uid != 0) return -1;
+    pid_t pid = audit_token_to_pid(*callerToken);
+    uid_t uid = audit_token_to_euid(*callerToken);
+    if(uid != 0) return -1;
 
-	setJailbreakdProcess(pid);
+    mach_port_t port = jailbreakdServerPort();
+    if(!MACH_PORT_VALID(port)) {
+        JBLogError("Invalid jailbreakd server port: %x", port);
+        return -1;
+    }
 
-	*portOut = xpc_mach_recv_create(jailbreakdServerPort());
-	return 0;
+    setJailbreakdProcess(pid);
+    *portOut = xpc_mach_recv_create(port);
+    return 0;
 }
 
 static int roothide_dyld_patch_enabled(audit_token_t *callerToken, bool* enabled)

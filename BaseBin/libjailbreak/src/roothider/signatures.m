@@ -134,9 +134,13 @@ typedef struct {
 	uint32_t* Subtypes;
 } preferredArchInfo;
 
-static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString *workingDir, NSMutableArray* fileCaches, NSMutableArray* rpathStack, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString *workingDir, NSMutableArray* fileCaches, NSMutableArray* rpathStack, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut, bool *collectionFailed)
 {
 @autoreleasepool {
+
+        if(collectionFailed && *collectionFailed) {
+                return;
+        }
 
 	DEBUG_LOG("Recursing into loadPath: %s\n\tloader: %s\n\tmainExecutable: %s\nworkingDir: %s\n", loadPath.fileSystemRepresentation, loaderPath.fileSystemRepresentation, mainExecutablePath.fileSystemRepresentation, workingDir.fileSystemRepresentation);
 
@@ -149,10 +153,19 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 		return false;
 	};
 	void (^cdhashesAdd)(cdhash_t) = ^(cdhash_t cdhash) {
-		(*cdhashCountOut)++;
-		(*cdhashesOut) = realloc((*cdhashesOut), (*cdhashCountOut) * sizeof(cdhash_t));
-		memcpy((*cdhashesOut)[(*cdhashCountOut)-1], cdhash, sizeof(cdhash_t));
-	};
+        uint32_t newCount = (*cdhashCountOut) + 1;
+        cdhash_t *newHashes = realloc((*cdhashesOut), newCount * sizeof(cdhash_t));
+        if(!newHashes) {
+            JBLogError("Failed to grow recursive trust cdhash collector");
+            if(collectionFailed) {
+                    *collectionFailed = true;
+            }
+            return;
+        }
+        (*cdhashesOut) = newHashes;
+        memcpy((*cdhashesOut)[(*cdhashCountOut)], cdhash, sizeof(cdhash_t));
+        (*cdhashCountOut) = newCount;
+    };
 
 
 	NSString *resolvedLoadPath = resolveLoadPath(loadPath, loaderPath, mainExecutablePath, workingDir, rpathStack);
@@ -269,6 +282,12 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 		}
 		free(superblob);
 	}
+        if(collectionFailed && *collectionFailed) {
+                fat_free(fat);
+                return;
+        }
+
+
 
 	// A trustcached executable can still reference a dependency that was
 	// installed or replaced after the executable was trusted. Always walk the
@@ -284,7 +303,10 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 		NSMutableArray* nextChain = rpathStack.mutableCopy;
 		[nextChain addObject:realLoadPath]; //Loading dependencies, add current macho itself to the rpath stack
 		
-		recurse_handler(@(pathCStr), realLoadPath, mainExecutablePath, workingDir, fileCaches, nextChain, preferredArch, cdhashesOut, cdhashCountOut);
+		recurse_handler(@(pathCStr), realLoadPath, mainExecutablePath, workingDir, fileCaches, nextChain, preferredArch, cdhashesOut, cdhashCountOut, collectionFailed);
+                if(collectionFailed && *collectionFailed) {
+                        *stop = true;
+                }
 	});
 
 	fat_free(fat);
@@ -292,8 +314,9 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 } //autoreleasepool
 }
 
-void recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+int recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
 {
+        bool collectionFailed = false;
 	if(!callerExecutablePath) {
 		callerExecutablePath = path;
 	}
@@ -312,8 +335,16 @@ void recurse_collect_untrusted_cdhashes(const char *path, const char *callerImag
 
 	NSMutableArray* fileCaches = [NSMutableArray array];
 
-	recurse_handler(@(path), @(callerImagePath), @(callerExecutablePath), workingDir ? @(workingDir) : nil, fileCaches, rpathStack, preferredArch, cdhashesOut, cdhashCountOut);
+	recurse_handler(@(path), @(callerImagePath), @(callerExecutablePath), workingDir ? @(workingDir) : nil, fileCaches, rpathStack, preferredArch, cdhashesOut, cdhashCountOut, &collectionFailed);
+
+        if(collectionFailed) {
+                free(*cdhashesOut);
+                *cdhashesOut = NULL;
+                *cdhashCountOut = 0;
+                return -1;
+        }
 
 	DEBUG_LOG("fileCaches: %s", path, fileCaches.description.UTF8String);
 	DEBUG_LOG("Finished collecting cdhashes for path: %s, found %u cdhashes, processed %d files", path, *cdhashCountOut, fileCaches.count);
+        return 0;
 }
