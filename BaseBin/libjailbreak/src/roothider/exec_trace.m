@@ -89,19 +89,20 @@ static void* exception_server(void* arg)
         kern_return_t kr = pid_for_task(request->task.name, &pid);
         if(kr != KERN_SUCCESS || pid<=0) {
             JBLogError("pid_for_task (task=%x pid=%d) failed: %x, %s\n", request->task.name, pid, kr, mach_error_string(kr));
-            continue;
+            reply.RetCode = KERN_FAILURE;
+            goto send_reply;
         }
 
         arm_thread_state64_t threadState={0};
         mach_msg_type_number_t threadStateCount = ARM_THREAD_STATE64_COUNT;
-        thread_get_state(request->thread.name, ARM_THREAD_STATE64, (thread_state_t)&threadState, &threadStateCount);
-
-        arm_exception_state64_t exceptionState;
-        mach_msg_type_number_t exceptionStateCount = ARM_EXCEPTION_STATE64_COUNT;
-        thread_get_state(request->thread.name, ARM_EXCEPTION_STATE64, (thread_state_t)&exceptionState, &exceptionStateCount);
-        
-        __darwin_arm_thread_state64_ptrauth_strip(threadState);
-        uint64_t pc = (uint64_t)__darwin_arm_thread_state64_get_pc(threadState);
+        uint64_t pc = 0;
+        kr = thread_get_state(request->thread.name, ARM_THREAD_STATE64, (thread_state_t)&threadState, &threadStateCount);
+        if(kr == KERN_SUCCESS) {
+            __darwin_arm_thread_state64_ptrauth_strip(threadState);
+            pc = (uint64_t)__darwin_arm_thread_state64_get_pc(threadState);
+        } else {
+            JBLogError("thread_get_state error: %x, %s\n", kr, mach_error_string(kr));
+        }
 
         JBLogDebug("pid=%d exception: type=%d ncode=%d code=0x%llX(%lld) subcode=0x%llX(%lld) thread=%x pc=%p\n", pid, request->exception, request->codeCnt, 
             request->code[0], request->code[0], request->code[1], request->code[1],
@@ -209,6 +210,7 @@ static void* exception_server(void* arg)
         trace_data = NULL;
         [trace_data_lock unlock];
 
+send_reply:
 		reply.Head.msgh_bits = MACH_MSGH_BITS(MACH_MSGH_BITS_REMOTE(msg->msgh_bits), 0);
 		reply.Head.msgh_size = sizeof(__Reply__mach_exception_raise_t);
 		reply.Head.msgh_remote_port = msg->msgh_remote_port;
