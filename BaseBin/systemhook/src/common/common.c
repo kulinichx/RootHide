@@ -199,6 +199,8 @@ static int spawn_exec_hook_common(bool isExec,
 	bool personaFixNeedsResume = true;
 	int personaFixUid = -1;
 	int personaFixGid = -1;
+	short personaFixOriginalFlags = 0;
+	struct _posix_spawn_persona_info *personaInfo = NULL;
 	posix_spawnattr_t attr = NULL;
 	if (desc) attr = desc->attrp;
 
@@ -291,13 +293,14 @@ static int spawn_exec_hook_common(bool isExec,
 		if (__builtin_available(iOS 17.6, *)) {
 			bool hasExecFlag = false;
 			short flags = 0;
-			if (posix_spawnattr_getflags(&attr, &flags) == 0) {
+			int flagsResult = posix_spawnattr_getflags(&attr, &flags);
+			if (flagsResult == 0) {
 				if (flags & POSIX_SPAWN_SETEXEC) {
 					hasExecFlag = true;
 				}
 			}
 			if (!hasExecFlag && !isExec && getuid() != 0) {
-				struct _posix_spawn_persona_info *personaInfo = *(struct _posix_spawn_persona_info **)(attrStruct + POSIX_SPAWNATTR_OFF_PERSONA);
+				personaInfo = *(struct _posix_spawn_persona_info **)(attrStruct + POSIX_SPAWNATTR_OFF_PERSONA);
 				if (personaInfo) {
 					if (personaInfo->pspi_id == 99 && (personaInfo->pspi_flags & POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE)) {
 						if (personaInfo->pspi_flags & POSIX_SPAWN_PERSONA_UID) {
@@ -310,16 +313,10 @@ static int spawn_exec_hook_common(bool isExec,
 				}
 
 				if (personaFixUid == 0 || personaFixGid == 0) {
-					// Revert any request to become root back to mobile
-					// Otherwise posix_spawn will straight up fail
-					if (personaFixUid == 0) personaInfo->pspi_uid = 501;
-					if (personaFixGid == 0) personaInfo->pspi_gid = 501;
-
+					if (flagsResult != 0) return flagsResult;
+					personaFixOriginalFlags = flags;
 					if (flags & POSIX_SPAWN_START_SUSPENDED) {
 						personaFixNeedsResume = false;
-					}
-					else {
-						posix_spawnattr_setflags(&attr, flags | POSIX_SPAWN_START_SUSPENDED);
 					}
 				}
 			}
@@ -327,17 +324,13 @@ static int spawn_exec_hook_common(bool isExec,
 	}
 
 	int r = -1;
-
 	pid_t childPid = -1;
+	char **envc = NULL;
+	char *const *spawnEnvp = envp;
 
-	if ((shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 1) || (!shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 0 && !hasSafeModeVariable)) {
-		// we're already good, just call orig
-		r = orig(&childPid, envp);
-	}
-	else {
+	if (!((shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 1) || (!shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 0 && !hasSafeModeVariable))) {
 		// the state we want to be in is not the state we are in right now
 
-		char **envc = NULL;
 		int envResult = envbuf_mutcopy((const char **)envp, &envc);
 		if (envResult != 0) return envResult;
 
@@ -394,12 +387,42 @@ static int spawn_exec_hook_common(bool isExec,
 			envbuf_unsetenv(&envc, "_MSSafeMode");
 		}
 
-		r = orig(&childPid, envc);
-
-		envbuf_free(envc);
+		spawnEnvp = envc;
 	}
 
-	if (personaFixUid == 0 || personaFixGid == 0 && childPid != -1) {
+	bool personaFixFlagsChanged = false;
+	if (personaFixUid == 0 || personaFixGid == 0) {
+		// Revert the root persona request to mobile only for the duration of posix_spawn.
+		if (personaFixUid == 0) personaInfo->pspi_uid = 501;
+		if (personaFixGid == 0) personaInfo->pspi_gid = 501;
+
+		if (personaFixNeedsResume) {
+			int flagsResult = posix_spawnattr_setflags(&attr, personaFixOriginalFlags | POSIX_SPAWN_START_SUSPENDED);
+			if (flagsResult != 0) {
+				if (personaFixUid == 0) personaInfo->pspi_uid = personaFixUid;
+				if (personaFixGid == 0) personaInfo->pspi_gid = personaFixGid;
+				if (envc) envbuf_free(envc);
+				return flagsResult;
+			}
+			personaFixFlagsChanged = true;
+		}
+	}
+
+	r = orig(&childPid, spawnEnvp);
+
+	// Restore caller-owned spawn attributes immediately after posix_spawn returns.
+	if (personaFixUid == 0) personaInfo->pspi_uid = personaFixUid;
+	if (personaFixGid == 0) personaInfo->pspi_gid = personaFixGid;
+	if (personaFixFlagsChanged) {
+		int restoreFlagsResult = posix_spawnattr_setflags(&attr, personaFixOriginalFlags);
+		if (restoreFlagsResult != 0) {
+		        os_log_error(OS_LOG_DEFAULT, "posix_spawnattr_setflags restore error: %d", restoreFlagsResult);
+		}
+	}
+
+	if (envc) envbuf_free(envc);
+
+	if (r == 0 && childPid != -1 && (personaFixUid == 0 || personaFixGid == 0)) {
 		jbclient_fork_fix(childPid);
 		if (personaFixNeedsResume) {
 			kill(childPid, SIGCONT);
