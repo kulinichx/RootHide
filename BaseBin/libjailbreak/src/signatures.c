@@ -410,7 +410,12 @@ int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfo
 	}
 
 	if (cdhashesCount > 0) {
-		jb_trustcache_add_cdhashes(cdhashes, cdhashesCount);
+		int trustcacheStatus = jb_trustcache_add_cdhashes(cdhashes, cdhashesCount);
+		if (trustcacheStatus != 0) {
+			free(sigInfosToAttach);
+			free(cdhashes);
+			return trustcacheStatus;
+		}
 	}
 
 	int r = 0;
