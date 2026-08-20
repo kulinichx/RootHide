@@ -13,7 +13,6 @@
 #include <libjailbreak/codesign.h>
 
 #include <signal.h>
-#include <errno.h>
 #include <libjailbreak/roothider.h>
 
 /*

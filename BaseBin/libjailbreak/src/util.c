@@ -7,8 +7,6 @@
 #include <mach/mach_time.h>
 #include <pthread.h>
 #include <signal.h>
-#include <errno.h>
-#include <poll.h>
 #include <dlfcn.h>
 #include <sys/sysctl.h>
 #include <archive.h>
@@ -54,18 +52,6 @@ bool host_is_arm64e(void)
 	if (sysctlbyname("hw.cpusubtype", &cpuSubtype, &size, NULL, 0) != 0) return false;
 	return cpuType == CPU_TYPE_ARM64 && ((cpuSubtype & ~0xff000000) == CPU_SUBTYPE_ARM64E);
 }
-
-void proc_ucred_update(uint64_t proc, uint64_t newUcred)
-{
-	if (gSystemInfo.kernelStruct.proc_ro.exists) {
-		uint64_t proc_ro = kread_ptr(proc + koffsetof(proc, proc_ro));
-		kwrite64(proc_ro + koffsetof(proc_ro, ucred), newUcred);
-	}
-	else {
-		kwrite_ptr(proc + koffsetof(proc, ucred), newUcred, 0x84E8);
-	}
-}
-
 
 uint64_t vm_page_for_pnum(uint64_t pnum)
 {

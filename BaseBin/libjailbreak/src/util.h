@@ -47,9 +47,6 @@ uint64_t kptr_sign(uint64_t kaddr, uint64_t pointer, uint16_t salt);
 void proc_allow_all_syscalls(uint64_t proc);
 void proc_remove_msg_filter(uint64_t proc);
 
-void proc_ucred_update(uint64_t proc, uint64_t newUcred);
-
-
 void killall(const char *executablePath, int signal);
 int libarchive_unarchive(const char *fileToExtract, const char *extractionPath);
 
