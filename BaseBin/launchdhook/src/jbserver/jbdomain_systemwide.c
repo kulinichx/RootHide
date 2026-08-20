@@ -269,53 +269,26 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 	// Allow invalid pages
 	cs_allow_invalid(proc, fullyDebugged);
 
-	// Fix setuid/setgid while preserving Dopamine 3's modern credential semantics.
+	// Fix setuid
 	struct stat sb;
 	if (stat(procPath, &sb) == 0) {
 		if (S_ISREG(sb.st_mode) && (sb.st_mode & (S_ISUID | S_ISGID))) {
 			uint64_t ucred = proc_ucred(proc);
-			if (!ucred) {
-				proc_rele(proc);
-				return ESRCH;
+			if ((sb.st_mode & (S_ISUID))) {
+				kwrite32(proc + koffsetof(proc, svuid), sb.st_uid);
+				kwrite32(ucred + koffsetof(ucred, svuid), sb.st_uid);
+				kwrite32(ucred + koffsetof(ucred, uid), sb.st_uid);
 			}
-
-			gid_t groups[NGROUPS_MAX];
-			kreadbuf(ucred + koffsetof(ucred, groups), groups, sizeof(groups));
-			uid_t uid = (uid_t)kread32(ucred + koffsetof(ucred, uid));
-			uid_t ruid = (uid_t)kread32(ucred + koffsetof(ucred, ruid));
-			gid_t gid = groups[0];
-			gid_t rgid = (gid_t)kread32(ucred + koffsetof(ucred, rgid));
-			uid_t oldUid = uid;
-			gid_t oldGid = gid;
-
-			bool updateSavedUid = false;
-			bool updateSavedGid = false;
-			if (sb.st_mode & S_ISUID) {
-				uid = sb.st_uid;
-				updateSavedUid = true;
+			if ((sb.st_mode & (S_ISGID))) {
+				kwrite32(proc + koffsetof(proc, svgid), sb.st_gid);
+				kwrite32(ucred + koffsetof(ucred, svgid), sb.st_gid);
+				kwrite32(ucred + koffsetof(ucred, groups), sb.st_gid);
 			}
-			if (sb.st_mode & S_ISGID) {
-				gid = sb.st_gid;
-				groups[0] = sb.st_gid;
-				updateSavedGid = true;
-			}
-
-			if (oldUid != uid || oldGid != gid) {
-				int credentialStatus = proc_ucred_update_content(proc, procPath, uid, gid, ruid, rgid, groups);
-				if (credentialStatus != 0) {
-					JBLogError("setid credential update failed pid=%d path=%s status=%d", pid, procPath, credentialStatus);
-					proc_rele(proc);
-					return credentialStatus;
-				}
-			}
-
-			// Commit saved IDs only after the credential transaction succeeded so
-			// a donor failure cannot leave the process in a half-updated state.
-			if (updateSavedUid) kwrite32(proc + koffsetof(proc, svuid), sb.st_uid);
-			if (updateSavedGid) kwrite32(proc + koffsetof(proc, svgid), sb.st_gid);
-
 			uint32_t flag = kread32(proc + koffsetof(proc, flag));
-			if (flag & P_SUGID) kwrite32(proc + koffsetof(proc, flag), flag & ~P_SUGID);
+			if ((flag & P_SUGID) != 0) {
+				flag &= ~P_SUGID;
+				kwrite32(proc + koffsetof(proc, flag), flag);
+			}
 		}
 	}
 
