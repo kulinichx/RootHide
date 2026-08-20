@@ -24,6 +24,9 @@ static bool dyldhook_is_systemhook_component(const char *component, size_t lengt
 	static const char basebinHook[] = "/basebin/systemhook.dylib";
 	if (length == sizeof(basebinHook) - 1 && !strncmp(component, basebinHook, length)) return true;
 
+	static const char systemHook[] = "/usr/lib/systemhook.dylib";
+	if (length == sizeof(systemHook) - 1 && !strncmp(component, systemHook, length)) return true;
+
 	static const char prefix[] = "/usr/lib/systemhook-";
 	static const char suffix[] = ".dylib";
 	const size_t prefixLength = sizeof(prefix) - 1;
