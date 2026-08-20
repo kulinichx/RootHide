@@ -18,8 +18,6 @@ int jbclient_trust_file_by_path(const char *path);
 int jbclient_process_checkin(char **rootPathOut, char **bootUUIDOut, char **sandboxExtensionsOut, bool *fullyDebuggedOut, bool *forceCSAdhocOut);
 int jbclient_fork_fix(uint64_t childPid);
 int jbclient_cs_revalidate(void);
-int jbclient_persona_fix(int childPid, uid_t overwriteUid, gid_t overwriteGid);
-int jbclient_persona_fix_ex(int childPid, uid_t overwriteUid, gid_t overwriteGid, bool resumeChild);
 int jbclient_jbsettings_get(const char *key, xpc_object_t *valueOut);
 bool jbclient_jbsettings_get_bool(const char *key);
 uint64_t jbclient_jbsettings_get_uint64(const char *key);

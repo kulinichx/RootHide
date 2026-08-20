@@ -200,29 +200,6 @@ int jbclient_cs_revalidate(void)
 	return -1;
 }
 
-int jbclient_persona_fix_ex(int childPid, uid_t overwriteUid, gid_t overwriteGid, bool resumeChild)
-{
-	xpc_object_t xargs = xpc_dictionary_create_empty();
-	xpc_dictionary_set_uint64(xargs, "child-pid", (uint64_t)childPid);
-	xpc_dictionary_set_uint64(xargs, "overwrite-uid", (uint64_t)overwriteUid);
-	xpc_dictionary_set_uint64(xargs, "overwrite-gid", (uint64_t)overwriteGid);
-	xpc_dictionary_set_bool(xargs, "resume-child", resumeChild);
-	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_SYSTEMWIDE, JBS_SYSTEMWIDE_PERSONA_FIX, xargs);
-	xpc_release(xargs);
-	if (xreply) {
-		int result = (int)xpc_dictionary_get_int64(xreply, "result");
-		xpc_release(xreply);
-		return result;
-	}
-	return -1;
-}
-
-int jbclient_persona_fix(int childPid, uid_t overwriteUid, gid_t overwriteGid)
-{
-	// D3-compatible client contract: the caller remains responsible for resume.
-	return jbclient_persona_fix_ex(childPid, overwriteUid, overwriteGid, false);
-}
-
 int jbclient_jbsettings_get(const char *key, xpc_object_t *valueOut)
 {
 	xpc_object_t xargs = xpc_dictionary_create_empty();
