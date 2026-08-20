@@ -11,7 +11,6 @@
 #include <libjailbreak/util.h>
 #include <libjailbreak/primitives.h>
 #include <libjailbreak/codesign.h>
-#include <libjailbreak/txm.h>
 
 #include <signal.h>
 #include <errno.h>
@@ -415,39 +414,6 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 	return 0;
 }
 
-int txm_fork_fix(uint64_t parentAddressSpace, uint64_t childAddressSpace)
-{
-	uint64_t parentHead = parentAddressSpace + koffsetof(TXMAddressSpace, codeRegions);
-	uint64_t childHead  =  childAddressSpace + koffsetof(TXMAddressSpace, codeRegions);
-
-	uint64_t curCodeRegion = 0, nextCodeRegion = 0;
-	for (curCodeRegion = RB_MIN(TXMCodeRegionRBTree, parentHead); curCodeRegion; curCodeRegion = nextCodeRegion) {
-		nextCodeRegion = RB_NEXT(TXMCodeRegionRBTree, parentHead, curCodeRegion);
-
-		uint8_t  curRegionType      =    kread8(curCodeRegion + koffsetof(TXMCodeRegion, type));
-		uint64_t curRegionStartAddr =   kread64(curCodeRegion + koffsetof(TXMCodeRegion, startAddr));
-		uint64_t curRegionEndAddr   =   kread64(curCodeRegion + koffsetof(TXMCodeRegion, endAddr));
-		uint64_t curRegionCodeSig   = kread_ptr(curCodeRegion + koffsetof(TXMCodeRegion, codeSignature));
-
-		uint64_t childCodeRegion = RB_FIND(TXMCodeRegionRBTree, childHead, CodeRegionRBTree_KEY(curRegionStartAddr));
-		if (!childCodeRegion && !curRegionCodeSig) {
-			childCodeRegion = allocateCodeRegionObject();
-			if (!childCodeRegion) return ENOMEM;
-
-			kwrite64(childCodeRegion + koffsetof(TXMCodeRegion, startAddr), curRegionStartAddr);
-			kwrite64(childCodeRegion + koffsetof(TXMCodeRegion, endAddr),   curRegionEndAddr);
-
-			RB_INSERT(TXMCodeRegionRBTree, childHead, childCodeRegion);
-		}
-
-		if (childCodeRegion) {
-			kwrite8(childCodeRegion + koffsetof(TXMCodeRegion, type), curRegionType);
-		}
-	}
-
-	return 0;
-}
-
 int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 {
 	int retval = 3;
@@ -463,11 +429,9 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 
 			uint64_t childTask  = proc_task(childProc);
 			uint64_t childVmMap = kread_ptr(childTask + koffsetof(task, map));
-			uint64_t childPmap  = kread_ptr(childVmMap + koffsetof(vm_map, pmap));
 
 			uint64_t parentTask  = proc_task(parentProc);
 			uint64_t parentVmMap = kread_ptr(parentTask + koffsetof(task, map));
-			uint64_t parentPmap  = kread_ptr(parentVmMap + koffsetof(vm_map, pmap));
 
 			uint64_t parentHeader   = parentVmMap + koffsetof(vm_map, hdr);
 			uint32_t parentNentries = kread32(parentHeader + koffsetof(vm_map_header, nentries));
@@ -528,16 +492,6 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 				}
 			} while (parentEntry != 0 && childEntry != 0 && parentEntry != parentFirstEntry && childEntry != childFirstEntry && parentIdx < parentNentries && childIdx < childNentries);
 			retval = 0;
-			if (koffsetof(pmap, txm_address_space)) {
-				uint64_t parentAddressSpace = kread_ptr(parentPmap + koffsetof(pmap, txm_address_space));
-				uint64_t childAddressSpace  = kread_ptr(childPmap  + koffsetof(pmap, txm_address_space));
-				if (!parentAddressSpace || !childAddressSpace) {
-					retval = EFAULT;
-				}
-				else {
-					retval = txm_fork_fix(parentAddressSpace, childAddressSpace);
-				}
-			}
 		}
 	}
 	if (childProc)  proc_rele(childProc);
