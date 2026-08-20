@@ -283,7 +283,6 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 	}
 #endif
 
-	bool forceDyldPatch = envbuf_getenv(envc, "DYLD_HOOK_SETUID") != NULL;
 	int pid = 0;
 	int ret = __posix_spawn_orig_wrapper(&pid, path, desc, argv, envc);
 	if(pidp) *pidp = pid;
@@ -294,7 +293,7 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 
 	if (ret == 0 && pid > 0) {
 		if(should_suspend) {
-			if(jbdSpawnPatchChildEx(pid, should_resume, forceDyldPatch) != 0) {
+			if(jbdSpawnPatchChild(pid, should_resume) != 0) {
 				JBLogError("Failed to patch spawned process (%d) %s", pid, path);
 				//just kill it instead of letting it hang forever so that launchd can respawn it later
 				kill(pid, SIGQUIT); //core dump
