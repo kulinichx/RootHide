@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <choma/MachO.h>
 #include <choma/Fat.h>
 #include <choma/MemoryStream.h>
@@ -122,43 +123,56 @@ void fat_collect_untrusted_cdhashes(Fat *fat, cdhash_t **cdhashesOut, uint32_t *
 	*cdhashCountOut = cdhashCount;
 }
 
-void file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+int file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
 {
+	if (!cdhashesOut || !cdhashCountOut) return EINVAL;
+	*cdhashesOut = NULL;
+	*cdhashCountOut = 0;
+
 	static char __thread filepath[PATH_MAX] = {0};
 	if (fcntl(fd, F_GETPATH, filepath) != 0) {
-		JBLogError("Failed to get file path for fd %d", fd);
-		return;
+		int status = errno ? errno : EIO;
+		JBLogError("Failed to get file path for fd %d (status=%d)", fd, status);
+		return status;
 	}
 	if (string_has_prefix(filepath, "/private/preboot/Cryptexes/")) {
 		JBLogDebug("Skipping Cryptexes file: %s", filepath);
-		return;
+		return 0;
 	}
 	if (isRemovableBundlePath(filepath) && !hasTrollstoreLiteMarker(filepath)) {
 		JBLogDebug("Ignoring adhoc signed app: %s", filepath);
-		return;
+		return 0;
 	}
 
-	MemoryStream *s = file_stream_init_from_file_descriptor(fd, 0, FILE_STREAM_SIZE_AUTO, 0);
-	if (!s) return;
+	MemoryStream *stream = file_stream_init_from_file_descriptor(fd, 0, FILE_STREAM_SIZE_AUTO, 0);
+	if (!stream) return ENOMEM;
 
-	Fat *fat = fat_init_from_memory_stream(s);
+	Fat *fat = fat_init_from_memory_stream(stream);
 	if (!fat) {
-		memory_stream_free(s);
-		return;
+		memory_stream_free(stream);
+		return ENOEXEC;
 	}
 
 	__block cdhash_t *cdhashes = NULL;
 	__block uint32_t cdhashCount = 0;
+	__block int status = 0;
 	fat_enumerate_slices(fat, ^(MachO *macho, bool *stop) {
+		if (status != 0) {
+			*stop = true;
+			return;
+		}
 		if (macho_is_mappable(macho)) {
 			cdhash_t cdhash;
 			if (macho_parse_code_signature(macho, cdhash) && !is_cdhash_trustcached(cdhash)) {
-				if (ensure_randomized_cdhash_for_slice(filepath, macho->archDescriptor.offset, cdhash) != 0) {
-					JBLogError("Failed to ensure randomized cdhash for %s", filepath);
+				status = ensure_randomized_cdhash_for_slice(filepath, macho->archDescriptor.offset, cdhash);
+				if (status != 0) {
+					JBLogError("Failed to ensure randomized cdhash for %s (status=%d)", filepath, status);
+					*stop = true;
 					return;
 				}
 				cdhash_t *newCdhashes = realloc(cdhashes, (cdhashCount + 1) * sizeof(cdhash_t));
 				if (!newCdhashes) {
+					status = ENOMEM;
 					*stop = true;
 					return;
 				}
@@ -170,30 +184,50 @@ void file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *c
 	});
 
 	fat_free(fat);
+	if (status != 0) {
+		free(cdhashes);
+		return status;
+	}
 
 	*cdhashesOut = cdhashes;
 	*cdhashCountOut = cdhashCount;
+	return 0;
 }
 
-void file_collect_untrusted_cdhashes_by_path(const char *path, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+int file_collect_untrusted_cdhashes_by_path(const char *path, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
 {
+	if (!path || !cdhashesOut || !cdhashCountOut) return EINVAL;
+	*cdhashesOut = NULL;
+	*cdhashCountOut = 0;
+
 	int fd = open(path, O_RDONLY);
-	if (fd < 0) return;
-	file_collect_untrusted_cdhashes(fd, cdhashesOut, cdhashCountOut);
+	if (fd < 0) return errno ? errno : EIO;
+	int status = file_collect_untrusted_cdhashes(fd, cdhashesOut, cdhashCountOut);
 	close(fd);
+	return status;
 }
 
-void fat_collect_signatures(Fat *fat, struct siginfo **sigInfosOut, uint32_t *sigInfoCountOut)
+int fat_collect_signatures(Fat *fat, struct siginfo **sigInfosOut, uint32_t *sigInfoCountOut)
 {
+	if (!fat || !sigInfosOut || !sigInfoCountOut) return EINVAL;
+	*sigInfosOut = NULL;
+	*sigInfoCountOut = 0;
+
 	__block struct siginfo *sigInfos = NULL;
 	__block uint32_t sigInfoCount = 0;
+	__block int status = 0;
 	fat_enumerate_slices(fat, ^(MachO *macho, bool *stop) {
+		if (status != 0) {
+			*stop = true;
+			return;
+		}
 		if (macho_is_mappable(macho)) {
 			CS_SuperBlob *superblob = macho_read_code_signature(macho);
 			if (superblob) {
 				struct siginfo *newSigInfos = realloc(sigInfos, (sigInfoCount + 1) * sizeof(struct siginfo));
 				if (!newSigInfos) {
 					free(superblob);
+					status = ENOMEM;
 					*stop = true;
 					return;
 				}
@@ -209,24 +243,39 @@ void fat_collect_signatures(Fat *fat, struct siginfo **sigInfosOut, uint32_t *si
 		}
 	});
 
-	if (sigInfosOut) *sigInfosOut = sigInfos;
-	if (sigInfoCountOut) *sigInfoCountOut = sigInfoCount;
+	if (status != 0) {
+		for (uint32_t i = 0; i < sigInfoCount; i++) {
+			if (sigInfos[i].source == SIGNATURE_SOURCE_ALLOCATION) {
+				free(sigInfos[i].signature.fs_blob_start);
+			}
+		}
+		free(sigInfos);
+		return status;
+	}
+
+	*sigInfosOut = sigInfos;
+	*sigInfoCountOut = sigInfoCount;
+	return 0;
 }
 
-void file_collect_signatures(int fd, struct siginfo **sigInfosOut, uint32_t *sigInfoCountOut)
+int file_collect_signatures(int fd, struct siginfo **sigInfosOut, uint32_t *sigInfoCountOut)
 {
+	if (!sigInfosOut || !sigInfoCountOut) return EINVAL;
+	*sigInfosOut = NULL;
+	*sigInfoCountOut = 0;
+
 	MemoryStream *s = file_stream_init_from_file_descriptor(fd, 0, FILE_STREAM_SIZE_AUTO, 0);
-	if (!s) return;
+	if (!s) return ENOMEM;
 
 	Fat *fat = fat_init_from_memory_stream(s);
 	if (!fat) {
 		memory_stream_free(s);
-		return;
+		return ENOEXEC;
 	}
 
-	fat_collect_signatures(fat, sigInfosOut, sigInfoCountOut);
-
+	int status = fat_collect_signatures(fat, sigInfosOut, sigInfoCountOut);
 	fat_free(fat);
+	return status;
 }
 
 

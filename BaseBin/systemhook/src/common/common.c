@@ -8,6 +8,7 @@
 #include <sandbox.h>
 #include <paths.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <dlfcn.h>
 #include "envbuf.h"
 #include "private.h"
@@ -423,9 +424,18 @@ static int spawn_exec_hook_common(bool isExec,
 	if (envc) envbuf_free(envc);
 
 	if (r == 0 && childPid != -1 && (personaFixUid == 0 || personaFixGid == 0)) {
-		jbclient_fork_fix(childPid);
-		if (personaFixNeedsResume) {
-			kill(childPid, SIGCONT);
+		int personaStatus = jbclient_persona_fix_ex(childPid, personaFixUid, personaFixGid, personaFixNeedsResume);
+		if (personaStatus != 0) {
+			// A positive errno means the server handled the transaction and performed
+			// guarded cleanup. Only perform a local fallback on transport failure.
+			// waitpid(WNOHANG) also proves this PID is still our live child before kill,
+			// avoiding a stale/recycled PID signal.
+			if (personaStatus < 0) {
+				int waitStatus = 0;
+				pid_t waitResult = waitpid(childPid, &waitStatus, WNOHANG);
+				if (waitResult == 0) (void)kill(childPid, SIGKILL);
+			}
+			r = personaStatus > 0 ? personaStatus : EIO;
 		}
 	}
 

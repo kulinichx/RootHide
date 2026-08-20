@@ -70,6 +70,7 @@ void jailbreakd_received_message(mach_port_t port)
 					int64_t result = 0;
 					pid_t pid = xpc_dictionary_get_int64(message, "pid");
 					bool resume = xpc_dictionary_get_bool(message, "resume");
+					bool forceDyldPatch = xpc_dictionary_get_bool(message, "force-dyld-patch");
 					pid_t ppid = proc_get_ppid(pid);
 					JBLogDebug("spawn patch: client pid=%d, child pid=%d, child's parent pid=%d, child proc=%s", clientPid, pid, ppid, proc_get_path(pid,NULL));
 					if(ppid == clientPid) {
@@ -77,7 +78,7 @@ void jailbreakd_received_message(mach_port_t port)
 							//`frida -f` sucks with proc_patch_dyld on ios15
 							result = proc_patch_csflags(pid);
 						}
-						else if(roothide_patch_proc(pid) == 0) {
+						else if(roothide_patch_proc_ex(pid, forceDyldPatch) == 0) {
 							if(resume) kill(pid, SIGCONT);
 						} else {
 							JBLogError("spawn patch failed: %d", pid);

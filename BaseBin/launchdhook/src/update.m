@@ -251,7 +251,12 @@ void jbupdate_finalize_stage2(const char *prevVersion, const char *newVersion)
 	// Update dyld trustcache
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashesCount = 0;
-	file_collect_untrusted_cdhashes_by_path(JBROOT_PATH("/basebin/.fakelib/dyld"), &cdhashes, &cdhashesCount);
+	r = file_collect_untrusted_cdhashes_by_path(JBROOT_PATH("/basebin/.fakelib/dyld"), &cdhashes, &cdhashesCount);
+	if (r != 0) {
+		char msg[4000];
+		snprintf(msg, 4000, "Dopamine: Preparing patched dyld signature failed with error %d, cannot continue.", r);
+		abort_with_reason(7, 1, msg, 0);
+	}
 
 	if (cdhashesCount > 1) {
 		char msg[4000];

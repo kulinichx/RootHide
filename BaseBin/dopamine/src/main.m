@@ -107,7 +107,11 @@ void activate_basebin(NSString *basebinPath)
 
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashesCount = 0;
-	file_collect_untrusted_cdhashes_by_path(fakelibDyldPath.fileSystemRepresentation, &cdhashes, &cdhashesCount);
+	int collectStatus = file_collect_untrusted_cdhashes_by_path(fakelibDyldPath.fileSystemRepresentation, &cdhashes, &cdhashesCount);
+	if (collectStatus != 0) {
+		printf("Activating basebin failed: signature preparation returned %d\n", collectStatus);
+		exit(-1);
+	}
 	if (cdhashesCount != 1) {
 		printf("Activating basebin failed: cdhashesCount != 1\n");
 		exit(-1);

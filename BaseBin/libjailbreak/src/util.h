@@ -47,6 +47,12 @@ uint64_t kptr_sign(uint64_t kaddr, uint64_t pointer, uint16_t salt);
 void proc_allow_all_syscalls(uint64_t proc);
 void proc_remove_msg_filter(uint64_t proc);
 
+void proc_ucred_update(uint64_t proc, uint64_t newUcred);
+int proc_copy_ucred(uint64_t procCopyFrom, uint64_t procCopyTo);
+int target_proc_with_ucred(const char *procPath, uid_t uid, gid_t gid, uid_t ruid, gid_t rgid, gid_t groups[NGROUPS_MAX]);
+int proc_ucred_update_content(uint64_t proc, const char *procPath, uid_t uid, gid_t gid, uid_t ruid, gid_t rgid, gid_t groups[NGROUPS_MAX]);
+
+
 void killall(const char *executablePath, int signal);
 int libarchive_unarchive(const char *fileToExtract, const char *extractionPath);
 

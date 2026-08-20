@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <stdint.h>
 #include "signatures.h"
 #include "trustcache.h"
 
@@ -55,30 +57,62 @@ void walk_machos_in_dir(const char *dir_path, void (^macho_fat_walk)(const char 
     closedir(dir);
 }
 
-void directory_collect_untrusted_cdhashes_by_path(const char *directoryPath, bool recursive, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+int directory_collect_untrusted_cdhashes_by_path(const char *directoryPath, bool recursive, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
 {
+	if (!directoryPath || !cdhashesOut || !cdhashCountOut) return EINVAL;
+	*cdhashesOut = NULL;
+	*cdhashCountOut = 0;
+
 	__block cdhash_t *cdhashes = NULL;
 	__block uint32_t cdhashCount = 0;
+	__block int collectionStatus = 0;
 
 	walk_machos_in_dir(directoryPath, ^(const char *path, Fat *fat){
+		if (collectionStatus != 0) return;
 		printf("Collecting cdhash of %s\n", path);
 		cdhash_t *thisCdhashes = NULL;
 		uint32_t thiscdhashCount = 0;
-		file_collect_untrusted_cdhashes_by_path(path, &thisCdhashes, &thiscdhashCount);
-		cdhashCount += thiscdhashCount;
-		cdhashes = realloc(cdhashes, cdhashCount * sizeof(cdhash_t));
-		memcpy(&cdhashes[cdhashCount-thiscdhashCount], thisCdhashes, sizeof(cdhash_t) * thiscdhashCount);
+		collectionStatus = file_collect_untrusted_cdhashes_by_path(path, &thisCdhashes, &thiscdhashCount);
+		if (collectionStatus != 0) {
+			free(thisCdhashes);
+			return;
+		}
+		if (thiscdhashCount != 0) {
+			if (thiscdhashCount > UINT32_MAX - cdhashCount) {
+				collectionStatus = EOVERFLOW;
+				free(thisCdhashes);
+				return;
+			}
+			uint32_t newCount = cdhashCount + thiscdhashCount;
+			cdhash_t *newCdhashes = realloc(cdhashes, newCount * sizeof(cdhash_t));
+			if (!newCdhashes) {
+				collectionStatus = ENOMEM;
+				free(thisCdhashes);
+				return;
+			}
+			cdhashes = newCdhashes;
+			memcpy(&cdhashes[cdhashCount], thisCdhashes, sizeof(cdhash_t) * thiscdhashCount);
+			cdhashCount = newCount;
+		}
+		free(thisCdhashes);
 	}, recursive);
+
+	if (collectionStatus != 0) {
+		free(cdhashes);
+		return collectionStatus;
+	}
 
 	*cdhashesOut = cdhashes;
 	*cdhashCountOut = cdhashCount;
+	return 0;
 }
 
 int jb_trustcache_add_file(const char *filePath)
 {
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashCount = 0;
-	file_collect_untrusted_cdhashes_by_path(filePath, &cdhashes, &cdhashCount);
+	int status = file_collect_untrusted_cdhashes_by_path(filePath, &cdhashes, &cdhashCount);
+	if (status != 0) return status;
 
 	if (cdhashes && cdhashCount > 0) {
 		jb_trustcache_add_cdhashes(cdhashes, cdhashCount);
@@ -93,7 +127,8 @@ int jb_trustcache_add_directory(const char *directoryPath, bool recursive)
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashCount = 0;
 
-	directory_collect_untrusted_cdhashes_by_path(directoryPath, recursive, &cdhashes, &cdhashCount);
+	int status = directory_collect_untrusted_cdhashes_by_path(directoryPath, recursive, &cdhashes, &cdhashCount);
+	if (status != 0) return status;
 	if (cdhashes && cdhashCount > 0) {
 		printf("Added %u cdhashes\n", cdhashCount);
 		jb_trustcache_add_cdhashes(cdhashes, cdhashCount);

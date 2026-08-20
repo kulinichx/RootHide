@@ -383,12 +383,13 @@ int jbdSystemwideLog(const char* fmt, ...)
 	return result;
 }
 
-int jbdSpawnPatchChild(int pid, bool resume)
+int jbdSpawnPatchChildEx(int pid, bool resume, bool forceDyldPatch)
 {
 	xpc_object_t message = xpc_dictionary_create_empty();
 	xpc_dictionary_set_uint64(message, "id", JBD_MSG_SPAWN_PATCH_CHILD);
 	xpc_dictionary_set_int64(message, "pid", pid);
 	xpc_dictionary_set_bool(message, "resume", resume);
+	xpc_dictionary_set_bool(message, "force-dyld-patch", forceDyldPatch);
 	xpc_object_t reply = jailbreakdXpcRequest(message);
 	xpc_release(message);
 	int64_t result = -1;
@@ -397,6 +398,11 @@ int jbdSpawnPatchChild(int pid, bool resume)
 		xpc_release(reply);
 	}
 	return result;
+}
+
+int jbdSpawnPatchChild(int pid, bool resume)
+{
+	return jbdSpawnPatchChildEx(pid, resume, false);
 }
 
 int jbdSpinlockFixOnly(int pid, bool resume)

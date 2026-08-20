@@ -152,16 +152,30 @@ jobs:
           grep -F 'extern const char *HOOK_DYLIB_PATH;' \
             BaseBin/systemhook/src/common/common.h
 
-      - name: Focused build systemhook
+      - name: Focused build P0-touched targets
         if: env.BUILD_MODE == 'focused'
         run: |
           set -euo pipefail
           export CLANG_MODULE_CACHE_PATH="$RUNNER_TEMP/clang-module-cache"
           mkdir -p "$CLANG_MODULE_CACHE_PATH"
+
+          # systemhook pulls in ChOma + libjailbreak and prepares BaseBin/.include.
           make -C BaseBin systemhook
+          # The P0 forward-port candidate also changes these runtime components.
+          make -C BaseBin launchdhook
+          make -C BaseBin jailbreakd
+          # Build dyldhook directly so focused mode does not pull the full basebin/trustcache graph.
+          make -C BaseBin/dyldhook
+
           mkdir -p artifacts
           cp BaseBin/systemhook/systemhook.dylib artifacts/systemhook.dylib
-          file artifacts/systemhook.dylib
+          cp BaseBin/launchdhook/launchdhook.dylib artifacts/launchdhook.dylib
+          cp BaseBin/jailbreakd/jailbreakd artifacts/jailbreakd
+          cp BaseBin/dyldhook/dyldhook_merge.arm64.dylib artifacts/dyldhook_merge.arm64.dylib
+          cp BaseBin/dyldhook/dyldhook_merge.arm64e.dylib artifacts/dyldhook_merge.arm64e.dylib
+
+          file artifacts/systemhook.dylib artifacts/launchdhook.dylib artifacts/jailbreakd \
+            artifacts/dyldhook_merge.arm64.dylib artifacts/dyldhook_merge.arm64e.dylib
           if strings artifacts/systemhook.dylib | grep -E "APTTRUST-|TRUSTFLOW-"; then
             echo "unexpected experimental trust diagnostics in systemhook" >&2
             exit 1
@@ -187,6 +201,10 @@ jobs:
           name: roothide-systemhook-${{ github.sha }}
           path: |
             artifacts/systemhook.dylib
+            artifacts/launchdhook.dylib
+            artifacts/jailbreakd
+            artifacts/dyldhook_merge.arm64.dylib
+            artifacts/dyldhook_merge.arm64e.dylib
             artifacts/source-provenance.txt
           if-no-files-found: error
           retention-days: 14

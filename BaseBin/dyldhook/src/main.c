@@ -14,6 +14,42 @@ __attribute__((section("__DATA,__jbinfo"))) static char jbinfoSection[0x4000];
 
 bool gDyldhookInitDone = false;
 
+static bool dyldhook_is_hex(char c)
+{
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static bool dyldhook_is_systemhook_component(const char *component, size_t length)
+{
+	static const char basebinHook[] = "/basebin/systemhook.dylib";
+	if (length == sizeof(basebinHook) - 1 && !strncmp(component, basebinHook, length)) return true;
+
+	static const char prefix[] = "/usr/lib/systemhook-";
+	static const char suffix[] = ".dylib";
+	const size_t prefixLength = sizeof(prefix) - 1;
+	const size_t suffixLength = sizeof(suffix) - 1;
+	if (length != prefixLength + 16 + suffixLength) return false;
+	if (strncmp(component, prefix, prefixLength) != 0) return false;
+	for (size_t i = 0; i < 16; i++) {
+		if (!dyldhook_is_hex(component[prefixLength + i])) return false;
+	}
+	return strncmp(component + prefixLength + 16, suffix, suffixLength) == 0;
+}
+
+static bool dyldhook_insert_libraries_contains_systemhook(const char *insertLibraries)
+{
+	if (!insertLibraries || !*insertLibraries) return false;
+	const char *component = insertLibraries;
+	for (const char *cursor = insertLibraries;; cursor++) {
+		if (*cursor == ':' || *cursor == '\0') {
+			if (dyldhook_is_systemhook_component(component, (size_t)(cursor - component))) return true;
+			if (*cursor == '\0') break;
+			component = cursor + 1;
+		}
+	}
+	return false;
+}
+
 bool jbinfo_is_checked_in(void)
 {
 	return jbInfo->state == DYLD_STATE_CHECKED_IN;
@@ -65,6 +101,18 @@ void dyldhook_perform_checkin(void)
 	}
 }
 
+int simple_atoi(char *p)
+{
+	int k = 0;
+	bool negate = false;
+	if (*p == '-') { negate = true; p++; }
+	while (*p) {
+		k = (k << 3) + (k << 1) + (*p) - '0';
+		p++;
+	}
+	return (negate ? -1 : 1) * k;
+}
+
 mach_port_t mach_task_self_ = MACH_PORT_NULL;
 
 void mach_init_4real(void)
@@ -91,12 +139,49 @@ void dyldhook_init(uintptr_t kernelParams)
 
 	// Walk kernelParams to get envp
 	uintptr_t argc = *(uintptr_t *)(kernelParams + sizeof(void *));
+	char **argv = (char **)(kernelParams + sizeof(void *) + sizeof(argc));
 	char **envp = (char **)(kernelParams + sizeof(void *) + sizeof(argc) + (sizeof(const char *) * argc) + sizeof(void *));
 
-	// If DYLD_INSERT_LIBRARIES is not set or does not contain systemhook, bail out
+	// Dopamine 3 credential donor path. Handle this before normal jailbreak check-in.
+	if (_simple_getenv(envp, "DYLD_HOOK_SETUID") != NULL) {
+		int uid = 0, gid = 0, ruid = 0, rgid = 0, fd = -1;
+		gid_t groups[NGROUPS_MAX];
+		for (int i = 0; i < NGROUPS_MAX; i++) groups[i] = -1;
+
+		for (int i = 1; i < argc; i++) {
+			int remaining = (int)argc - i - 1;
+			if (!strcmp(argv[i], "--fd")) { if (remaining < 1) break; fd = simple_atoi(argv[++i]); }
+			else if (!strcmp(argv[i], "--uid")) { if (remaining < 1) break; uid = simple_atoi(argv[++i]); }
+			else if (!strcmp(argv[i], "--ruid")) { if (remaining < 1) break; ruid = simple_atoi(argv[++i]); }
+			else if (!strcmp(argv[i], "--gid")) { if (remaining < 1) break; gid = simple_atoi(argv[++i]); }
+			else if (!strcmp(argv[i], "--rgid")) { if (remaining < 1) break; rgid = simple_atoi(argv[++i]); }
+			else if (!strcmp(argv[i], "--groups")) {
+				if (remaining < NGROUPS_MAX) break;
+				for (int k = 0; k < NGROUPS_MAX; k++) groups[k] = simple_atoi(argv[++i]);
+			}
+		}
+
+		if (fd == -1) return;
+		setgid(gid);
+		setgid(gid);
+		setregid(rgid, -1);
+		int ngroups = 0;
+		while (ngroups < NGROUPS_MAX && groups[ngroups] != -1) ngroups++;
+		setgroups(ngroups, groups);
+		setuid(uid);
+		setuid(uid);
+		setreuid(ruid, -1);
+
+		char ready = 0x42;
+		write(fd, &ready, sizeof(ready));
+		for (;;) __asm("wfe");
+	}
+
+	// Only perform the early check-in for processes that are actually receiving
+	// the jailbreak systemhook. RootHide randomizes the /usr/lib filename, so
+	// match a complete DYLD_INSERT_LIBRARIES component rather than a substring.
 	const char *insertLibrariesVar = _simple_getenv(envp, "DYLD_INSERT_LIBRARIES");
-	// if (!insertLibrariesVar) return;
-	// if (!strstr(insertLibrariesVar, "/usr/lib/systemhook-") && !strstr(insertLibrariesVar, "/basebin/systemhook.dylib")) return;
+	if (!dyldhook_insert_libraries_contains_systemhook(insertLibrariesVar)) return;
 
 	// If all is well, do check-in right here before dyld_start!
 	dyldhook_perform_checkin();

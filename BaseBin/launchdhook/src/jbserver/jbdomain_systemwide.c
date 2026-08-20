@@ -11,8 +11,10 @@
 #include <libjailbreak/util.h>
 #include <libjailbreak/primitives.h>
 #include <libjailbreak/codesign.h>
+#include <libjailbreak/txm.h>
 
 #include <signal.h>
+#include <errno.h>
 #include <libjailbreak/roothider.h>
 
 /*
@@ -148,7 +150,12 @@ int systemwide_trust_file(audit_token_t *processToken, int rfd, struct siginfo *
 	// reloaded so TXM adjustments and optional attachment use the new blobs.
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashesCount = 0;
-	file_collect_untrusted_cdhashes(fd, &cdhashes, &cdhashesCount);
+	int prepareStatus = file_collect_untrusted_cdhashes(fd, &cdhashes, &cdhashesCount);
+	if (prepareStatus != 0) {
+		free(cdhashes);
+		close(fd);
+		return prepareStatus;
+	}
 	if (cdhashes && cdhashesCount > 0) {
 		jb_trustcache_add_cdhashes(cdhashes, cdhashesCount);
 		free(cdhashes);
@@ -156,10 +163,14 @@ int systemwide_trust_file(audit_token_t *processToken, int rfd, struct siginfo *
 
 	struct siginfo *sigInfos = NULL;
 	uint32_t sigInfoCount = 0;
-	file_collect_signatures(fd, &sigInfos, &sigInfoCount);
+	int signatureStatus = file_collect_signatures(fd, &sigInfos, &sigInfoCount);
+	if (signatureStatus != 0) {
+		close(fd);
+		return signatureStatus;
+	}
 
 	int r = trust_signatures(pid, fd, sigInfos, sigInfoCount);
-	if (attach) {
+	if (r == 0 && attach) {
 		for (uint32_t i = 0; i < sigInfoCount; i++) {
 			int attachResult = fcntl(fd, F_ADDSIGS, &sigInfos[i].signature);
 			if (attachResult != 0) r = attachResult;
@@ -259,26 +270,53 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 	// Allow invalid pages
 	cs_allow_invalid(proc, fullyDebugged);
 
-	// Fix setuid
+	// Fix setuid/setgid while preserving Dopamine 3's modern credential semantics.
 	struct stat sb;
 	if (stat(procPath, &sb) == 0) {
 		if (S_ISREG(sb.st_mode) && (sb.st_mode & (S_ISUID | S_ISGID))) {
 			uint64_t ucred = proc_ucred(proc);
-			if ((sb.st_mode & (S_ISUID))) {
-				kwrite32(proc + koffsetof(proc, svuid), sb.st_uid);
-				kwrite32(ucred + koffsetof(ucred, svuid), sb.st_uid);
-				kwrite32(ucred + koffsetof(ucred, uid), sb.st_uid);
+			if (!ucred) {
+				proc_rele(proc);
+				return ESRCH;
 			}
-			if ((sb.st_mode & (S_ISGID))) {
-				kwrite32(proc + koffsetof(proc, svgid), sb.st_gid);
-				kwrite32(ucred + koffsetof(ucred, svgid), sb.st_gid);
-				kwrite32(ucred + koffsetof(ucred, groups), sb.st_gid);
+
+			gid_t groups[NGROUPS_MAX];
+			kreadbuf(ucred + koffsetof(ucred, groups), groups, sizeof(groups));
+			uid_t uid = (uid_t)kread32(ucred + koffsetof(ucred, uid));
+			uid_t ruid = (uid_t)kread32(ucred + koffsetof(ucred, ruid));
+			gid_t gid = groups[0];
+			gid_t rgid = (gid_t)kread32(ucred + koffsetof(ucred, rgid));
+			uid_t oldUid = uid;
+			gid_t oldGid = gid;
+
+			bool updateSavedUid = false;
+			bool updateSavedGid = false;
+			if (sb.st_mode & S_ISUID) {
+				uid = sb.st_uid;
+				updateSavedUid = true;
 			}
+			if (sb.st_mode & S_ISGID) {
+				gid = sb.st_gid;
+				groups[0] = sb.st_gid;
+				updateSavedGid = true;
+			}
+
+			if (oldUid != uid || oldGid != gid) {
+				int credentialStatus = proc_ucred_update_content(proc, procPath, uid, gid, ruid, rgid, groups);
+				if (credentialStatus != 0) {
+					JBLogError("setid credential update failed pid=%d path=%s status=%d", pid, procPath, credentialStatus);
+					proc_rele(proc);
+					return credentialStatus;
+				}
+			}
+
+			// Commit saved IDs only after the credential transaction succeeded so
+			// a donor failure cannot leave the process in a half-updated state.
+			if (updateSavedUid) kwrite32(proc + koffsetof(proc, svuid), sb.st_uid);
+			if (updateSavedGid) kwrite32(proc + koffsetof(proc, svgid), sb.st_gid);
+
 			uint32_t flag = kread32(proc + koffsetof(proc, flag));
-			if ((flag & P_SUGID) != 0) {
-				flag &= ~P_SUGID;
-				kwrite32(proc + koffsetof(proc, flag), flag);
-			}
+			if (flag & P_SUGID) kwrite32(proc + koffsetof(proc, flag), flag & ~P_SUGID);
 		}
 	}
 
@@ -377,6 +415,39 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 	return 0;
 }
 
+int txm_fork_fix(uint64_t parentAddressSpace, uint64_t childAddressSpace)
+{
+	uint64_t parentHead = parentAddressSpace + koffsetof(TXMAddressSpace, codeRegions);
+	uint64_t childHead  =  childAddressSpace + koffsetof(TXMAddressSpace, codeRegions);
+
+	uint64_t curCodeRegion = 0, nextCodeRegion = 0;
+	for (curCodeRegion = RB_MIN(TXMCodeRegionRBTree, parentHead); curCodeRegion; curCodeRegion = nextCodeRegion) {
+		nextCodeRegion = RB_NEXT(TXMCodeRegionRBTree, parentHead, curCodeRegion);
+
+		uint8_t  curRegionType      =    kread8(curCodeRegion + koffsetof(TXMCodeRegion, type));
+		uint64_t curRegionStartAddr =   kread64(curCodeRegion + koffsetof(TXMCodeRegion, startAddr));
+		uint64_t curRegionEndAddr   =   kread64(curCodeRegion + koffsetof(TXMCodeRegion, endAddr));
+		uint64_t curRegionCodeSig   = kread_ptr(curCodeRegion + koffsetof(TXMCodeRegion, codeSignature));
+
+		uint64_t childCodeRegion = RB_FIND(TXMCodeRegionRBTree, childHead, CodeRegionRBTree_KEY(curRegionStartAddr));
+		if (!childCodeRegion && !curRegionCodeSig) {
+			childCodeRegion = allocateCodeRegionObject();
+			if (!childCodeRegion) return ENOMEM;
+
+			kwrite64(childCodeRegion + koffsetof(TXMCodeRegion, startAddr), curRegionStartAddr);
+			kwrite64(childCodeRegion + koffsetof(TXMCodeRegion, endAddr),   curRegionEndAddr);
+
+			RB_INSERT(TXMCodeRegionRBTree, childHead, childCodeRegion);
+		}
+
+		if (childCodeRegion) {
+			kwrite8(childCodeRegion + koffsetof(TXMCodeRegion, type), curRegionType);
+		}
+	}
+
+	return 0;
+}
+
 int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 {
 	int retval = 3;
@@ -392,9 +463,11 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 
 			uint64_t childTask  = proc_task(childProc);
 			uint64_t childVmMap = kread_ptr(childTask + koffsetof(task, map));
+			uint64_t childPmap  = kread_ptr(childVmMap + koffsetof(vm_map, pmap));
 
 			uint64_t parentTask  = proc_task(parentProc);
 			uint64_t parentVmMap = kread_ptr(parentTask + koffsetof(task, map));
+			uint64_t parentPmap  = kread_ptr(parentVmMap + koffsetof(vm_map, pmap));
 
 			uint64_t parentHeader   = parentVmMap + koffsetof(vm_map, hdr);
 			uint32_t parentNentries = kread32(parentHeader + koffsetof(vm_map_header, nentries));
@@ -455,6 +528,16 @@ int systemwide_fork_fix(audit_token_t *parentToken, uint64_t childPid)
 				}
 			} while (parentEntry != 0 && childEntry != 0 && parentEntry != parentFirstEntry && childEntry != childFirstEntry && parentIdx < parentNentries && childIdx < childNentries);
 			retval = 0;
+			if (koffsetof(pmap, txm_address_space)) {
+				uint64_t parentAddressSpace = kread_ptr(parentPmap + koffsetof(pmap, txm_address_space));
+				uint64_t childAddressSpace  = kread_ptr(childPmap  + koffsetof(pmap, txm_address_space));
+				if (!parentAddressSpace || !childAddressSpace) {
+					retval = EFAULT;
+				}
+				else {
+					retval = txm_fork_fix(parentAddressSpace, childAddressSpace);
+				}
+			}
 		}
 	}
 	if (childProc)  proc_rele(childProc);
@@ -474,6 +557,116 @@ static int systemwide_cs_revalidate(audit_token_t *callerToken)
 		}
 	}
 	return -1;
+}
+
+static int systemwide_validate_direct_child(pid_t callerPid, uint64_t callerProc, pid_t childPid, uint64_t childProc)
+{
+	if (callerPid <= 0 || childPid <= 0 || !callerProc || !childProc) return ESRCH;
+
+	// Re-resolve both PIDs before every sensitive phase. This prevents a stale
+	// proc pointer / recycled PID from turning the Persona transaction into an
+	// operation on an unrelated process.
+	uint64_t liveCallerProc = proc_find(callerPid);
+	uint64_t liveChildProc = proc_find(childPid);
+	int status = 0;
+	if (!liveCallerProc || !liveChildProc || liveCallerProc != callerProc || liveChildProc != childProc) {
+		status = ESRCH;
+	}
+	else if (kread_ptr(childProc + koffsetof(proc, pptr)) != callerProc) {
+		status = EACCES;
+	}
+
+	if (liveChildProc) proc_rele(liveChildProc);
+	if (liveCallerProc) proc_rele(liveCallerProc);
+	return status;
+}
+
+static int systemwide_persona_fix(audit_token_t *callerToken, int childPid, uid_t overwriteUid, gid_t overwriteGid, bool resumeChild)
+{
+	bool hasPersonaMgmtEntitlement = false;
+	xpc_object_t personaMgmtVal = xpc_copy_entitlement_for_token("com.apple.private.persona-mgmt", callerToken);
+	if (personaMgmtVal) {
+		if (xpc_get_type(personaMgmtVal) == XPC_TYPE_INT64) {
+			hasPersonaMgmtEntitlement = xpc_int64_get_value(personaMgmtVal) == 1;
+		}
+		else if (xpc_get_type(personaMgmtVal) == XPC_TYPE_UINT64) {
+			hasPersonaMgmtEntitlement = xpc_uint64_get_value(personaMgmtVal) == 1;
+		}
+		else if (xpc_get_type(personaMgmtVal) == XPC_TYPE_BOOL) {
+			hasPersonaMgmtEntitlement = xpc_bool_get_value(personaMgmtVal);
+		}
+		xpc_release(personaMgmtVal);
+	}
+	if (!hasPersonaMgmtEntitlement) return EACCES;
+	if (childPid <= 0) return EINVAL;
+
+	pid_t callerPid = audit_token_to_pid(*callerToken);
+	if (callerPid <= 0) return EINVAL;
+
+	uint64_t callerProc = proc_find(callerPid);
+	uint64_t childProc = proc_find(childPid);
+	if (!callerProc || !childProc) {
+		if (childProc) proc_rele(childProc);
+		if (callerProc) proc_rele(callerProc);
+		return ESRCH;
+	}
+
+	int status = systemwide_validate_direct_child(callerPid, callerProc, childPid, childProc);
+	char childProcPath[4 * MAXPATHLEN] = {0};
+	if (status == 0 && proc_pidpath(childPid, childProcPath, sizeof(childProcPath)) <= 0) status = ESRCH;
+
+	if (status == 0) {
+		uint64_t childUcred = proc_ucred(childProc);
+		if (!childUcred) {
+			status = ESRCH;
+		}
+		else {
+			gid_t groups[NGROUPS_MAX];
+			kreadbuf(childUcred + koffsetof(ucred, groups), groups, sizeof(groups));
+
+			uid_t uid = (uid_t)kread32(childUcred + koffsetof(ucred, uid));
+			uid_t ruid = (uid_t)kread32(childUcred + koffsetof(ucred, ruid));
+			gid_t gid = groups[0];
+			gid_t rgid = (gid_t)kread32(childUcred + koffsetof(ucred, rgid));
+
+			if (overwriteUid != (uid_t)-1) {
+				uid = overwriteUid;
+				ruid = overwriteUid;
+			}
+			if (overwriteGid != (gid_t)-1) {
+				gid = overwriteGid;
+				rgid = overwriteGid;
+				groups[0] = overwriteGid;
+			}
+
+			status = proc_ucred_update_content(childProc, childProcPath, uid, gid, ruid, rgid, groups);
+			if (status == 0 && overwriteUid != (uid_t)-1) kwrite32(childProc + koffsetof(proc, svuid), overwriteUid);
+			if (status == 0 && overwriteGid != (gid_t)-1) kwrite32(childProc + koffsetof(proc, svgid), overwriteGid);
+
+			if (status == 0) {
+				uint32_t flag = kread32(childProc + koffsetof(proc, flag));
+				if (flag & P_SUGID) kwrite32(childProc + koffsetof(proc, flag), flag & ~P_SUGID);
+			}
+		}
+	}
+
+	if (status == 0 && resumeChild) {
+		status = systemwide_validate_direct_child(callerPid, callerProc, childPid, childProc);
+		if (status == 0 && kill(childPid, SIGCONT) != 0) status = errno ? errno : EIO;
+	}
+
+	if (status != 0) {
+		// Never leave a partially-fixed suspended child alive. Revalidate ownership
+		// before cleanup to avoid acting on a recycled PID.
+		if (systemwide_validate_direct_child(callerPid, callerProc, childPid, childProc) == 0) {
+			(void)kill(childPid, SIGKILL);
+		}
+		JBLogError("persona fix failed caller=%d child=%d status=%d", callerPid, childPid, status);
+	}
+
+	proc_rele(childProc);
+	proc_rele(callerProc);
+	return status;
 }
 
 struct jbserver_domain gSystemwideDomain = {
@@ -502,6 +695,7 @@ struct jbserver_domain gSystemwideDomain = {
 				{ .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
 				{ .name = "fd", .type = JBS_TYPE_UINT64, .out = false },
 				{ .name = "siginfo", .type = JBS_TYPE_DATA, .out = false },
+				{ .name = "attach", .type = JBS_TYPE_BOOL, .out = false },
 				{ 0 },
 			},
 		},
@@ -541,6 +735,18 @@ struct jbserver_domain gSystemwideDomain = {
 			.args = (jbserver_arg[]){
 				{ .name = "key", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "value", .type = JBS_TYPE_XPC_GENERIC, .out = true },
+			},
+		},
+		// JBS_SYSTEMWIDE_PERSONA_FIX
+		{
+			.handler = systemwide_persona_fix,
+			.args = (jbserver_arg[]){
+				{ .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
+				{ .name = "child-pid", .type = JBS_TYPE_UINT64, .out = false },
+				{ .name = "overwrite-uid", .type = JBS_TYPE_UINT64, .out = false },
+				{ .name = "overwrite-gid", .type = JBS_TYPE_UINT64, .out = false },
+				{ .name = "resume-child", .type = JBS_TYPE_BOOL, .out = false },
+				{ 0 },
 			},
 		},
 		{ 0 },

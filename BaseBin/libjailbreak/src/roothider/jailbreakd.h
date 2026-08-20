@@ -26,6 +26,7 @@ mach_port_t jailbreakdServerPort();
 int jbdTestCall(int value);
 int jbdSystemwideLog(const char* fmt, ...);
 
+int jbdSpawnPatchChildEx(int pid, bool resume, bool forceDyldPatch);
 int jbdSpawnPatchChild(int pid, bool resume);
 int jbdSpawnExecStart(const char* execfile, bool resume);
 int jbdSpawnExecCancel(const char* execfile);

@@ -207,13 +207,18 @@ bool dyld_patch_enabled()
     return jbinfo(dyld_patch_enabled);
 }
 
-int roothide_patch_proc(pid_t pid)
+int roothide_patch_proc_ex(pid_t pid, bool forceDyldPatch)
 {
     char path[PATH_MAX]={0};
-    if(dyld_patch_enabled() || process_force_dyld_patch(proc_get_path(pid,path), NULL)) {
+    if(forceDyldPatch || dyld_patch_enabled() || process_force_dyld_patch(proc_get_path(pid,path), NULL)) {
         return proc_patch_dyld(pid);
     }
     return proc_patch_csflags(pid);
+}
+
+int roothide_patch_proc(pid_t pid)
+{
+    return roothide_patch_proc_ex(pid, false);
 }
 
 int roothide_config_set_spinlock_fix(bool enabled)
