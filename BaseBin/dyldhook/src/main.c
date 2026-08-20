@@ -101,18 +101,6 @@ void dyldhook_perform_checkin(void)
 	}
 }
 
-int simple_atoi(char *p)
-{
-	int k = 0;
-	bool negate = false;
-	if (*p == '-') { negate = true; p++; }
-	while (*p) {
-		k = (k << 3) + (k << 1) + (*p) - '0';
-		p++;
-	}
-	return (negate ? -1 : 1) * k;
-}
-
 mach_port_t mach_task_self_ = MACH_PORT_NULL;
 
 void mach_init_4real(void)
@@ -139,7 +127,6 @@ void dyldhook_init(uintptr_t kernelParams)
 
 	// Walk kernelParams to get envp
 	uintptr_t argc = *(uintptr_t *)(kernelParams + sizeof(void *));
-	char **argv = (char **)(kernelParams + sizeof(void *) + sizeof(argc));
 	char **envp = (char **)(kernelParams + sizeof(void *) + sizeof(argc) + (sizeof(const char *) * argc) + sizeof(void *));
 
 	// Only perform the early check-in for processes that are actually receiving
