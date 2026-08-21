@@ -146,4 +146,6 @@
 "Button_OK" = "OK";
 
 "System_Uptime_Format" = "uptime: %ddays %dh %dm %ds";
+"System_Uptime_Prefix" = "uptime:";
+"System_Uptime_Less_Than_Minute" = "uptime: less than 1 minute";
 "Settings_Disable_Update" = "Disable Update";

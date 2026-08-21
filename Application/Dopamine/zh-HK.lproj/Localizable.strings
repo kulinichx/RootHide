@@ -127,4 +127,6 @@
 "Alert_Reboot_Device_Body" = "裝置將重新啟動，越獄會暫時失效，需再次執行越獄才能恢復。是否繼續？";
 
 "System_Uptime_Format" = "已運行: %d天 %d時 %d分 %d秒";
+"System_Uptime_Prefix" = "已運行";
+"System_Uptime_Less_Than_Minute" = "已運行 不到 1 分鐘";
 "Settings_Disable_Update" = "禁止更新檢測";

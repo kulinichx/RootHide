@@ -67,7 +67,8 @@
             self.layer.shadowOpacity = 0.3;
         }
         
-        [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(updateLabel) userInfo:nil repeats:YES];
+        [self updateLabel];
+        [NSTimer scheduledTimerWithTimeInterval:60.0 target:self selector:@selector(updateLabel) userInfo:nil repeats:YES];
     }
     return self;
 }
@@ -79,12 +80,28 @@
 - (NSString *)formatUptime {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    long uptimeInt = ts.tv_sec;
-    int seconds = uptimeInt % 60;
-    int minutes = (uptimeInt / 60) % 60;
-    int hours = (uptimeInt / 3600) % 24;
-    long days = uptimeInt / 86400;
-    return [NSString stringWithFormat:NSLocalizedString(@"System_Uptime_Format", nil), days, hours, minutes, seconds];
+    NSTimeInterval uptime = ts.tv_sec;
+
+    if (uptime < 60) {
+        NSString *lessThanMinute = NSLocalizedString(@"System_Uptime_Less_Than_Minute", nil);
+        if ([lessThanMinute isEqualToString:@"System_Uptime_Less_Than_Minute"]) {
+            return @"uptime: less than 1 minute";
+        }
+        return lessThanMinute;
+    }
+
+    NSDateComponentsFormatter *formatter = [[NSDateComponentsFormatter alloc] init];
+    formatter.allowedUnits = NSCalendarUnitDay | NSCalendarUnitHour | NSCalendarUnitMinute;
+    formatter.unitsStyle = NSDateComponentsFormatterUnitsStyleFull;
+    formatter.zeroFormattingBehavior = NSDateComponentsFormatterZeroFormattingBehaviorDropAll;
+    formatter.maximumUnitCount = 3;
+
+    NSString *duration = [formatter stringFromTimeInterval:uptime];
+    NSString *prefix = NSLocalizedString(@"System_Uptime_Prefix", nil);
+    if ([prefix isEqualToString:@"System_Uptime_Prefix"]) {
+        prefix = @"uptime:";
+    }
+    return [NSString stringWithFormat:@"%@ %@", prefix, duration ?: @""];
 }
 
 @end

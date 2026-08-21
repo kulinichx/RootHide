@@ -37,8 +37,8 @@
 
 - (BOOL)isUpdateAvailable
 {
-    NSNumber *disableUpdate = [_preferenceManager preferenceValueForKey:@"disableUpdateEnabled"];
-    if ([disableUpdate boolValue] == YES)
+    BOOL disableUpdate = [_preferenceManager boolPreferenceValueForKey:@"disableUpdateEnabled" fallback:YES];
+    if (disableUpdate)
         return NO;
     
     NSArray *releases = [self getLatestReleases];
@@ -80,7 +80,7 @@
     static dispatch_once_t onceToken;
     static NSArray *releases;
     dispatch_once(&onceToken, ^{
-        NSURL *url = [NSURL URLWithString:@"https://api.github.com/repos/roothide/Dopamine2-roothide/releases"];
+        NSURL *url = [NSURL URLWithString:@"https://api.github.com/repos/kulinichx/RootHide/releases"];
         NSData *data = [NSData dataWithContentsOfURL:url];
         if (data) {
             NSError *error;

@@ -237,20 +237,7 @@ extern char **environ;
 
 - (NSString *)versionSupportString
 {
-    cpu_subtype_t cpuFamily = 0;
-    size_t cpuFamilySize = sizeof(cpuFamily);
-    sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
-
-    if ([self isArm64e]) {
-        if (cpuFamily == CPUFAMILY_ARM_VORTEX_TEMPEST || cpuFamily == CPUFAMILY_ARM_LIGHTNING_THUNDER) {
-            return @"iOS 15.0 - 18.7.1, 26.0 - 26.0.1 (A12/A13, PPL)";
-        }
-        if (![self isSPTM]) {
-            return @"iOS 15.0 - 17.3.1 (PPL)";
-        }
-        return @"iOS 17.0 - 17.3.1 (SPTM)";
-    }
-    return @"iOS 15.0 - 18.7.1 (arm64)";
+    return @"iOS 16.0 – 16.7.16";
 }
 
 - (BOOL)isInstalledThroughTrollStore
@@ -802,6 +789,12 @@ extern char **environ;
 
 - (BOOL)isSupported
 {
+    NSString *systemVersion = [self systemVersion];
+    if ([systemVersion compare:@"16.0" options:NSNumericSearch] == NSOrderedAscending ||
+        [systemVersion compare:@"16.7.16" options:NSNumericSearch] == NSOrderedDescending) {
+        return false;
+    }
+
     //cpu_subtype_t cpuFamily = 0;
     //size_t cpuFamilySize = sizeof(cpuFamily);
     //sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
