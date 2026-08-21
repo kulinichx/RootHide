@@ -57,7 +57,6 @@ int dopamine_get_root(audit_token_t *processToken)
 {
 	pid_t pid = audit_token_to_pid(*processToken);
 	uint64_t proc = proc_find(pid);
-	if (!proc) return 1;
 	uint64_t ucred = proc_ucred(proc);
 
 	if (kread32(ucred + koffsetof(ucred, uid)) == 501) {
@@ -84,7 +83,6 @@ int dopamine_drop_root(audit_token_t *processToken)
 {
 	pid_t pid = audit_token_to_pid(*processToken);
 	uint64_t proc = proc_find(pid);
-	if (!proc) return 1;
 	uint64_t ucred = proc_ucred(proc);
 
 	if (kread32(ucred + koffsetof(ucred, uid)) == 0) {

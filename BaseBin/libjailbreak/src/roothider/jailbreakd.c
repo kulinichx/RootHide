@@ -334,7 +334,7 @@ xpc_object_t jailbreakdXpcRequest(xpc_object_t xdict)
 
 	mach_port_deallocate(mach_task_self(), port);
 
-	if(pipe) xpc_release(pipe);
+	xpc_release(pipe);
 	return xreply;
 }
 
