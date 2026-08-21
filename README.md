@@ -95,7 +95,7 @@ remove incompatible tweaks if SpringBoard enters a respring loop.
 ## Downloads and changelog
 
 Download signed builds and read the changelog on the
-[GitHub Releases](https://github.com/P013onEr/RootHide/releases) page. The
+[GitHub Releases](https://github.com/roothide/Dopamine2-roothide/releases) page. The
 in-app update screen reads release notes from the same location.
 
 ## Tested configuration

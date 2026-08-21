@@ -262,7 +262,6 @@
             [specifiers addObject:dyldPatchSpecifier];
             /**************************** roothide specfic *********************************/
             
-            // 关闭更新
             PSSpecifier *disableUpdateSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Disable_Update") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
             [disableUpdateSpecifier setProperty:@YES forKey:@"enabled"];
             [disableUpdateSpecifier setProperty:@"disableUpdateEnabled" forKey:@"key"];
