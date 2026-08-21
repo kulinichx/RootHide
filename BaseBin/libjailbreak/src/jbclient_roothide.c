@@ -1,7 +1,5 @@
 #include <dlfcn.h>
-#include <errno.h>
 #include <mach-o/dyld.h>
-#include <os/log.h>
 #include "jbclient_xpc.h"
 #include "jbserver.h"
 
