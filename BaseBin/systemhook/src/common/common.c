@@ -181,26 +181,19 @@ int __execve_orig(const char *path, char *const argv[], char *const envp[])
 // 1. Ensure the binary about to be spawned and all of it's dependencies are trust cached
 // 2. Insert "DYLD_INSERT_LIBRARIES=/usr/lib/systemhook.dylib" into all binaries spawned
 // 3. Increase Jetsam limit to more sane value (Multipler defined as JETSAM_MULTIPLIER)
-// 4. Fix spawning as root via persona entitlement on iOS 17.6+
 
-static int spawn_exec_hook_common(bool isExec,
-						   const char *path,
+static int spawn_exec_hook_common(const char *path,
 						   char *const argv[restrict],
 						   char *const envp[restrict],
 		struct _posix_spawn_args_desc *desc,
 								 int (*trust_binary)(const char *path),
 								double jetsamMultiplier,
-								 int (^orig)(pid_t *pid, char *const envp[restrict]))
+								 int (^orig)(char *const envp[restrict]))
 {
 	if (!path) {
-		return orig(NULL, envp);
+		return orig(envp);
 	}
 
-	bool personaFixNeedsResume = true;
-	int personaFixUid = -1;
-	int personaFixGid = -1;
-	short personaFixOriginalFlags = 0;
-	struct _posix_spawn_persona_info *personaInfo = NULL;
 	posix_spawnattr_t attr = NULL;
 	if (desc) attr = desc->attrp;
 
@@ -286,45 +279,9 @@ static int spawn_exec_hook_common(bool isExec,
 			}
 		}
 
-		// On iOS 17.6 and up Apple neutered persona overwrites to block going from (non root) -> (root)
-		// Since jailbreak infra relies on this, we need to reenable it via our patches
-		// To do this we will spawn the process as suspended, modify the ucred to the desired uid/gid and resume it
-		// POSIX_SPAWN_SETEXEC is not a concern since using it together with POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE is not supported anyways
-		if (__builtin_available(iOS 17.6, *)) {
-			bool hasExecFlag = false;
-			short flags = 0;
-			int flagsResult = posix_spawnattr_getflags(&attr, &flags);
-			if (flagsResult == 0) {
-				if (flags & POSIX_SPAWN_SETEXEC) {
-					hasExecFlag = true;
-				}
-			}
-			if (!hasExecFlag && !isExec && getuid() != 0) {
-				personaInfo = *(struct _posix_spawn_persona_info **)(attrStruct + POSIX_SPAWNATTR_OFF_PERSONA);
-				if (personaInfo) {
-					if (personaInfo->pspi_id == 99 && (personaInfo->pspi_flags & POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE)) {
-						if (personaInfo->pspi_flags & POSIX_SPAWN_PERSONA_UID) {
-							personaFixUid = personaInfo->pspi_uid;
-						}
-						if (personaInfo->pspi_flags & POSIX_SPAWN_PERSONA_GID) {
-							personaFixGid = personaInfo->pspi_gid;
-						}
-					}
-				}
-
-				if (personaFixUid == 0 || personaFixGid == 0) {
-					if (flagsResult != 0) return flagsResult;
-					personaFixOriginalFlags = flags;
-					if (flags & POSIX_SPAWN_START_SUSPENDED) {
-						personaFixNeedsResume = false;
-					}
-				}
-			}
-		}
 	}
 
 	int r = -1;
-	pid_t childPid = -1;
 	char **envc = NULL;
 	char *const *spawnEnvp = envp;
 
@@ -390,44 +347,9 @@ static int spawn_exec_hook_common(bool isExec,
 		spawnEnvp = envc;
 	}
 
-	bool personaFixFlagsChanged = false;
-	if (personaFixUid == 0 || personaFixGid == 0) {
-		// Revert the root persona request to mobile only for the duration of posix_spawn.
-		if (personaFixUid == 0) personaInfo->pspi_uid = 501;
-		if (personaFixGid == 0) personaInfo->pspi_gid = 501;
-
-		if (personaFixNeedsResume) {
-			int flagsResult = posix_spawnattr_setflags(&attr, personaFixOriginalFlags | POSIX_SPAWN_START_SUSPENDED);
-			if (flagsResult != 0) {
-				if (personaFixUid == 0) personaInfo->pspi_uid = personaFixUid;
-				if (personaFixGid == 0) personaInfo->pspi_gid = personaFixGid;
-				if (envc) envbuf_free(envc);
-				return flagsResult;
-			}
-			personaFixFlagsChanged = true;
-		}
-	}
-
-	r = orig(&childPid, spawnEnvp);
-
-	// Restore caller-owned spawn attributes immediately after posix_spawn returns.
-	if (personaFixUid == 0) personaInfo->pspi_uid = personaFixUid;
-	if (personaFixGid == 0) personaInfo->pspi_gid = personaFixGid;
-	if (personaFixFlagsChanged) {
-		int restoreFlagsResult = posix_spawnattr_setflags(&attr, personaFixOriginalFlags);
-		if (restoreFlagsResult != 0) {
-		        os_log_error(OS_LOG_DEFAULT, "posix_spawnattr_setflags restore error: %d", restoreFlagsResult);
-		}
-	}
+	r = orig(spawnEnvp);
 
 	if (envc) envbuf_free(envc);
-
-	if (r == 0 && childPid != -1 && (personaFixUid == 0 || personaFixGid == 0)) {
-		jbclient_fork_fix(childPid);
-		if (personaFixNeedsResume) {
-			kill(childPid, SIGCONT);
-		}
-	}
 
 	return r;
 }
@@ -444,12 +366,8 @@ int posix_spawn_hook_shared(pid_t *restrict pid,
 {
 	int (*posix_spawn_orig)(pid_t *restrict, const char *restrict, struct _posix_spawn_args_desc *, char *const[restrict], char *const[restrict]) = orig;
 
-	int r = spawn_exec_hook_common(false, path, argv, envp, desc, trust_binary, jetsamMultiplier, ^int(pid_t *pidOut, char *const envp_patched[restrict]) {
-		int rr = posix_spawn_orig(pid ?: pidOut, path, desc, argv, envp_patched);
-		if (rr == 0 && pid && pidOut) {
-			*pidOut = *pid;
-		}
-		return rr;
+	int r = spawn_exec_hook_common(path, argv, envp, desc, trust_binary, jetsamMultiplier, ^int(char *const envp_patched[restrict]) {
+		return posix_spawn_orig(pid, path, desc, argv, envp_patched);
 	});
 
 	if (r == 0 && pid && desc) {
@@ -502,7 +420,7 @@ int execve_hook_shared(const char *path,
 {
 	int (*execve_orig)(const char *, char *const[], char *const[]) = orig;
 
-	int r = spawn_exec_hook_common(true, path, argv, envp, NULL, trust_binary, 0, ^int(pid_t *pidOut, char *const envp_patched[restrict]){
+	int r = spawn_exec_hook_common(path, argv, envp, NULL, trust_binary, 0, ^int(char *const envp_patched[restrict]){
 		return execve_orig(path, argv, envp_patched);
 	});
 
