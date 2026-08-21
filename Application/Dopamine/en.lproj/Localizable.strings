@@ -145,6 +145,5 @@
 "Button_Mount" = "Mount";
 "Button_OK" = "OK";
 
-// lishaowen从真皮迁移
 "System_Uptime_Format" = "uptime: %ddays %dh %dm %ds";
 "Settings_Disable_Update" = "Disable Update";
