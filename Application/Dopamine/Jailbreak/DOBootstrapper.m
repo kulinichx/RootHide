@@ -1240,10 +1240,42 @@ int getCFMajorVersion(void)
         [[DOUIManager sharedInstance] sendLog:@"Updating BaseBin" debug:NO];
         
         NSError* error=nil;
-        if ([[NSFileManager defaultManager] fileExistsAtPath:jbrootPrefix(@"/basebin")]) {
-            if (![[NSFileManager defaultManager] removeItemAtPath:jbrootPrefix(@"/basebin") error:&error]) {
-                completion([NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed deleting existing basebin file with error: %@", error.localizedDescription]}]);
-                return;
+        NSString *basebinPath = jbrootPrefix(@"/basebin");
+        if ([[NSFileManager defaultManager] fileExistsAtPath:basebinPath]) {
+            if (![[NSFileManager defaultManager] removeItemAtPath:basebinPath error:&error]) {
+                BOOL recovered = NO;
+
+                NSString *corruptedFilePath = [basebinPath stringByAppendingPathComponent:@"gen/dyld.old"];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:corruptedFilePath]) {
+                    if (![[NSFileManager defaultManager] removeItemAtPath:corruptedFilePath error:nil]) {
+                        // Dopamine 3.0 - 3.0.6 could leave dyld.old corrupted after a jbupdate panic.
+                        // The file may be undeletable but can still be moved out of the jailbreak root.
+                        NSString *activePrebootPath = [[DOEnvironmentManager sharedManager] activePrebootPath];
+
+                        NSString *characterSet = @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                        NSUInteger stringLen = 6;
+                        NSMutableString *randomString = [NSMutableString stringWithCapacity:stringLen];
+                        for (NSUInteger i = 0; i < stringLen; i++) {
+                            NSUInteger randomIndex = arc4random_uniform((uint32_t)[characterSet length]);
+                            unichar randomCharacter = [characterSet characterAtIndex:randomIndex];
+                            [randomString appendFormat:@"%C", randomCharacter];
+                        }
+
+                        NSString *orphanedName = [NSString stringWithFormat:@"orphaned-%@", randomString];
+                        NSString *orphanedPath = [activePrebootPath stringByAppendingPathComponent:orphanedName];
+                        [[NSFileManager defaultManager] moveItemAtPath:corruptedFilePath toPath:orphanedPath error:nil];
+
+                        if ([[NSFileManager defaultManager] removeItemAtPath:basebinPath error:&error]) {
+                            recovered = YES;
+                            error = nil;
+                        }
+                    }
+                }
+
+                if (!recovered) {
+                    completion([NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed deleting existing basebin file with error: %@", error.localizedDescription]}]);
+                    return;
+                }
             }
         }
         error = [self extractTar:[[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"basebin.tar"] toPath:jbrootPrefix(@"/")];

@@ -363,11 +363,11 @@ extern char **environ;
 
 - (int)spawnJbctlAsRootWithArgs:(NSArray *)args
 {
-    // 3.0.7+ jbctl understands --waitfor.  Keep the suspended-spawn fallback
-    // only for an already-installed older jailbreak whose jbctl cannot parse it.
+    // --waitfor was introduced in Dopamine 3.0.5. Keep the suspended-spawn
+    // fallback only for an already-installed older jailbreak.
     bool needsLegacySolution = false;
     if (self.jailbrokenVersion) {
-        needsLegacySolution = ([self.jailbrokenVersion compare:@"3.0.7" options:NSNumericSearch] == NSOrderedAscending);
+        needsLegacySolution = ([self.jailbrokenVersion compare:@"3.0.5" options:NSNumericSearch] == NSOrderedAscending);
     }
 
     size_t argCapacity = args.count + 4;
@@ -452,7 +452,7 @@ extern char **environ;
         [self runUnsandboxed:^{
             spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
             if (needsLegacySolution && spawnResult == 0) {
-                // Compatibility only: old jbctl has no --waitfor support.
+                // Compatibility only: Dopamine <3.0.5 jbctl has no --waitfor support.
                 kill(pid, SIGCONT);
             }
         }];

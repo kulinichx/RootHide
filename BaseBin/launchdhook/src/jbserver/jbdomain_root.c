@@ -29,7 +29,9 @@ static int root_get_sysinfo(xpc_object_t *sysInfoOut)
 static int root_steal_ucred(audit_token_t *clientToken, uint64_t ucred, uint64_t *orgUcred)
 {
 	uint64_t kernproc = proc_find(0);
+	if (!kernproc) return -1;
 	uint64_t kern_ucred = proc_ucred(kernproc);
+	if (!kern_ucred) return -1;
 	if (!ucred) {
 		// Passing 0 to this means kernel ucred
 		ucred = kern_ucred;
@@ -37,8 +39,10 @@ static int root_steal_ucred(audit_token_t *clientToken, uint64_t ucred, uint64_t
 
 	pid_t pid = audit_token_to_pid(*clientToken);
 	uint64_t proc = proc_find(pid);
+	if (!proc) return -1;
 
 	*orgUcred = proc_ucred(proc);
+	if (!*orgUcred) return -1;
 	if (gSystemInfo.kernelStruct.proc_ro.exists) {
 		uint64_t proc_ro = kread_ptr(proc + koffsetof(proc, proc_ro));
 		kwrite64(proc_ro + koffsetof(proc_ro, ucred), ucred);

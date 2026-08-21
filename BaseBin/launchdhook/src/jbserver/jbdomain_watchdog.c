@@ -11,8 +11,11 @@ static bool watchdog_domain_allowed(audit_token_t clientToken)
 {
 	xpc_object_t entitlementValue = xpc_copy_entitlement_for_token("com.apple.private.iowatchdog.user-access", &clientToken);
 	if (entitlementValue && xpc_get_type(entitlementValue) == XPC_TYPE_BOOL) {
-		return xpc_bool_get_value(entitlementValue);
+		bool allowed = xpc_bool_get_value(entitlementValue);
+		xpc_release(entitlementValue);
+		return allowed;
 	}
+	if (entitlementValue) xpc_release(entitlementValue);
 	return false;
 }
 
@@ -27,7 +30,7 @@ static int watchdog_intercept_userspace_panic(const char *panicMessage)
 
 	setenv("WATCHDOG_PANIC_MESSAGE", panicMessage, 1);
 	FILE *touchFile = fopen(JBROOT_PATH("/basebin/.safe_mode"), "w");
-	fclose(touchFile);
+	if (touchFile) fclose(touchFile);
 
 	return 0;
 }
@@ -37,6 +40,7 @@ static int watchdog_get_last_userspace_panic(char **panicMessage)
 	char *messageInEnv = getenv("WATCHDOG_PANIC_MESSAGE");
 	if (messageInEnv) {
 		*panicMessage = strdup(messageInEnv);
+		if (!*panicMessage) return 1;
 		unsetenv("WATCHDOG_PANIC_MESSAGE");
 		return 0;
 	}
