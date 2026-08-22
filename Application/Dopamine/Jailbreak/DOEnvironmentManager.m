@@ -172,7 +172,6 @@ extern char **environ;
 - (void)setJailbroken:(BOOL)jailbroken withVersion:(NSString *)version
 {
     _isJailbroken = jailbroken;
-    if (_isJailbroken) _isJailbroken = version;
 }
 
 - (BOOL)isJailbrokenWithOtherJailbreak
