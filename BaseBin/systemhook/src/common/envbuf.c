@@ -79,10 +79,15 @@ void envbuf_setenv(char **envpp[], const char *name, const char *value)
 		if (!envp) {
 			// treat NULL as [NULL]
 			envp = malloc(sizeof(const char *));
+			if (!envp) return;
 			envp[0] = NULL;
 		}
 
 		char *envToSet = malloc(strlen(name)+strlen(value)+2);
+		if (!envToSet) {
+			if (!*envpp) free(envp);
+			return;
+		}
 		strcpy(envToSet, name);
 		strcat(envToSet, "=");
 		strcat(envToSet, value);
