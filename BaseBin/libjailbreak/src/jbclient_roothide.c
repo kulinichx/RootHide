@@ -60,6 +60,7 @@ bool jbclient_roothide_jailbroken()
 
     xpc_object_t xargs = xpc_dictionary_create_empty();
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBROKEN_CHECK, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		if(result == 0) {
@@ -77,6 +78,7 @@ bool jbclient_palehide_present()
 
     xpc_object_t xargs = xpc_dictionary_create_empty();
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_PALEHIDE_PRESENT, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		if(result == 0) {
@@ -96,6 +98,7 @@ bool jbclient_blacklist_check_pid(pid_t pid)
     xpc_dictionary_set_string(xargs, "checktype", "pid");
     xpc_dictionary_set_uint64(xargs, "checkvalue", pid);
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_BLACKLIST_CHECK, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		if(result == 0) {
@@ -115,6 +118,7 @@ bool jbclient_blacklist_check_path(const char* path)
     xpc_dictionary_set_string(xargs, "checktype", "path");
     xpc_dictionary_set_string(xargs, "checkvalue", path);
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_BLACKLIST_CHECK, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		if(result == 0) {
@@ -134,6 +138,7 @@ bool jbclient_blacklist_check_bundle(const char* bundle)
     xpc_dictionary_set_string(xargs, "checktype", "bundle");
     xpc_dictionary_set_string(xargs, "checkvalue", bundle);
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_BLACKLIST_CHECK, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		if(result == 0) {
@@ -237,6 +242,7 @@ bool jbclient_dyld_patch_enabled()
 	dispatch_once(&onceToken, ^{
 		xpc_object_t xargs = xpc_dictionary_create_empty();
 		xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_DYLD_PATCH_ENABLED_GET, xargs);
+		xpc_release(xargs);
 		if (xreply) {
 			int64_t result = xpc_dictionary_get_int64(xreply, "result");
 			if(result == 0) {
@@ -254,6 +260,7 @@ int jbclient_set_dyld_patch(bool enabled)
     xpc_object_t xargs = xpc_dictionary_create_empty();
 	xpc_dictionary_set_bool(xargs, "enabled", enabled);
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_DYLD_PATCH_ENABLED_SET, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		xpc_release(xreply);
