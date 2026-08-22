@@ -168,6 +168,13 @@ static int roothide_jailbreakd_lookup(audit_token_t *callerToken, xpc_object_t *
     *portOut = xpc_mach_send_create(port);
     return 0;
 }
+static int roothide_jailbreakd_ready(audit_token_t *callerToken, bool *readyOut)
+{
+    if (!readyOut) return -1;
+    *readyOut = jailbreakdHasCheckedIn();
+    return 0;
+}
+
 static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t *portOut)
 {
     if(!callerToken || !portOut) return -1;
@@ -184,6 +191,7 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
     }
 
     setJailbreakdProcess(pid);
+    setJailbreakdCheckedIn(true);
     *portOut = xpc_mach_recv_create(port);
     return 0;
 }
@@ -308,6 +316,15 @@ struct jbserver_domain gRootHideDomain = {
             .args = (jbserver_arg[]) {
                     { .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
                     { .name = "enabled", .type = JBS_TYPE_BOOL, .out = false },
+                    { 0 },
+            },
+        },
+        //JBS_ROOTHIDE_JAILBREAKD_READY
+        {
+            .handler = roothide_jailbreakd_ready,
+            .args = (jbserver_arg[]) {
+                    { .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
+                    { .name = "ready", .type = JBS_TYPE_BOOL, .out = true },
                     { 0 },
             },
         },

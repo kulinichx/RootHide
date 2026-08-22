@@ -134,25 +134,71 @@ int basebin_generate(bool comingFromJBUpdate)
 		carbonCopy(@"/usr/lib/dyld", dyldOrigPath);
 	}
 
-	carbonCopy(dyldOrigPath, dyldInflightPath);
-
-	NSString *dyldUUIDPrefix = [@"DOPA" stringByAppendingString:dopamineVersion];
-	if (apply_dyld_patch(dyldInflightPath, dyldUUIDPrefix.UTF8String) != 0) return 2;
-	if (merge_dyldhook(dyldInflightPath, dyldInflightPath) != 0) return 3;
-	if (resign_file(dyldInflightPath, @"com.apple.dyld", YES) != 0) return 4;
-
-	if (comingFromJBUpdate) {
-		// We cannot delete dyld as this point because it's still in use
-		// If we did this, we'd panic the system
-		// So we will move the past patched dyld to dyld.old to keep the vnode alive
-		// If there is another dyld.old at this point, we will remove it now
-		// since it is guaranteed to not be in use at this point
-		if ([[NSFileManager defaultManager] fileExistsAtPath:dyldOldPath]) {
-			[[NSFileManager defaultManager] removeItemAtPath:dyldOldPath error:nil];
-		}
-		[[NSFileManager defaultManager] moveItemAtPath:dyldPatchedPath toPath:dyldOldPath error:nil];
+	// Build the replacement beside the active dyld first.  Do not touch the
+	// currently active path until all patch/sign operations have completed.
+	if (carbonCopy(dyldOrigPath, dyldInflightPath) != 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:dyldInflightPath error:nil];
+		return 5;
 	}
 
-	[[NSFileManager defaultManager] moveItemAtPath:dyldInflightPath toPath:dyldPatchedPath error:nil];
+	NSString *dyldUUIDPrefix = [@"DOPA" stringByAppendingString:dopamineVersion];
+	if (apply_dyld_patch(dyldInflightPath, dyldUUIDPrefix.UTF8String) != 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:dyldInflightPath error:nil];
+		return 2;
+	}
+	if (merge_dyldhook(dyldInflightPath, dyldInflightPath) != 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:dyldInflightPath error:nil];
+		return 3;
+	}
+	if (resign_file(dyldInflightPath, @"com.apple.dyld", YES) != 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:dyldInflightPath error:nil];
+		return 4;
+	}
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSError *fsError = nil;
+	if (comingFromJBUpdate) {
+		// We cannot delete the active patched dyld because its vnode may still be
+		// in use.  Keep it as dyld.old until the replacement is fully installed.
+		if ([fm fileExistsAtPath:dyldOldPath]) {
+			if (![fm removeItemAtPath:dyldOldPath error:&fsError]) {
+				printf("Error: Failed removing previous dyld.old: %s\n", fsError ? fsError.localizedDescription.UTF8String : "unknown error");
+				[fm removeItemAtPath:dyldInflightPath error:nil];
+				return 6;
+			}
+		}
+
+		fsError = nil;
+		if (![fm moveItemAtPath:dyldPatchedPath toPath:dyldOldPath error:&fsError]) {
+			printf("Error: Failed preserving active patched dyld: %s\n", fsError ? fsError.localizedDescription.UTF8String : "unknown error");
+			[fm removeItemAtPath:dyldInflightPath error:nil];
+			return 7;
+		}
+
+		fsError = nil;
+		if (![fm moveItemAtPath:dyldInflightPath toPath:dyldPatchedPath error:&fsError]) {
+			printf("Error: Failed installing replacement patched dyld: %s\n", fsError ? fsError.localizedDescription.UTF8String : "unknown error");
+
+			// Best-effort rollback.  The old vnode remains valid across rename, and
+			// restoring its path prevents .fakelib/dyld from becoming dangling.
+			NSError *rollbackError = nil;
+			if ([fm moveItemAtPath:dyldOldPath toPath:dyldPatchedPath error:&rollbackError]) {
+				[fm removeItemAtPath:dyldInflightPath error:nil];
+				return 8;
+			}
+
+			printf("Error: Failed rolling back patched dyld: %s\n", rollbackError ? rollbackError.localizedDescription.UTF8String : "unknown error");
+			return 9;
+		}
+	}
+	else {
+		fsError = nil;
+		if (![fm moveItemAtPath:dyldInflightPath toPath:dyldPatchedPath error:&fsError]) {
+			printf("Error: Failed installing patched dyld: %s\n", fsError ? fsError.localizedDescription.UTF8String : "unknown error");
+			[fm removeItemAtPath:dyldInflightPath error:nil];
+			return 10;
+		}
+	}
+
 	return 0;
 }

@@ -7,6 +7,7 @@
 #include <mach/mach.h>
 #include <bsm/libbsm.h>
 #include <sys/param.h>
+#include <stdatomic.h>
 
 #include "../libjailbreak.h"
 #include "jailbreakd.h"
@@ -33,6 +34,7 @@ int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr,
 
 static bool __firstLoad = false;
 static bool __jailbreakd_initialized = false;
+static atomic_bool __jailbreakd_checked_in = false;
 mach_port_t gJailbreakdPort = MACH_PORT_NULL;
 
 #define JAILBREAKD_CLIENT_PORT_FAST_GET
@@ -91,6 +93,17 @@ mach_port_t jailbreakdClientPortFastGet()
 }
 #endif
 
+
+void setJailbreakdCheckedIn(bool checkedIn)
+{
+	atomic_store_explicit(&__jailbreakd_checked_in, checkedIn, memory_order_release);
+}
+
+bool jailbreakdHasCheckedIn(void)
+{
+	return atomic_load_explicit(&__jailbreakd_checked_in, memory_order_acquire);
+}
+
 void setJailbreakdProcess(pid_t pid)
 {
 	//Reclaim the previous jailbreakd zombie process
@@ -148,6 +161,8 @@ int spawnJailbreakd()
 		});
 		dispatch_resume(source);
 	});
+
+	setJailbreakdCheckedIn(false);
 
 	pid_t pid;
 	posix_spawnattr_t attr = NULL;

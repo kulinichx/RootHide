@@ -54,6 +54,21 @@ mach_port_t jbclient_jailbreakd_checkin()
 	return port;
 }
 
+
+bool jbclient_jailbreakd_ready(void)
+{
+	bool ready = false;
+	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_READY, NULL);
+	if (xreply) {
+		int64_t result = xpc_dictionary_get_int64(xreply, "result");
+		if (result == 0) {
+			ready = xpc_dictionary_get_bool(xreply, "ready");
+		}
+		xpc_release(xreply);
+	}
+	return ready;
+}
+
 bool jbclient_roothide_jailbroken()
 {
 	bool jailbroken = false;

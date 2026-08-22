@@ -19,6 +19,8 @@ void enableJBDLog(void* debugLog, void* errorLog);
 int initJailbreakd(bool firstLoad);
 
 void setJailbreakdProcess(pid_t pid);
+void setJailbreakdCheckedIn(bool checkedIn);
+bool jailbreakdHasCheckedIn(void);
 
 mach_port_t jailbreakdClientPort();
 mach_port_t jailbreakdServerPort();
