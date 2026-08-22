@@ -18,6 +18,7 @@
 #include <libjailbreak/hookd.h>
 #include <libkern/OSCacheControl.h>
 #include <os/log.h>
+#include <os/lock.h>
 
 // RootHide dynamic policy lives in domain 6; jbclient_roothide.c is linked into systemhook.
 extern bool jbclient_blacklist_check_path(const char *path);
@@ -103,24 +104,44 @@ xpc_object_t xpc_object_from_plist(const char *path)
 
 xpc_object_t jbuserconfig_get_value(const char *key)
 {
+	static os_unfair_lock configLock = OS_UNFAIR_LOCK_INIT;
+	static xpc_object_t configDict = NULL;
+	static struct timespec lastConfigWrite = { .tv_sec = 0, .tv_nsec = 0 };
+
 	const char *configPath = JBROOT_PATH("/basebin/config.plist");
-	if (!access(configPath, R_OK)) {
-		static xpc_object_t configDict = NULL;
-		static struct timespec lastConfigWrite = { .tv_sec=0, .tv_nsec = 0 };
-
-		struct stat configStat;
-		if (stat(configPath, &configStat) == 0) {
-			if (timespec_compare(&configStat.st_mtimespec, &lastConfigWrite) > 0) {
-				lastConfigWrite = configStat.st_mtimespec;
-				if (configDict) xpc_release(configDict);
-				configDict = xpc_object_from_plist(configPath);
-			}
-		}
-
-		return xpc_dictionary_get_value(configDict, key);
+	if (access(configPath, R_OK) != 0) {
+		return NULL;
 	}
 
-	return NULL;
+	xpc_object_t value = NULL;
+
+	os_unfair_lock_lock(&configLock);
+
+	struct stat configStat;
+	if (stat(configPath, &configStat) == 0) {
+		if (timespec_compare(&configStat.st_mtimespec, &lastConfigWrite) > 0) {
+			xpc_object_t newConfigDict = xpc_object_from_plist(configPath);
+			if (newConfigDict) {
+				if (configDict) {
+					xpc_release(configDict);
+				}
+
+				configDict = newConfigDict;
+				lastConfigWrite = configStat.st_mtimespec;
+			}
+		}
+	}
+
+	if (configDict && xpc_get_type(configDict) == XPC_TYPE_DICTIONARY) {
+		value = xpc_dictionary_get_value(configDict, key);
+		if (value) {
+			xpc_retain(value);
+		}
+	}
+
+	os_unfair_lock_unlock(&configLock);
+
+	return value;
 }
 
 static bool is_apt_helper_path(const char *path)
@@ -162,10 +183,24 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 	}
 
 	xpc_object_t userBlacklist = jbuserconfig_get_value("ProcessBlacklist");
-	if (userBlacklist && xpc_get_type(userBlacklist) == XPC_TYPE_ARRAY) {
-		size_t userBlacklistCount = xpc_array_get_count(userBlacklist);
-		for (size_t i = 0; i < userBlacklistCount; i++) {
-			if (!strcmp(xpc_array_get_string(userBlacklist, i), path)) return kSpawnConfigTrust;
+	if (userBlacklist) {
+		bool userBlacklisted = false;
+
+		if (xpc_get_type(userBlacklist) == XPC_TYPE_ARRAY) {
+			size_t userBlacklistCount = xpc_array_get_count(userBlacklist);
+			for (size_t i = 0; i < userBlacklistCount; i++) {
+				const char *blacklistedPath = xpc_array_get_string(userBlacklist, i);
+				if (blacklistedPath && !strcmp(blacklistedPath, path)) {
+					userBlacklisted = true;
+					break;
+				}
+			}
+		}
+
+		xpc_release(userBlacklist);
+
+		if (userBlacklisted) {
+			return kSpawnConfigTrust;
 		}
 	}
 
