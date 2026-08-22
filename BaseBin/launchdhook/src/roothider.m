@@ -190,38 +190,78 @@ void roothide_launchd_postinit(bool firstLoad)
 
 #include <dlfcn.h>
 #include <IOKit/IOKitLib.h>
-void fix__iosConnect()
+
+// MSFindSymbol/ElleKit walks the shared cache and may take internal locks.
+// Resolve the private IOSurface globals once during launchd initialization,
+// before the posix_spawn hook is installed, rather than lazily from
+// launchd's spawn queue.
+static io_service_t* gIOSurfaceService = NULL;
+static io_connect_t* gIOSurfaceConnect = NULL;
+
+void roothide_launchd_prepare_iosurface_fix(void)
 {
     MSImageRef IOSurfaceImage = MSGetImageByName("/System/Library/Frameworks/IOSurface.framework/IOSurface");
     JBLogDebug("IOSurfaceImage=%p\n", IOSurfaceImage);
-    assert(IOSurfaceImage != NULL);
+    if (!IOSurfaceImage) {
+        JBLogError("IOSurface image unavailable; IOSurface connection fix disabled");
+        return;
+    }
 
-    io_service_t* __iosService = MSFindSymbol(IOSurfaceImage, "__iosService");
-    io_connect_t* __iosConnect = MSFindSymbol(IOSurfaceImage, "__iosConnect");
-    assert(__iosService != NULL && __iosConnect != NULL);
+    io_service_t* iosService = MSFindSymbol(IOSurfaceImage, "__iosService");
+    io_connect_t* iosConnect = MSFindSymbol(IOSurfaceImage, "__iosConnect");
+    if (!iosService || !iosConnect) {
+        JBLogError("IOSurface private symbols unavailable; IOSurface connection fix disabled");
+        return;
+    }
 
-    JBLogDebug("__iosService=%p __iosConnect=%p\n", __iosService, __iosConnect);
-    JBLogDebug("*__iosService=%d *__iosConnect=%d\n", *__iosService, *__iosConnect);
+    gIOSurfaceService = iosService;
+    gIOSurfaceConnect = iosConnect;
+    JBLogDebug("prepared __iosService=%p __iosConnect=%p\n", gIOSurfaceService, gIOSurfaceConnect);
+}
+
+void fix__iosConnect()
+{
+    if (!gIOSurfaceService || !gIOSurfaceConnect) {
+        JBLogError("IOSurface connection fix was not prepared; skipping");
+        return;
+    }
+
+    JBLogDebug("__iosService=%p __iosConnect=%p\n", gIOSurfaceService, gIOSurfaceConnect);
+    JBLogDebug("*__iosService=%d *__iosConnect=%d\n", *gIOSurfaceService, *gIOSurfaceConnect);
 
     kern_return_t (*IOServiceClose)(io_connect_t connect);
     kern_return_t (*IOServiceOpen)(io_service_t service, task_port_t owningTask, uint32_t type, io_connect_t* connect);
 
     *(void **)&IOServiceOpen = dlsym(RTLD_DEFAULT, "IOServiceOpen");
     *(void **)&IOServiceClose = dlsym(RTLD_DEFAULT, "IOServiceClose");
-    assert(IOServiceOpen != NULL && IOServiceClose != NULL);
-    
-    io_connect_t old__iosConnect = *__iosConnect;
+    if (!IOServiceOpen || !IOServiceClose) {
+        JBLogError("IOServiceOpen/IOServiceClose unavailable; IOSurface connection fix skipped");
+        return;
+    }
 
-    if(old__iosConnect) {
+    io_connect_t oldIOSConnect = *gIOSurfaceConnect;
+    if (!oldIOSConnect) {
+        return;
+    }
 
-        assert(*__iosService != 0);
+    if (*gIOSurfaceService == 0) {
+        JBLogError("__iosService is zero; IOSurface connection fix skipped");
+        return;
+    }
 
-        kern_return_t kr = IOServiceOpen(*__iosService, mach_task_self(), 0, __iosConnect);
-        JBLogDebug("IOServiceOpen kr=%x, new iosConnect=%d\n", kr, *__iosConnect);
-        assert(kr == KERN_SUCCESS);
+    io_connect_t newIOSConnect = MACH_PORT_NULL;
+    kern_return_t kr = IOServiceOpen(*gIOSurfaceService, mach_task_self(), 0, &newIOSConnect);
+    JBLogDebug("IOServiceOpen kr=%x, new iosConnect=%d\n", kr, newIOSConnect);
+    if (kr != KERN_SUCCESS || newIOSConnect == MACH_PORT_NULL) {
+        JBLogError("IOServiceOpen failed: %x", kr);
+        return;
+    }
 
-        kr = IOServiceClose(old__iosConnect);
-        assert(kr == KERN_SUCCESS);
+    *gIOSurfaceConnect = newIOSConnect;
+
+    kr = IOServiceClose(oldIOSConnect);
+    if (kr != KERN_SUCCESS) {
+        JBLogError("IOServiceClose old IOSurface connection failed: %x", kr);
     }
 }
 

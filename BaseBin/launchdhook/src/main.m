@@ -28,6 +28,7 @@ bool gInEarlyBoot = true;
 #define abort_with_reason(reason_namespace,reason_code,reason_string,reason_flags)  launchd_panic("%s",reason_string)
 void roothide_launchd_preinit();
 void roothide_launchd_postinit(bool firstLoad);
+void roothide_launchd_prepare_iosurface_fix(void);
 bool roothide_is_ios16_or_newer(void);
 
 extern void systemwide_domain_set_enabled(bool enabled);
@@ -151,6 +152,7 @@ __attribute__((constructor)) static void initializer(void)
 
 	initXPCHooks();
 	initDaemonHooks();
+	roothide_launchd_prepare_iosurface_fix();
 	initSpawnHooks();
 	initIPCHooks();
 	initJetsamHook();
