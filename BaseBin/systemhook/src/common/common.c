@@ -92,9 +92,8 @@ xpc_object_t xpc_object_from_plist(const char *path)
 		}
 		size_t len = s.st_size;
 		void *addr = mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, ldFd, 0);
+		close(ldFd);
 		if (addr != MAP_FAILED) {
-			close(ldFd);
-
 			xObj = xpc_create_from_plist(addr, len);
 			munmap(addr, len);
 		}
