@@ -30,19 +30,13 @@ endif
 	mkdir -p build/Build/Products/Debug-iphoneos/Dopamine.app/Base.lproj
 	cp -a Dopamine/Prebuilt/Base.lproj/LaunchScreen.storyboardc build/Build/Products/Debug-iphoneos/Dopamine.app/Base.lproj/
 	cp -a Dopamine/Resources/*.deb build/Build/Products/Debug-iphoneos/Dopamine.app/
-# ifeq ($(PALEHIDE), 1)
-	THEOS="$(CURDIR)/../theos" make -C Dopamine/Exploits/palera1n package
-	rm -rf build/Build/Products/Debug-iphoneos/Dopamine.app/Frameworks/palera1n.framework
-	cp -a Dopamine/Exploits/palera1n/.framework build/Build/Products/Debug-iphoneos/Dopamine.app/Frameworks/palera1n.framework
 	for framework in ClearSword DarkSword Titan momentarius; do \
 		rm -rf build/Build/Products/Debug-iphoneos/Dopamine.app/Frameworks/$$framework.framework; \
 		cp -a Dopamine/Prebuilt/Frameworks/$$framework.framework build/Build/Products/Debug-iphoneos/Dopamine.app/Frameworks/; \
 	done
-# endif
 
 
 clean:
-	make -C Dopamine/Exploits/palera1n clean
 	rm -rf build Payload Dopamine.ipa Dopamine.tipa
 
 build_clean:
