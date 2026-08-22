@@ -58,12 +58,13 @@ bool string_has_suffix(const char* str, const char* suffix)
 void string_enumerate_components(const char *string, const char *separator, void (^enumBlock)(const char *pathString, bool *stop))
 {
 	char *stringCopy = strdup(string);
-	char *curString = strtok(stringCopy, separator);
+	char *savePtr = NULL;
+	char *curString = strtok_r(stringCopy, separator, &savePtr);
 	while (curString != NULL) {
 		bool stop = false;
 		enumBlock(curString, &stop);
 		if (stop) break;
-		curString = strtok(NULL, separator);
+		curString = strtok_r(NULL, separator, &savePtr);
 	}
 	free(stringCopy);
 }
