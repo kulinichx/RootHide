@@ -151,7 +151,10 @@ int spawnJailbreakd()
 
 	pid_t pid;
 	posix_spawnattr_t attr = NULL;
-	posix_spawnattr_init(&attr);
+	int attrResult = posix_spawnattr_init(&attr);
+	if (attrResult != 0) {
+		return attrResult;
+	}
 	// posix_spawnattr_setspecialport_np(&attr, bootstraport, TASK_BOOTSTRAP_PORT);
 	// posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ bootstraport, MACH_PORT_NULL }, 3);
 	posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstraport }, 3);
