@@ -715,7 +715,10 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
 {
     posix_spawnattr_t attr = NULL;
     if(!attrp) {
-        posix_spawnattr_init(&attr);
+        int attrResult = posix_spawnattr_init(&attr);
+        if (attrResult != 0) {
+            return attrResult;
+        }
         attrp = &attr;
     }
 
