@@ -785,7 +785,10 @@ int jbctl_earlyboot(mach_port_t earlyBootServer, ...)
 	argsArr[argc] = NULL;
 
 	posix_spawnattr_t attr;
-	posix_spawnattr_init(&attr);
+	int attrResult = posix_spawnattr_init(&attr);
+	if (attrResult != 0) {
+		return attrResult;
+	}
 	posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){earlyBootServer, MACH_PORT_NULL, MACH_PORT_NULL}, 3);
 	pid_t spawnedPid = 0;
 	int r = posix_spawn(&spawnedPid, jbctlPath, NULL, &attr, (char *const *)argsArr, NULL);
