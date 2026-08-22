@@ -1,4 +1,5 @@
 #include "common.h"
+#include "../roothider.h"
 #include <xpc/xpc.h>
 #include <xpc_private.h>
 #include <mach-o/dyld.h>
@@ -134,7 +135,11 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 	// RootHide dynamic blacklist is stronger than the normal Dopamine policy:
 	// no trust, no systemhook injection, and no tweak propagation. Returning 0
 	// also makes spawn_exec_hook_common strip any inherited jailbreak env.
-	if (path && jbclient_blacklist_check_path(path)) {
+	// RootHide app blacklist can only match executables inside a normal
+	// removable app container. Avoid a synchronous domain-6 XPC round trip
+	// for system daemons/helpers; keep the authoritative server-side check
+	// for app-container paths so RootHide Manager changes remain dynamic.
+	if (path && isRemovableBundlePath(path) && jbclient_blacklist_check_path(path)) {
 		return 0;
 	}
 
