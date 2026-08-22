@@ -18,7 +18,10 @@ int hookd_start(pid_t *pid, mach_port_t *machPort)
 	mach_port_insert_right(mach_task_self(), checkinPort, checkinPort, MACH_MSG_TYPE_MAKE_SEND);
 
 	posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
+    int attrResult = posix_spawnattr_init(&attr);
+    if (attrResult != 0) {
+        return attrResult;
+    }
     posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){MACH_PORT_NULL, MACH_PORT_NULL, checkinPort}, 3);
 
 	const char *envp[] = {
@@ -28,6 +31,7 @@ int hookd_start(pid_t *pid, mach_port_t *machPort)
 
 	const char *path = JBROOT_PATH("/basebin/hookd");
 	int r = posix_spawn(pid, path, NULL, &attr, (char *[]){ (char *)path, NULL }, (char *const *)envp);
+	posix_spawnattr_destroy(&attr);
 	if (r != 0) {
 		return r;
 	}
