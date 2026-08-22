@@ -96,8 +96,14 @@ void envbuf_setenv(char **envpp[], const char *name, const char *value)
 		else {
 			// if doesn't exist yet: increase env buffer size, place at end
 			int prevLen = envbuf_len((const char **)envp);
-			*envpp = realloc(envp, (prevLen+1)*sizeof(const char *));
-			envp = *envpp;
+			char **newEnvp = realloc(envp, (prevLen+1)*sizeof(const char *));
+			if (!newEnvp) {
+				free(envToSet);
+				if (!*envpp) free(envp);
+				return;
+			}
+			*envpp = newEnvp;
+			envp = newEnvp;
 			envp[prevLen-1] = envToSet;
 			envp[prevLen] = NULL;
 		}
@@ -117,7 +123,8 @@ void envbuf_unsetenv(char **envpp[], const char *name)
 			for (int i = existingEnvIndex; i < (prevLen-1); i++) {
 				envp[i] = envp[i+1];
 			}
-			*envpp = realloc(envp, (prevLen-1)*sizeof(const char *));
+			char **newEnvp = realloc(envp, (prevLen-1)*sizeof(const char *));
+			if (newEnvp) *envpp = newEnvp;
 		}
 	}
 }
