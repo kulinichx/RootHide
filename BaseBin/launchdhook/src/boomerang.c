@@ -40,11 +40,14 @@ void boomerang_stashPrimitives()
 	// Spawn boomerang process
 	pid_t boomerangPid = 0;
 	posix_spawnattr_t attr = NULL;
-	posix_spawnattr_init(&attr);
+	int attrResult = posix_spawnattr_init(&attr);
+	if (attrResult != 0) {
+		return;
+	}
 	posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, serverPort }, 3);
 	int ret = posix_spawn(&boomerangPid, JBROOT_PATH("/basebin/boomerang"), NULL, &attr, NULL, NULL);
-	if (ret != 0) return;
 	posix_spawnattr_destroy(&attr);
+	if (ret != 0) return;
 
 	// Wait for boomerang to retrieve the primitives from launchd (handled in server above)
 	dispatch_semaphore_wait(boomerangDone, DISPATCH_TIME_FOREVER);
