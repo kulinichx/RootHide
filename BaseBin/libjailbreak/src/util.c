@@ -662,7 +662,10 @@ int __exec_cmd_internal_va(bool suspended, bool root, bool waitForExit, pid_t *p
 	argv[argc] = NULL;
 
 	posix_spawnattr_t attr = NULL;
-	posix_spawnattr_init(&attr);
+	int attrResult = posix_spawnattr_init(&attr);
+	if (attrResult != 0) {
+		return attrResult;
+	}
 	if (suspended) {
 		posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
 	}
