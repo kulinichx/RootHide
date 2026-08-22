@@ -619,18 +619,6 @@ kern_return_t bootstrap_look_up(mach_port_t port, const char *service, mach_port
 
 bool otherJailbreakActived(bool postexploit)
 {
-    if(!postexploit)
-    {
-        // // may be palehide
-        // uint32_t csflags = 0;
-        // csops(getpid(), CS_OPS_STATUS, &csflags, sizeof(csflags));
-        // if((csflags & CS_PLATFORM_BINARY) != 0) {
-        //     if(!builtint_palehide_test()) {
-        //         return true; // rootless dopamine 2.x
-        //     }
-        // }
-    }
-
     if(!jbclient_roothide_jailbroken())
     {
         // it works even rootless dopamine 2.x is hidden
