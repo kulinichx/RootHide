@@ -78,7 +78,11 @@ int main(int argc, char* argv[])
 	
 			pid_t pid;
 			posix_spawnattr_t attr = NULL;
-			posix_spawnattr_init(&attr);
+			int attrError = posix_spawnattr_init(&attr);
+			if(attrError != 0) {
+				JBLogError("posix_spawnattr_init jailbreakd failed: %d, %s", attrError, strerror(attrError));
+				return 4;
+			}
 			posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
 			// posix_spawnattr_setspecialport_np(&attr, bootstraport, TASK_BOOTSTRAP_PORT);
 			// posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ bootstraport, MACH_PORT_NULL }, 3);

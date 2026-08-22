@@ -403,15 +403,18 @@ void *boomerang_server(struct boomerang_info *info)
     // Stash port to server in launchd's initPorts[2]
     // Since we don't have the neccessary entitlements, we need to do it over jbctl
     posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
+    int attrError = posix_spawnattr_init(&attr);
+    if (attrError != 0) {
+        return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLaunchdInjection userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Initializing spawn attributes failed with error code %d", attrError]}];
+    }
     posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){MACH_PORT_NULL, MACH_PORT_NULL, serverPort}, 3);
     pid_t spawnedPid = 0;
     const char *jbctlPath = JBROOT_PATH("/basebin/jbctl");
     int spawnError = posix_spawn(&spawnedPid, jbctlPath, NULL, &attr, (char *const *)(const char *[]){ jbctlPath, "internal", "launchd_stash_port", NULL }, NULL);
+    posix_spawnattr_destroy(&attr);
     if (spawnError != 0) {
         return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLaunchdInjection userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Spawning jbctl failed with error code %d", spawnError]}];
     }
-    posix_spawnattr_destroy(&attr);
     int status = 0;
     do {
         if (waitpid(spawnedPid, &status, 0) == -1) {
