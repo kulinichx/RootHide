@@ -508,21 +508,6 @@ void roothide_init_with_executable(const char* executable)
 		}
 	}
 
-#ifndef __arm64e__
-	if(strcmp(executable, "/System/Library/Frameworks/LocalAuthentication.framework/Support/coreauthd")==0
-	|| strcmp(executable, "/System/Library/Frameworks/CryptoTokenKit.framework/ctkd")==0
-	|| strcmp(executable, "/usr/libexec/securityd")==0
-	|| strcmp(executable, "/usr/libexec/keybagd")==0) {
-		if(jbclient_palehide_present())
-		{
-			void* roothidehooks = dlopen(JBROOT_PATH("/basebin/roothidehooks.dylib"), RTLD_NOW);
-			ASSERT(roothidehooks != NULL);
-			void (*palera1n)() = dlsym(roothidehooks, "palera1n");
-			palera1n();
-		}
-	}
-#endif
-
 	if(string_has_suffix(executable, "/Dopamine.app/Dopamine")) {
 		loadPathHook(); //requre jit
 	}

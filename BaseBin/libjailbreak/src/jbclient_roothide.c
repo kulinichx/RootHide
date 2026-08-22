@@ -72,24 +72,6 @@ bool jbclient_roothide_jailbroken()
 	return jailbroken;
 }
 
-bool jbclient_palehide_present()
-{
-	bool palehide = false;
-
-    xpc_object_t xargs = xpc_dictionary_create_empty();
-	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_PALEHIDE_PRESENT, xargs);
-	xpc_release(xargs);
-	if (xreply) {
-		int64_t result = xpc_dictionary_get_int64(xreply, "result");
-		if(result == 0) {
-			palehide = xpc_dictionary_get_bool(xreply, "palehide");
-		}
-		xpc_release(xreply);
-	}
-
-	return palehide;
-}
-
 bool jbclient_blacklist_check_pid(pid_t pid)
 {
 	bool blacklisted = false;

@@ -43,7 +43,6 @@ int jbclient_boomerang_done(void);
 
 
 /*********** roothide specfic **********/
-bool jbclient_palehide_present();
 bool jbclient_roothide_jailbroken();
 mach_port_t jbclient_jailbreakd_lookup();
 mach_port_t jbclient_jailbreakd_checkin();
