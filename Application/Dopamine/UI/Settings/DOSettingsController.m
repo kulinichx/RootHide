@@ -353,23 +353,25 @@
                     }
 */
                     
-                    PSSpecifier *removeJailbreakSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                    [removeJailbreakSpecifier setProperty:@"Button_Remove_Jailbreak" forKey:@"title"];
-                    [removeJailbreakSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                    [removeJailbreakSpecifier setProperty:buttonHeight forKey:@"height"];
-                    [removeJailbreakSpecifier setProperty:@"trash" forKey:@"image"];
-                    [removeJailbreakSpecifier setProperty:@"removeJailbreakPressed" forKey:@"action"];
+                    if (!envManager.isJailbroken && envManager.isInstalledThroughTrollStore) {
+                        PSSpecifier *removeJailbreakSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                        [removeJailbreakSpecifier setProperty:@"Button_Remove_Jailbreak" forKey:@"title"];
+                        [removeJailbreakSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                        [removeJailbreakSpecifier setProperty:buttonHeight forKey:@"height"];
+                        [removeJailbreakSpecifier setProperty:@"trash" forKey:@"image"];
+                        [removeJailbreakSpecifier setProperty:@"removeJailbreakPressed" forKey:@"action"];
 /*
-                    if (hideJailbreakButtonShown) {
-                        if (envManager.isJailbroken) {
-                            [removeJailbreakSpecifier setProperty:DOLocalizedString(@"Hint_Hide_Jailbreak_Jailbroken") forKey:@"footerText"];
+                        if (hideJailbreakButtonShown) {
+                            if (envManager.isJailbroken) {
+                                [removeJailbreakSpecifier setProperty:DOLocalizedString(@"Hint_Hide_Jailbreak_Jailbroken") forKey:@"footerText"];
+                            }
+                            else {
+                                [removeJailbreakSpecifier setProperty:DOLocalizedString(@"Hint_Hide_Jailbreak") forKey:@"footerText"];
+                            }
                         }
-                        else {
-                            [removeJailbreakSpecifier setProperty:DOLocalizedString(@"Hint_Hide_Jailbreak") forKey:@"footerText"];
-                        }
-                    }
 */
-                    [specifiers addObject:removeJailbreakSpecifier];
+                        [specifiers addObject:removeJailbreakSpecifier];
+                    }
                 }
             }
         }
