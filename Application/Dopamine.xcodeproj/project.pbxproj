@@ -59,7 +59,6 @@
 		8C029F6B2B4E320E0071DE58 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 8C029F6A2B4E320E0071DE58 /* libz.tbd */; };
 		8C05B00F2B631532001A7CF3 /* libjailbreak.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 8CDD08422B4F6DD800A32B61 /* libjailbreak.dylib */; platformFilter = ios; };
 		8C05B0142B6315DB001A7CF3 /* badRecovery.m in Sources */ = {isa = PBXBuildFile; fileRef = 8C05B0132B6315DB001A7CF3 /* badRecovery.m */; };
-		8C05B0152B631738001A7CF3 /* badRecovery.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8C05B0032B63152B001A7CF3 /* badRecovery.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8C05B0182B632925001A7CF3 /* badRecovery.s in Sources */ = {isa = PBXBuildFile; fileRef = 8C05B0172B632925001A7CF3 /* badRecovery.s */; };
 		8C05C59F2B75A1770097A931 /* bootstrap_1800.tar.zst in Resources */ = {isa = PBXBuildFile; fileRef = 8C05C59E2B759F8A0097A931 /* bootstrap_1800.tar.zst */; };
 		8C05C5A02B75A17A0097A931 /* bootstrap_1900.tar.zst in Resources */ = {isa = PBXBuildFile; fileRef = 8C05C59D2B759F8A0097A931 /* bootstrap_1900.tar.zst */; };
@@ -107,9 +106,7 @@
 		8C56D4CD2B7C118B001C03D3 /* LICENSE_kfd.md in Resources */ = {isa = PBXBuildFile; fileRef = 8C56D4CC2B7C118B001C03D3 /* LICENSE_kfd.md */; };
 		8C58E5592B7EAF8000E3ADAA /* CoreServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8C58E5582B7EAF8000E3ADAA /* CoreServices.framework */; };
 		8C5FA8D72BDD36B6008C246F /* weightBufs.h in Headers */ = {isa = PBXBuildFile; fileRef = 8C5FA8D62BDD36B6008C246F /* weightBufs.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		8C5FA8DB2BDD36B6008C246F /* weightBufs.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8C5FA8D42BDD36B6008C246F /* weightBufs.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8C5FA8E72BDD36BF008C246F /* multicast_bytecopy.h in Headers */ = {isa = PBXBuildFile; fileRef = 8C5FA8E62BDD36BF008C246F /* multicast_bytecopy.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		8C5FA8EB2BDD36BF008C246F /* multicast_bytecopy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8C5FA8E42BDD36BF008C246F /* multicast_bytecopy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8C5FA8F22BDD439A008C246F /* weightBufs.m in Sources */ = {isa = PBXBuildFile; fileRef = 8C5FA8F12BDD439A008C246F /* weightBufs.m */; };
 		8C5FA8F62BDD4480008C246F /* multicast_bytecopy.m in Sources */ = {isa = PBXBuildFile; fileRef = 8C5FA8F32BDD43A9008C246F /* multicast_bytecopy.m */; };
 		8C5FA91A2BDD47D5008C246F /* iokit.h in Headers */ = {isa = PBXBuildFile; fileRef = 8C5FA8F82BDD47D4008C246F /* iokit.h */; };
@@ -205,33 +202,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		8C05B0072B63152B001A7CF3 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8C71980D2ABF0E82003C6658 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 8C05B0022B63152B001A7CF3;
-			remoteInfo = badRecovery;
-		};
 		8C2B1FE32B532374009BA166 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 8C71980D2ABF0E82003C6658 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 8C2B1FDE2B532374009BA166;
 			remoteInfo = dmaFail;
-		};
-		8C5FA8D82BDD36B6008C246F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8C71980D2ABF0E82003C6658 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 8C5FA8D32BDD36B6008C246F;
-			remoteInfo = weightBufs;
-		};
-		8C5FA8E82BDD36BF008C246F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8C71980D2ABF0E82003C6658 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 8C5FA8E32BDD36BF008C246F;
-			remoteInfo = multicast_bytecopy;
 		};
 		8CDD07AB2B4F619000A32B61 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -1336,9 +1312,6 @@
 			dependencies = (
 				8CDD07AC2B4F619000A32B61 /* PBXTargetDependency */,
 				8C2B1FE42B532374009BA166 /* PBXTargetDependency */,
-				8C05B0082B63152B001A7CF3 /* PBXTargetDependency */,
-				8C5FA8D92BDD36B6008C246F /* PBXTargetDependency */,
-				8C5FA8E92BDD36BF008C246F /* PBXTargetDependency */,
 			);
 			name = Dopamine;
 			packageProductDependencies = (
@@ -1735,25 +1708,10 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		8C05B0082B63152B001A7CF3 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 8C05B0022B63152B001A7CF3 /* badRecovery */;
-			targetProxy = 8C05B0072B63152B001A7CF3 /* PBXContainerItemProxy */;
-		};
 		8C2B1FE42B532374009BA166 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 8C2B1FDE2B532374009BA166 /* dmaFail */;
 			targetProxy = 8C2B1FE32B532374009BA166 /* PBXContainerItemProxy */;
-		};
-		8C5FA8D92BDD36B6008C246F /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 8C5FA8D32BDD36B6008C246F /* weightBufs */;
-			targetProxy = 8C5FA8D82BDD36B6008C246F /* PBXContainerItemProxy */;
-		};
-		8C5FA8E92BDD36BF008C246F /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 8C5FA8E32BDD36BF008C246F /* multicast_bytecopy */;
-			targetProxy = 8C5FA8E82BDD36BF008C246F /* PBXContainerItemProxy */;
 		};
 		8CDD07AC2B4F619000A32B61 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
