@@ -262,11 +262,8 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				8C5FA8DB2BDD36B6008C246F /* weightBufs.framework in Embed Frameworks */,
 				8CDD07AF2B4F619000A32B61 /* kfd.framework in Embed Frameworks */,
 				8C2B1FF42B53492B009BA166 /* dmaFail.framework in Embed Frameworks */,
-				8C5FA8EB2BDD36BF008C246F /* multicast_bytecopy.framework in Embed Frameworks */,
-				8C05B0152B631738001A7CF3 /* badRecovery.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1507,7 +1504,6 @@
 				8C56D4CA2B7C102B001C03D3 /* LICENSE_Procursus.md in Resources */,
 				8CCD2FC42B77AAA000F9C5DA /* basebin-link.deb in Resources */,
 				8C05C5A02B75A17A0097A931 /* bootstrap_1900.tar.zst in Resources */,
-				8C05C59F2B75A1770097A931 /* bootstrap_1800.tar.zst in Resources */,
 				042479A42B66916B0082581B /* Credits.plist in Resources */,
 				8C2875212BD850B4008B24DA /* LICENSE_libgrabkernel2.md in Resources */,
 				8C512B912B5C9F9100C6F14A /* sileo.deb in Resources */,

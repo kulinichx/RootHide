@@ -100,7 +100,8 @@ basebin.tc: subprojects
 # dyldhook dylibs do not need to be added to the basebin trustcache
 dyldhook: basebin.tc
 	$(MAKE) -C dyldhook
-	@cp dyldhook/*.dylib .build
+	@cp dyldhook/dyldhook_merge.arm64.dylib .build
+	@cp dyldhook/dyldhook_merge.arm64e.dylib .build
 
 basebin.tar: basebin.tc dyldhook
 	@find ./.build -name ".DS_Store" -delete
