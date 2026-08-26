@@ -288,7 +288,7 @@
         restartIconOpticalScale = 1.04;
     }
     else if ([imageName isEqualToString:@"arrow.clockwise.circle"]) {
-        restartIconOpticalScale = 0.92;
+        restartIconOpticalScale = 1.06;
     }
     else if ([imageName isEqualToString:@"power"]) {
         restartIconOpticalScale = 0.96;
@@ -420,13 +420,13 @@
     CGFloat mainSpacing = compactLayout ? 8.0 : 12.0;
     CGFloat topInset = isPad ? 24.0 : (compactLayout ? 6.0 : 10.0);
     CGFloat horizontalInset = compactLayout ? 20.0 : 25.0;
-    CGFloat headerToProfileSpacing = isPad ? 34.0 : (compactLayout ? 14.0 : 18.0);
-    CGFloat logoHeight = isPad ? 49.0 : (compactLayout ? 39.0 : 40.0);
-    CGFloat headerSubtitleScale = isPad ? 1.0 : (compactLayout ? 0.93 : 0.95);
-    CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 72.0 : 84.0);
+    CGFloat headerToProfileSpacing = isPad ? 29.0 : (compactLayout ? 14.0 : 18.0);
+    CGFloat logoHeight = isPad ? 55.0 : (compactLayout ? 39.0 : 40.0);
+    CGFloat headerSubtitleScale = isPad ? 1.09 : (compactLayout ? 0.93 : 0.95);
+    CGFloat avatarSize = isPad ? 104.0 : (compactLayout ? 72.0 : 84.0);
     CGFloat avatarIconSize = avatarSize * 0.62;
     CGFloat gridDrop = isPad ? 14.0 : (compactLayout ? 6.0 : 8.0);
-    CGFloat profileToGridSpacing = (isPad ? 20.0 : (compactLayout ? 15.0 : 18.0)) + gridDrop;
+    CGFloat profileToGridSpacing = (isPad ? 15.0 : (compactLayout ? 15.0 : 18.0)) + gridDrop;
     CGFloat gridHeight = isPad ? 300.0 : (compactLayout ? 214.0 : 250.0);
     CGFloat themeCardHeight = isPad ? 60.0 : (compactLayout ? 48.0 : 52.0);
     CGFloat restartPadding = isPad ? 14.0 : (compactLayout ? 10.0 : 12.0);
@@ -434,7 +434,7 @@
     CGFloat restartContainerHeight = gridHeight - themeCardHeight - mainSpacing;
     CGFloat restartButtonHeight = (restartContainerHeight - (restartPadding * 2.0) - (restartSpacing * 2.0)) / 3.0;
     CGFloat restartCornerRadius = restartButtonHeight / 2.0;
-    CGFloat usernameFontSize = isPad ? 23.0 : (compactLayout ? 16.0 : 19.0);
+    CGFloat usernameFontSize = isPad ? 24.0 : (compactLayout ? 16.0 : 19.0);
     CGFloat systemFontSize = isPad ? 18.0 : (compactLayout ? 12.0 : 15.0);
     CGFloat mottoFontSize = isPad ? 21.0 : (compactLayout ? 13.0 : 16.0);
     CGFloat avatarToUsernameSpacing = isPad ? 12.0 : (compactLayout ? 9.0 : 10.0);
@@ -442,7 +442,7 @@
     CGFloat systemToMottoSpacing = isPad ? 12.0 : (compactLayout ? 9.0 : 10.0);
     CGFloat leftColumnWidthMultiplier = isPad ? 0.34 : 0.35;
     CGFloat jailbreakButtonHeight = isPad ? 60.0 : (compactLayout ? 44.0 : 48.0);
-    CGFloat jailbreakVerticalOffset = isPad ? 0.0 : (compactLayout ? -24.0 : -30.0);
+    CGFloat jailbreakVerticalOffset = isPad ? -12.0 : (compactLayout ? -24.0 : -30.0);
     CGFloat jailbreakHorizontalInset = isPad ? 0.0 : 4.0;
 
     UIStackView *mainStack = [[UIStackView alloc] init];
@@ -622,7 +622,7 @@
         [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     }];
-    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"paintpalette" action:themeAction];
+    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"slider.horizontal.3" action:themeAction];
     themeCard.layer.cornerRadius = themeCardHeight / 2.0;
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
