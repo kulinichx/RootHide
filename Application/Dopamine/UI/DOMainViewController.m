@@ -256,8 +256,13 @@
     UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.08];
     innerGlass.alpha = enabled ? 1.0 : 0.45;
 
-    // Keep every restart action on the same visual grid: a fixed-width icon
-    // column and one shared text start position. The row itself stays centered.
+    // Keep all restart actions on one shared icon/text grid. On iPhone the
+    // content uses almost the full pill width so the longest localized title
+    // does not get squeezed by the old 72% centered content constraint.
+    BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+    CGFloat iconSize = isPad ? 24.0 : 21.0;
+    CGFloat iconToTitleSpacing = isPad ? 10.0 : 8.0;
+
     UIView *contentRow = [[UIView alloc] init];
     contentRow.translatesAutoresizingMaskIntoConstraints = NO;
     [innerGlass.contentView addSubview:contentRow];
@@ -274,8 +279,10 @@
     titleLabel.textColor = UIColor.whiteColor;
     titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     titleLabel.textAlignment = NSTextAlignmentLeft;
+    titleLabel.numberOfLines = 1;
     titleLabel.adjustsFontSizeToFitWidth = YES;
-    titleLabel.minimumScaleFactor = 0.82;
+    titleLabel.minimumScaleFactor = 0.94;
+    titleLabel.allowsDefaultTighteningForTruncation = YES;
     [contentRow addSubview:titleLabel];
 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
@@ -285,18 +292,16 @@
     [button addAction:action forControlEvents:UIControlEventTouchUpInside];
     [innerGlass.contentView addSubview:button];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [contentRow.centerXAnchor constraintEqualToAnchor:innerGlass.contentView.centerXAnchor],
+    NSMutableArray<NSLayoutConstraint *> *contentConstraints = [NSMutableArray arrayWithArray:@[
         [contentRow.centerYAnchor constraintEqualToAnchor:innerGlass.contentView.centerYAnchor],
-        [contentRow.widthAnchor constraintEqualToAnchor:innerGlass.contentView.widthAnchor multiplier:0.72],
         [contentRow.heightAnchor constraintEqualToConstant:28],
 
         [iconView.leadingAnchor constraintEqualToAnchor:contentRow.leadingAnchor],
         [iconView.centerYAnchor constraintEqualToAnchor:contentRow.centerYAnchor],
-        [iconView.widthAnchor constraintEqualToConstant:24],
-        [iconView.heightAnchor constraintEqualToConstant:24],
+        [iconView.widthAnchor constraintEqualToConstant:iconSize],
+        [iconView.heightAnchor constraintEqualToConstant:iconSize],
 
-        [titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:10],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:iconToTitleSpacing],
         [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:contentRow.trailingAnchor],
         [titleLabel.centerYAnchor constraintEqualToAnchor:contentRow.centerYAnchor],
 
@@ -305,6 +310,21 @@
         [button.topAnchor constraintEqualToAnchor:innerGlass.contentView.topAnchor],
         [button.bottomAnchor constraintEqualToAnchor:innerGlass.contentView.bottomAnchor]
     ]];
+
+    if (isPad) {
+        [contentConstraints addObjectsFromArray:@[
+            [contentRow.centerXAnchor constraintEqualToAnchor:innerGlass.contentView.centerXAnchor],
+            [contentRow.widthAnchor constraintEqualToAnchor:innerGlass.contentView.widthAnchor multiplier:0.72]
+        ]];
+    }
+    else {
+        [contentConstraints addObjectsFromArray:@[
+            [contentRow.leadingAnchor constraintEqualToAnchor:innerGlass.contentView.leadingAnchor constant:18.0],
+            [contentRow.trailingAnchor constraintEqualToAnchor:innerGlass.contentView.trailingAnchor constant:-12.0]
+        ]];
+    }
+
+    [NSLayoutConstraint activateConstraints:contentConstraints];
     return innerGlass;
 }
 
