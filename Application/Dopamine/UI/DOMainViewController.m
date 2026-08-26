@@ -250,9 +250,9 @@
     return card;
 }
 
-- (UIVisualEffectView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled
+- (UIVisualEffectView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
-    UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:22 tintAlpha:0.08];
+    UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.08];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     button.enabled = enabled;
     innerGlass.alpha = enabled ? 1.0 : 0.45;
@@ -267,6 +267,43 @@
     return innerGlass;
 }
 
+- (void)configureCustomGlassHeaderView:(DOHeaderView *)headerView logoHeight:(CGFloat)logoHeight
+{
+    // DOHeaderView already owns the original Dopamine logo + subtitle stack.
+    // Reuse it so version/author/uptime keep their existing spacing and update logic,
+    // while only changing horizontal alignment for the custom home.
+    UIStackView *headerStack = nil;
+    for (UIView *subview in headerView.subviews) {
+        if ([subview isKindOfClass:[UIStackView class]]) {
+            headerStack = (UIStackView *)subview;
+            break;
+        }
+    }
+
+    if (!headerStack)
+        return;
+
+    headerStack.alignment = UIStackViewAlignmentCenter;
+    headerStack.spacing = 2.0;
+
+    for (UIView *arrangedSubview in headerStack.arrangedSubviews) {
+        if ([arrangedSubview isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)arrangedSubview;
+            label.textAlignment = NSTextAlignmentCenter;
+        }
+        else if ([arrangedSubview isKindOfClass:[UIImageView class]]) {
+            UIImageView *logoView = (UIImageView *)arrangedSubview;
+            for (NSLayoutConstraint *constraint in logoView.constraints) {
+                if (constraint.firstAttribute == NSLayoutAttributeHeight &&
+                    constraint.relation == NSLayoutRelationEqual) {
+                    constraint.constant = logoHeight;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 - (void)setupCustomGlassHome
 {
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
@@ -277,15 +314,18 @@
     // reference layout remains intact on compact iPhones, regular iPhones and iPad.
     CGFloat mainSpacing = compactLayout ? 8.0 : 12.0;
     CGFloat topInset = isPad ? 24.0 : (compactLayout ? 6.0 : 10.0);
-    CGFloat headerHeight = isPad ? 126.0 : (compactLayout ? 100.0 : 108.0);
+    CGFloat headerToProfileSpacing = isPad ? 34.0 : (compactLayout ? 20.0 : 24.0);
+    CGFloat logoHeight = isPad ? 44.0 : (compactLayout ? 40.0 : 42.0);
     CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 62.0 : 72.0);
     CGFloat avatarIconSize = avatarSize * 0.62;
-    CGFloat profileHeight = isPad ? 220.0 : (compactLayout ? 136.0 : 168.0);
-    CGFloat profileToGridSpacing = isPad ? 28.0 : (compactLayout ? 20.0 : 26.0);
+    CGFloat profileToGridSpacing = isPad ? 20.0 : (compactLayout ? 15.0 : 18.0);
     CGFloat gridHeight = isPad ? 300.0 : (compactLayout ? 214.0 : 250.0);
     CGFloat themeCardHeight = isPad ? 60.0 : (compactLayout ? 48.0 : 52.0);
     CGFloat restartPadding = isPad ? 14.0 : (compactLayout ? 10.0 : 12.0);
     CGFloat restartSpacing = isPad ? 12.0 : (compactLayout ? 8.0 : 10.0);
+    CGFloat restartContainerHeight = gridHeight - themeCardHeight - mainSpacing;
+    CGFloat restartButtonHeight = (restartContainerHeight - (restartPadding * 2.0) - (restartSpacing * 2.0)) / 3.0;
+    CGFloat restartCornerRadius = restartButtonHeight / 2.0;
     CGFloat usernameFontSize = isPad ? 23.0 : (compactLayout ? 16.0 : 19.0);
     CGFloat systemFontSize = isPad ? 18.0 : (compactLayout ? 12.0 : 15.0);
     CGFloat mottoFontSize = isPad ? 21.0 : (compactLayout ? 13.0 : 16.0);
@@ -308,7 +348,7 @@
         NSLayoutConstraint *maxWidthConstraint = [mainStack.widthAnchor constraintLessThanOrEqualToConstant:UI_IPAD_MAX_WIDTH];
         maxWidthConstraint.priority = UILayoutPriorityRequired;
 
-        NSLayoutConstraint *verticalPositionConstraint = [mainStack.centerYAnchor constraintEqualToAnchor:safeArea.centerYAnchor constant:-30.0];
+        NSLayoutConstraint *verticalPositionConstraint = [mainStack.centerYAnchor constraintEqualToAnchor:safeArea.centerYAnchor constant:-10.0];
         verticalPositionConstraint.priority = UILayoutPriorityDefaultHigh;
 
         [NSLayoutConstraint activateConstraints:@[
@@ -333,21 +373,21 @@
         ]];
     }
 
-    // DOHeaderView is retained so Dopamine keeps its existing logo, support range,
-    // and credits presentation. A fixed natural height prevents large iPad
-    // screens from stretching the header vertically.
+    // Keep the original DOHeaderView so version/author/uptime retain Dopamine's
+    // existing internal spacing and behavior. Custom Home only centers that stack
+    // and gives the Dopamine logo slightly more visual weight.
     DOHeaderView *headerView = [[DOHeaderView alloc] initWithImage:[UIImage imageNamed:@"Dopamine"] subtitles:@[
         [DOGlobalAppearance mainSubtitleString:[[DOEnvironmentManager sharedManager] versionSupportString]],
         [DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By") withAlpha:0.8],
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
+    [self configureCustomGlassHeaderView:headerView logoHeight:logoHeight];
     [mainStack addArrangedSubview:headerView];
-    [headerView.heightAnchor constraintEqualToConstant:headerHeight].active = YES;
+    [mainStack setCustomSpacing:headerToProfileSpacing afterView:headerView];
 
     UIView *profileView = [[UIView alloc] init];
     profileView.translatesAutoresizingMaskIntoConstraints = NO;
     [mainStack addArrangedSubview:profileView];
-    [profileView.heightAnchor constraintEqualToConstant:profileHeight].active = YES;
     [mainStack setCustomSpacing:profileToGridSpacing afterView:profileView];
 
     UIVisualEffectView *avatarGlass = [self customGlassViewWithCornerRadius:(avatarSize / 2.0) tintAlpha:0.06];
@@ -415,6 +455,7 @@
         [mottoLabel.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor],
         [mottoLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:profileView.leadingAnchor constant:18],
         [mottoLabel.trailingAnchor constraintLessThanOrEqualToAnchor:profileView.trailingAnchor constant:-18],
+        [mottoLabel.bottomAnchor constraintEqualToAnchor:profileView.bottomAnchor],
         mottoMaxWidth
     ]];
 
@@ -514,9 +555,9 @@
         [self presentViewController:confirmation animated:YES completion:nil];
     }];
 
-    [restartStack addArrangedSubview:[self customGlassRestartButtonWithTitle:DOLocalizedString(@"Menu_Restart_SpringBoard_Title") imageName:@"arrow.clockwise" action:respringAction enabled:isJailbroken]];
-    [restartStack addArrangedSubview:[self customGlassRestartButtonWithTitle:DOLocalizedString(@"Menu_Reboot_Userspace_Title") imageName:@"arrow.clockwise.circle" action:userspaceAction enabled:isJailbroken]];
-    [restartStack addArrangedSubview:[self customGlassRestartButtonWithTitle:DOLocalizedString(@"Menu_Reboot_Device_Title") imageName:@"power" action:rebootAction enabled:YES]];
+    [restartStack addArrangedSubview:[self customGlassRestartButtonWithTitle:DOLocalizedString(@"Menu_Restart_SpringBoard_Title") imageName:@"arrow.clockwise" action:respringAction enabled:isJailbroken cornerRadius:restartCornerRadius]];
+    [restartStack addArrangedSubview:[self customGlassRestartButtonWithTitle:DOLocalizedString(@"Menu_Reboot_Userspace_Title") imageName:@"arrow.clockwise.circle" action:userspaceAction enabled:isJailbroken cornerRadius:restartCornerRadius]];
+    [restartStack addArrangedSubview:[self customGlassRestartButtonWithTitle:DOLocalizedString(@"Menu_Reboot_Device_Title") imageName:@"power" action:rebootAction enabled:YES cornerRadius:restartCornerRadius]];
 
     // Keep a dedicated gap for the optional update button. setupUpdateAvailable:
     // positions that button above jailbreakBtn, so without this reserve it can overlap
