@@ -693,6 +693,9 @@
         [UIImage systemImageNamed:@"lock.open" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] :
         [UIImage systemImageNamed:@"lock.slash" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
 
+    __block UIColor *jailbreakExpandedBackgroundColor = nil;
+    __block UIVisualEffectView *jailbreakEmphasisGlass = nil;
+
     self.jailbreakBtn = [[DOJailbreakButton alloc] initWithAction:[UIAction actionWithTitle:jailbreakButtonTitle image:jailbreakButtonImage identifier:@"jailbreak" handler:^(__kindof UIAction * _Nonnull action) {
 /********************************** roothide specific ************************************/
         if (otherJailbreakActived(false)) {
@@ -706,6 +709,12 @@
 
         actionGrid.userInteractionEnabled = NO;
         self.updateButton.userInteractionEnabled = NO;
+
+        // Compact state uses an emphasized glass material. Before expansion,
+        // restore DOJailbreakButton's original opaque theme color so the stock
+        // jailbreak/progress interface keeps the author's intended treatment.
+        jailbreakEmphasisGlass.hidden = YES;
+        self.jailbreakBtn.backgroundColor = jailbreakExpandedBackgroundColor;
         [self.jailbreakBtn expandButton:self.jailbreakButtonConstraints];
 
         [UIView animateWithDuration:0.75 delay:0 usingSpringWithDamping:0.9 initialSpringVelocity:2.0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
@@ -718,6 +727,23 @@
         [self startJailbreak];
     }]];
     self.jailbreakBtn.enabled = !isJailbroken && isSupported;
+
+    // Preserve the original DOJailbreakButton color for expanded/progress mode.
+    // On the home screen, use the same blur/border language as the other cards
+    // but with a stronger tint (0.10 vs 0.05) to keep the jailbreak CTA visually
+    // more important without looking like a separate solid-blue material.
+    jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
+    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.10];
+    jailbreakEmphasisGlass.userInteractionEnabled = NO;
+    self.jailbreakBtn.backgroundColor = UIColor.clearColor;
+    [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass atIndex:0];
+    [NSLayoutConstraint activateConstraints:@[
+        [jailbreakEmphasisGlass.leadingAnchor constraintEqualToAnchor:self.jailbreakBtn.leadingAnchor],
+        [jailbreakEmphasisGlass.trailingAnchor constraintEqualToAnchor:self.jailbreakBtn.trailingAnchor],
+        [jailbreakEmphasisGlass.topAnchor constraintEqualToAnchor:self.jailbreakBtn.topAnchor],
+        [jailbreakEmphasisGlass.bottomAnchor constraintEqualToAnchor:self.jailbreakBtn.bottomAnchor]
+    ]];
+
     [self.view addSubview:self.jailbreakBtn];
 
     self.customGlassJailbreakCenterYConstraint =
