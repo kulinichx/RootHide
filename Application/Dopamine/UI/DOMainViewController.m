@@ -309,9 +309,8 @@
 
 - (void)configureCustomGlassHeaderView:(DOHeaderView *)headerView logoHeight:(CGFloat)logoHeight
 {
-    // DOHeaderView already owns the original Dopamine logo + subtitle stack.
-    // Reuse it so version/author/uptime keep their existing spacing and update logic,
-    // while only changing horizontal alignment for the custom home.
+    // Keep the Dopamine logo centered, but present version / author / uptime as
+    // one compact left-aligned information block centered beneath the logo.
     UIStackView *headerStack = nil;
     for (UIView *subview in headerView.subviews) {
         if ([subview isKindOfClass:[UIStackView class]]) {
@@ -326,10 +325,15 @@
     headerStack.alignment = UIStackViewAlignmentCenter;
     headerStack.spacing = 2.0;
 
+    NSMutableArray<UILabel *> *subtitleLabels = [NSMutableArray array];
+    CGFloat subtitleWidth = 0.0;
+
     for (UIView *arrangedSubview in headerStack.arrangedSubviews) {
         if ([arrangedSubview isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)arrangedSubview;
-            label.textAlignment = NSTextAlignmentCenter;
+            label.textAlignment = NSTextAlignmentLeft;
+            [subtitleLabels addObject:label];
+            subtitleWidth = MAX(subtitleWidth, ceil(label.intrinsicContentSize.width));
         }
         else if ([arrangedSubview isKindOfClass:[UIImageView class]]) {
             UIImageView *logoView = (UIImageView *)arrangedSubview;
@@ -340,6 +344,14 @@
                     break;
                 }
             }
+        }
+    }
+
+    // Giving all subtitle labels the width of the widest line keeps their left
+    // edges on the same vertical axis while the block itself stays centered.
+    if (subtitleWidth > 0.0) {
+        for (UILabel *label in subtitleLabels) {
+            [label.widthAnchor constraintEqualToConstant:subtitleWidth].active = YES;
         }
     }
 }
@@ -355,7 +367,7 @@
     CGFloat mainSpacing = compactLayout ? 8.0 : 12.0;
     CGFloat topInset = isPad ? 24.0 : (compactLayout ? 6.0 : 10.0);
     CGFloat headerToProfileSpacing = isPad ? 34.0 : (compactLayout ? 20.0 : 24.0);
-    CGFloat logoHeight = isPad ? 44.0 : (compactLayout ? 40.0 : 42.0);
+    CGFloat logoHeight = isPad ? 49.0 : (compactLayout ? 42.0 : 45.0);
     CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 62.0 : 72.0);
     CGFloat avatarIconSize = avatarSize * 0.62;
     CGFloat gridDrop = isPad ? 14.0 : (compactLayout ? 8.0 : 10.0);
@@ -551,7 +563,7 @@
         [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     }];
-    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"Theme" imageName:@"photo.on.rectangle.angled" action:themeAction];
+    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"photo.on.rectangle.angled" action:themeAction];
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
 
