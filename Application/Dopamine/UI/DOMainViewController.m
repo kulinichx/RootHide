@@ -252,7 +252,7 @@
 
 - (UIVisualEffectView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled
 {
-    UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:18 tintAlpha:0.08];
+    UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:22 tintAlpha:0.08];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     button.enabled = enabled;
     innerGlass.alpha = enabled ? 1.0 : 0.45;
@@ -269,55 +269,92 @@
 
 - (void)setupCustomGlassHome
 {
+    BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+    CGFloat availableHeight = CGRectGetHeight(self.view.bounds);
+    BOOL compactLayout = !isPad && availableHeight < 720.0;
+
+    // Keep one visual structure on every device. Only dimensions change so the
+    // reference layout remains intact on compact iPhones, regular iPhones and iPad.
+    CGFloat mainSpacing = compactLayout ? 8.0 : 12.0;
+    CGFloat topInset = isPad ? 24.0 : (compactLayout ? 6.0 : 10.0);
+    CGFloat headerHeight = isPad ? 126.0 : (compactLayout ? 100.0 : 108.0);
+    CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 62.0 : 72.0);
+    CGFloat avatarIconSize = avatarSize * 0.62;
+    CGFloat profileHeight = isPad ? 220.0 : (compactLayout ? 136.0 : 168.0);
+    CGFloat profileToGridSpacing = isPad ? 28.0 : (compactLayout ? 20.0 : 26.0);
+    CGFloat gridHeight = isPad ? 300.0 : (compactLayout ? 214.0 : 250.0);
+    CGFloat themeCardHeight = isPad ? 60.0 : (compactLayout ? 48.0 : 52.0);
+    CGFloat restartPadding = isPad ? 14.0 : (compactLayout ? 10.0 : 12.0);
+    CGFloat restartSpacing = isPad ? 12.0 : (compactLayout ? 8.0 : 10.0);
+    CGFloat usernameFontSize = isPad ? 23.0 : (compactLayout ? 16.0 : 19.0);
+    CGFloat systemFontSize = isPad ? 18.0 : (compactLayout ? 12.0 : 15.0);
+    CGFloat mottoFontSize = isPad ? 21.0 : (compactLayout ? 13.0 : 16.0);
+    CGFloat avatarToUsernameSpacing = isPad ? 12.0 : (compactLayout ? 9.0 : 10.0);
+    CGFloat usernameToSystemSpacing = isPad ? 4.0 : (compactLayout ? 2.0 : 3.0);
+    CGFloat systemToMottoSpacing = isPad ? 12.0 : (compactLayout ? 9.0 : 10.0);
+
     UIStackView *mainStack = [[UIStackView alloc] init];
     mainStack.axis = UILayoutConstraintAxisVertical;
     mainStack.alignment = UIStackViewAlignmentFill;
     mainStack.distribution = UIStackViewDistributionFill;
-    mainStack.spacing = 12;
+    mainStack.spacing = mainSpacing;
     mainStack.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:mainStack];
 
     UILayoutGuide *safeArea = self.view.safeAreaLayoutGuide;
-    if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) {
+    if (isPad) {
         NSLayoutConstraint *relativeWidthConstraint = [mainStack.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.8];
         relativeWidthConstraint.priority = UILayoutPriorityDefaultHigh;
         NSLayoutConstraint *maxWidthConstraint = [mainStack.widthAnchor constraintLessThanOrEqualToConstant:UI_IPAD_MAX_WIDTH];
         maxWidthConstraint.priority = UILayoutPriorityRequired;
 
+        NSLayoutConstraint *verticalPositionConstraint = [mainStack.centerYAnchor constraintEqualToAnchor:safeArea.centerYAnchor constant:-30.0];
+        verticalPositionConstraint.priority = UILayoutPriorityDefaultHigh;
+
         [NSLayoutConstraint activateConstraints:@[
-            [mainStack.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:8],
-            [mainStack.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-8],
+            [mainStack.topAnchor constraintGreaterThanOrEqualToAnchor:safeArea.topAnchor constant:topInset],
+            [mainStack.bottomAnchor constraintLessThanOrEqualToAnchor:safeArea.bottomAnchor constant:-12],
             [mainStack.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+            verticalPositionConstraint,
             relativeWidthConstraint,
             maxWidthConstraint
         ]];
     }
     else {
+        NSLayoutConstraint *verticalPositionConstraint = [mainStack.centerYAnchor constraintEqualToAnchor:safeArea.centerYAnchor];
+        verticalPositionConstraint.priority = UILayoutPriorityDefaultHigh;
+
         [NSLayoutConstraint activateConstraints:@[
-            [mainStack.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:8],
-            [mainStack.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-8],
+            [mainStack.topAnchor constraintGreaterThanOrEqualToAnchor:safeArea.topAnchor constant:topInset],
+            [mainStack.bottomAnchor constraintLessThanOrEqualToAnchor:safeArea.bottomAnchor constant:-8],
             [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:UI_PADDING],
-            [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-UI_PADDING]
+            [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-UI_PADDING],
+            verticalPositionConstraint
         ]];
     }
 
+    // DOHeaderView is retained so Dopamine keeps its existing logo, support range,
+    // and credits presentation. A fixed natural height prevents large iPad
+    // screens from stretching the header vertically.
     DOHeaderView *headerView = [[DOHeaderView alloc] initWithImage:[UIImage imageNamed:@"Dopamine"] subtitles:@[
         [DOGlobalAppearance mainSubtitleString:[[DOEnvironmentManager sharedManager] versionSupportString]],
         [DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By") withAlpha:0.8],
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
     [mainStack addArrangedSubview:headerView];
+    [headerView.heightAnchor constraintEqualToConstant:headerHeight].active = YES;
 
     UIView *profileView = [[UIView alloc] init];
     profileView.translatesAutoresizingMaskIntoConstraints = NO;
     [mainStack addArrangedSubview:profileView];
-    [profileView.heightAnchor constraintEqualToConstant:132].active = YES;
+    [profileView.heightAnchor constraintEqualToConstant:profileHeight].active = YES;
+    [mainStack setCustomSpacing:profileToGridSpacing afterView:profileView];
 
-    UIVisualEffectView *avatarGlass = [self customGlassViewWithCornerRadius:34 tintAlpha:0.06];
+    UIVisualEffectView *avatarGlass = [self customGlassViewWithCornerRadius:(avatarSize / 2.0) tintAlpha:0.06];
     [profileView addSubview:avatarGlass];
     [NSLayoutConstraint activateConstraints:@[
-        [avatarGlass.widthAnchor constraintEqualToConstant:68],
-        [avatarGlass.heightAnchor constraintEqualToConstant:68],
+        [avatarGlass.widthAnchor constraintEqualToConstant:avatarSize],
+        [avatarGlass.heightAnchor constraintEqualToConstant:avatarSize],
         [avatarGlass.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor],
         [avatarGlass.topAnchor constraintEqualToAnchor:profileView.topAnchor]
     ]];
@@ -330,8 +367,8 @@
     [NSLayoutConstraint activateConstraints:@[
         [avatarImageView.centerXAnchor constraintEqualToAnchor:avatarGlass.contentView.centerXAnchor],
         [avatarImageView.centerYAnchor constraintEqualToAnchor:avatarGlass.contentView.centerYAnchor],
-        [avatarImageView.widthAnchor constraintEqualToConstant:42],
-        [avatarImageView.heightAnchor constraintEqualToConstant:42]
+        [avatarImageView.widthAnchor constraintEqualToConstant:avatarIconSize],
+        [avatarImageView.heightAnchor constraintEqualToConstant:avatarIconSize]
     ]];
 
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -343,7 +380,7 @@
     usernameLabel.text = username;
     usernameLabel.textColor = UIColor.whiteColor;
     usernameLabel.textAlignment = NSTextAlignmentCenter;
-    usernameLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    usernameLabel.font = [UIFont systemFontOfSize:usernameFontSize weight:UIFontWeightSemibold];
     [profileView addSubview:usernameLabel];
 
     UILabel *systemLabel = [[UILabel alloc] init];
@@ -351,7 +388,7 @@
     systemLabel.text = [NSString stringWithFormat:@"iOS %@", UIDevice.currentDevice.systemVersion];
     systemLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.72];
     systemLabel.textAlignment = NSTextAlignmentCenter;
-    systemLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    systemLabel.font = [UIFont systemFontOfSize:systemFontSize weight:UIFontWeightMedium];
     [profileView addSubview:systemLabel];
 
     UILabel *mottoLabel = [[UILabel alloc] init];
@@ -359,35 +396,40 @@
     mottoLabel.text = motto;
     mottoLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.78];
     mottoLabel.textAlignment = NSTextAlignmentCenter;
-    mottoLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-    mottoLabel.numberOfLines = 1;
+    mottoLabel.font = [UIFont systemFontOfSize:mottoFontSize weight:UIFontWeightRegular];
+    mottoLabel.numberOfLines = 2;
     mottoLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [profileView addSubview:mottoLabel];
 
+    NSLayoutConstraint *mottoMaxWidth = [mottoLabel.widthAnchor constraintLessThanOrEqualToAnchor:profileView.widthAnchor multiplier:0.78];
+    mottoMaxWidth.priority = UILayoutPriorityRequired;
+
     [NSLayoutConstraint activateConstraints:@[
-        [usernameLabel.topAnchor constraintEqualToAnchor:avatarGlass.bottomAnchor constant:5],
+        [usernameLabel.topAnchor constraintEqualToAnchor:avatarGlass.bottomAnchor constant:avatarToUsernameSpacing],
         [usernameLabel.leadingAnchor constraintEqualToAnchor:profileView.leadingAnchor constant:12],
         [usernameLabel.trailingAnchor constraintEqualToAnchor:profileView.trailingAnchor constant:-12],
-        [systemLabel.topAnchor constraintEqualToAnchor:usernameLabel.bottomAnchor constant:1],
+        [systemLabel.topAnchor constraintEqualToAnchor:usernameLabel.bottomAnchor constant:usernameToSystemSpacing],
         [systemLabel.leadingAnchor constraintEqualToAnchor:profileView.leadingAnchor constant:12],
         [systemLabel.trailingAnchor constraintEqualToAnchor:profileView.trailingAnchor constant:-12],
-        [mottoLabel.topAnchor constraintEqualToAnchor:systemLabel.bottomAnchor constant:3],
-        [mottoLabel.leadingAnchor constraintEqualToAnchor:profileView.leadingAnchor constant:18],
-        [mottoLabel.trailingAnchor constraintEqualToAnchor:profileView.trailingAnchor constant:-18]
+        [mottoLabel.topAnchor constraintEqualToAnchor:systemLabel.bottomAnchor constant:systemToMottoSpacing],
+        [mottoLabel.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor],
+        [mottoLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:profileView.leadingAnchor constant:18],
+        [mottoLabel.trailingAnchor constraintLessThanOrEqualToAnchor:profileView.trailingAnchor constant:-18],
+        mottoMaxWidth
     ]];
 
     UIView *actionGrid = [[UIView alloc] init];
     actionGrid.translatesAutoresizingMaskIntoConstraints = NO;
     [mainStack addArrangedSubview:actionGrid];
-    NSLayoutConstraint *gridHeight = [actionGrid.heightAnchor constraintEqualToConstant:250];
-    gridHeight.priority = UILayoutPriorityDefaultHigh;
-    gridHeight.active = YES;
+    NSLayoutConstraint *gridHeightConstraint = [actionGrid.heightAnchor constraintEqualToConstant:gridHeight];
+    gridHeightConstraint.priority = UILayoutPriorityRequired;
+    gridHeightConstraint.active = YES;
 
     UIStackView *leftColumn = [[UIStackView alloc] init];
     leftColumn.axis = UILayoutConstraintAxisVertical;
     leftColumn.alignment = UIStackViewAlignmentFill;
     leftColumn.distribution = UIStackViewDistributionFillEqually;
-    leftColumn.spacing = 12;
+    leftColumn.spacing = mainSpacing;
     leftColumn.translatesAutoresizingMaskIntoConstraints = NO;
     [actionGrid addSubview:leftColumn];
 
@@ -395,7 +437,7 @@
     rightColumn.axis = UILayoutConstraintAxisVertical;
     rightColumn.alignment = UIStackViewAlignmentFill;
     rightColumn.distribution = UIStackViewDistributionFill;
-    rightColumn.spacing = 12;
+    rightColumn.spacing = mainSpacing;
     rightColumn.translatesAutoresizingMaskIntoConstraints = NO;
     [actionGrid addSubview:rightColumn];
 
@@ -404,7 +446,7 @@
         [leftColumn.topAnchor constraintEqualToAnchor:actionGrid.topAnchor],
         [leftColumn.bottomAnchor constraintEqualToAnchor:actionGrid.bottomAnchor],
         [leftColumn.widthAnchor constraintEqualToAnchor:actionGrid.widthAnchor multiplier:0.34],
-        [rightColumn.leadingAnchor constraintEqualToAnchor:leftColumn.trailingAnchor constant:12],
+        [rightColumn.leadingAnchor constraintEqualToAnchor:leftColumn.trailingAnchor constant:mainSpacing],
         [rightColumn.trailingAnchor constraintEqualToAnchor:actionGrid.trailingAnchor],
         [rightColumn.topAnchor constraintEqualToAnchor:actionGrid.topAnchor],
         [rightColumn.bottomAnchor constraintEqualToAnchor:actionGrid.bottomAnchor]
@@ -429,7 +471,7 @@
     }];
     UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"Theme" imageName:@"photo.on.rectangle.angled" action:themeAction];
     [rightColumn addArrangedSubview:themeCard];
-    [themeCard.heightAnchor constraintEqualToConstant:52].active = YES;
+    [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
 
     UIVisualEffectView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.035];
     [rightColumn addArrangedSubview:restartContainer];
@@ -438,14 +480,14 @@
     restartStack.axis = UILayoutConstraintAxisVertical;
     restartStack.alignment = UIStackViewAlignmentFill;
     restartStack.distribution = UIStackViewDistributionFillEqually;
-    restartStack.spacing = 10;
+    restartStack.spacing = restartSpacing;
     restartStack.translatesAutoresizingMaskIntoConstraints = NO;
     [restartContainer.contentView addSubview:restartStack];
     [NSLayoutConstraint activateConstraints:@[
-        [restartStack.leadingAnchor constraintEqualToAnchor:restartContainer.contentView.leadingAnchor constant:12],
-        [restartStack.trailingAnchor constraintEqualToAnchor:restartContainer.contentView.trailingAnchor constant:-12],
-        [restartStack.topAnchor constraintEqualToAnchor:restartContainer.contentView.topAnchor constant:12],
-        [restartStack.bottomAnchor constraintEqualToAnchor:restartContainer.contentView.bottomAnchor constant:-12]
+        [restartStack.leadingAnchor constraintEqualToAnchor:restartContainer.contentView.leadingAnchor constant:restartPadding],
+        [restartStack.trailingAnchor constraintEqualToAnchor:restartContainer.contentView.trailingAnchor constant:-restartPadding],
+        [restartStack.topAnchor constraintEqualToAnchor:restartContainer.contentView.topAnchor constant:restartPadding],
+        [restartStack.bottomAnchor constraintEqualToAnchor:restartContainer.contentView.bottomAnchor constant:-restartPadding]
     ]];
 
     BOOL isJailbroken = [[DOEnvironmentManager sharedManager] isJailbroken] || [[DOEnvironmentManager sharedManager] isJailbrokenWithOtherJailbreak];
@@ -488,7 +530,8 @@
     UIView *buttonPlaceHolder = [[UIView alloc] init];
     buttonPlaceHolder.translatesAutoresizingMaskIntoConstraints = NO;
     [mainStack addArrangedSubview:buttonPlaceHolder];
-    [buttonPlaceHolder.heightAnchor constraintEqualToConstant:60].active = YES;
+    CGFloat jailbreakButtonHeight = compactLayout ? 56.0 : 60.0;
+    [buttonPlaceHolder.heightAnchor constraintEqualToConstant:jailbreakButtonHeight].active = YES;
 
     NSString *jailbreakButtonTitle = [self jailbreakButtonTitle];
     UIImage *jailbreakButtonImage = isSupported ?
