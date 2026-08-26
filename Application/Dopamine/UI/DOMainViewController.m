@@ -223,7 +223,14 @@
 
     UIButtonConfiguration *configuration = [UIButtonConfiguration plainButtonConfiguration];
     configuration.title = title;
-    configuration.image = [UIImage systemImageNamed:imageName];
+
+    BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+    CGFloat symbolPointSize = isPad ? 21.0 : 19.0;
+    UIImageSymbolConfiguration *symbolConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:symbolPointSize
+                                                        weight:UIImageSymbolWeightMedium
+                                                         scale:UIImageSymbolScaleMedium];
+    configuration.image = [UIImage systemImageNamed:imageName withConfiguration:symbolConfiguration];
     configuration.imagePadding = 8;
     configuration.baseForegroundColor = UIColor.whiteColor;
     configuration.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *incoming) {
@@ -267,10 +274,32 @@
     contentRow.translatesAutoresizingMaskIntoConstraints = NO;
     [innerGlass.contentView addSubview:contentRow];
 
-    UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:imageName]];
+    CGFloat restartSymbolPointSize = isPad ? 23.0 : 20.0;
+    UIImageSymbolConfiguration *restartSymbolConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:restartSymbolPointSize
+                                                        weight:UIImageSymbolWeightMedium
+                                                         scale:UIImageSymbolScaleMedium];
+
+    // SF Symbols have different intrinsic visual mass even inside identical
+    // image-view frames. Apply tiny optical corrections so the three restart
+    // glyphs read as the same apparent size without changing their alignment.
+    CGFloat restartIconOpticalScale = 1.0;
+    if ([imageName isEqualToString:@"arrow.clockwise"]) {
+        restartIconOpticalScale = 1.04;
+    }
+    else if ([imageName isEqualToString:@"arrow.clockwise.circle"]) {
+        restartIconOpticalScale = 0.92;
+    }
+    else if ([imageName isEqualToString:@"power"]) {
+        restartIconOpticalScale = 0.96;
+    }
+
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:
+        [UIImage systemImageNamed:imageName withConfiguration:restartSymbolConfiguration]];
     iconView.translatesAutoresizingMaskIntoConstraints = NO;
     iconView.tintColor = UIColor.whiteColor;
     iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.transform = CGAffineTransformMakeScale(restartIconOpticalScale, restartIconOpticalScale);
     [contentRow addSubview:iconView];
 
     UILabel *titleLabel = [[UILabel alloc] init];
@@ -593,7 +622,7 @@
         [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     }];
-    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"photo.on.rectangle.angled" action:themeAction];
+    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"paintpalette" action:themeAction];
     themeCard.layer.cornerRadius = themeCardHeight / 2.0;
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
