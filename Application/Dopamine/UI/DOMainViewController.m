@@ -22,6 +22,7 @@
 @property DOJailbreakButton *jailbreakBtn;
 @property NSArray<NSLayoutConstraint *> *jailbreakButtonConstraints;
 @property DOActionMenuButton *updateButton;
+@property NSLayoutConstraint *customGlassJailbreakCenterYConstraint;
 @property(nonatomic) BOOL hideStatusBar;
 @property(nonatomic) BOOL hideHomeIndicator;
 
@@ -307,7 +308,7 @@
     return innerGlass;
 }
 
-- (void)configureCustomGlassHeaderView:(DOHeaderView *)headerView logoHeight:(CGFloat)logoHeight
+- (void)configureCustomGlassHeaderView:(DOHeaderView *)headerView logoHeight:(CGFloat)logoHeight subtitleScale:(CGFloat)subtitleScale
 {
     // Keep the Dopamine logo centered, but present version / author / uptime as
     // one compact left-aligned information block centered beneath the logo.
@@ -332,6 +333,9 @@
         if ([arrangedSubview isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)arrangedSubview;
             label.textAlignment = NSTextAlignmentLeft;
+            if (subtitleScale != 1.0) {
+                label.font = [label.font fontWithSize:(label.font.pointSize * subtitleScale)];
+            }
             [subtitleLabels addObject:label];
             subtitleWidth = MAX(subtitleWidth, ceil(label.intrinsicContentSize.width));
         }
@@ -366,11 +370,13 @@
     // reference layout remains intact on compact iPhones, regular iPhones and iPad.
     CGFloat mainSpacing = compactLayout ? 8.0 : 12.0;
     CGFloat topInset = isPad ? 24.0 : (compactLayout ? 6.0 : 10.0);
-    CGFloat headerToProfileSpacing = isPad ? 34.0 : (compactLayout ? 20.0 : 24.0);
-    CGFloat logoHeight = isPad ? 49.0 : (compactLayout ? 42.0 : 45.0);
-    CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 62.0 : 72.0);
+    CGFloat horizontalInset = compactLayout ? 20.0 : 25.0;
+    CGFloat headerToProfileSpacing = isPad ? 34.0 : (compactLayout ? 14.0 : 18.0);
+    CGFloat logoHeight = isPad ? 49.0 : (compactLayout ? 39.0 : 40.0);
+    CGFloat headerSubtitleScale = isPad ? 1.0 : (compactLayout ? 0.93 : 0.95);
+    CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 72.0 : 84.0);
     CGFloat avatarIconSize = avatarSize * 0.62;
-    CGFloat gridDrop = isPad ? 14.0 : (compactLayout ? 8.0 : 10.0);
+    CGFloat gridDrop = isPad ? 14.0 : (compactLayout ? 6.0 : 8.0);
     CGFloat profileToGridSpacing = (isPad ? 20.0 : (compactLayout ? 15.0 : 18.0)) + gridDrop;
     CGFloat gridHeight = isPad ? 300.0 : (compactLayout ? 214.0 : 250.0);
     CGFloat themeCardHeight = isPad ? 60.0 : (compactLayout ? 48.0 : 52.0);
@@ -385,6 +391,10 @@
     CGFloat avatarToUsernameSpacing = isPad ? 12.0 : (compactLayout ? 9.0 : 10.0);
     CGFloat usernameToSystemSpacing = isPad ? 4.0 : (compactLayout ? 2.0 : 3.0);
     CGFloat systemToMottoSpacing = isPad ? 12.0 : (compactLayout ? 9.0 : 10.0);
+    CGFloat leftColumnWidthMultiplier = isPad ? 0.34 : 0.35;
+    CGFloat jailbreakButtonHeight = isPad ? 60.0 : (compactLayout ? 44.0 : 48.0);
+    CGFloat jailbreakVerticalOffset = isPad ? 0.0 : (compactLayout ? -24.0 : -30.0);
+    CGFloat jailbreakHorizontalInset = isPad ? 0.0 : 4.0;
 
     UIStackView *mainStack = [[UIStackView alloc] init];
     mainStack.axis = UILayoutConstraintAxisVertical;
@@ -420,8 +430,8 @@
         [NSLayoutConstraint activateConstraints:@[
             [mainStack.topAnchor constraintGreaterThanOrEqualToAnchor:safeArea.topAnchor constant:topInset],
             [mainStack.bottomAnchor constraintLessThanOrEqualToAnchor:safeArea.bottomAnchor constant:-8],
-            [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:UI_PADDING],
-            [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-UI_PADDING],
+            [mainStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:horizontalInset],
+            [mainStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-horizontalInset],
             verticalPositionConstraint
         ]];
     }
@@ -434,7 +444,7 @@
         [DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By") withAlpha:0.8],
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
-    [self configureCustomGlassHeaderView:headerView logoHeight:logoHeight];
+    [self configureCustomGlassHeaderView:headerView logoHeight:logoHeight subtitleScale:headerSubtitleScale];
     [mainStack addArrangedSubview:headerView];
     [mainStack setCustomSpacing:headerToProfileSpacing afterView:headerView];
 
@@ -539,7 +549,7 @@
         [leftColumn.leadingAnchor constraintEqualToAnchor:actionGrid.leadingAnchor],
         [leftColumn.topAnchor constraintEqualToAnchor:actionGrid.topAnchor],
         [leftColumn.bottomAnchor constraintEqualToAnchor:actionGrid.bottomAnchor],
-        [leftColumn.widthAnchor constraintEqualToAnchor:actionGrid.widthAnchor multiplier:0.34],
+        [leftColumn.widthAnchor constraintEqualToAnchor:actionGrid.widthAnchor multiplier:leftColumnWidthMultiplier],
         [rightColumn.leadingAnchor constraintEqualToAnchor:leftColumn.trailingAnchor constant:mainSpacing],
         [rightColumn.trailingAnchor constraintEqualToAnchor:actionGrid.trailingAnchor],
         [rightColumn.topAnchor constraintEqualToAnchor:actionGrid.topAnchor],
@@ -564,6 +574,7 @@
         [self presentViewController:alert animated:YES completion:nil];
     }];
     UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"photo.on.rectangle.angled" action:themeAction];
+    themeCard.layer.cornerRadius = themeCardHeight / 2.0;
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
 
@@ -626,7 +637,6 @@
     UIView *buttonPlaceHolder = [[UIView alloc] init];
     buttonPlaceHolder.translatesAutoresizingMaskIntoConstraints = NO;
     [mainStack addArrangedSubview:buttonPlaceHolder];
-    CGFloat jailbreakButtonHeight = compactLayout ? 56.0 : 60.0;
     [buttonPlaceHolder.heightAnchor constraintEqualToConstant:jailbreakButtonHeight].active = YES;
 
     NSString *jailbreakButtonTitle = [self jailbreakButtonTitle];
@@ -661,11 +671,14 @@
     self.jailbreakBtn.enabled = !isJailbroken && isSupported;
     [self.view addSubview:self.jailbreakBtn];
 
+    self.customGlassJailbreakCenterYConstraint =
+        [self.jailbreakBtn.centerYAnchor constraintEqualToAnchor:buttonPlaceHolder.centerYAnchor constant:jailbreakVerticalOffset];
+
     [NSLayoutConstraint activateConstraints:(self.jailbreakButtonConstraints = @[
-        [self.jailbreakBtn.leadingAnchor constraintEqualToAnchor:buttonPlaceHolder.leadingAnchor],
-        [self.jailbreakBtn.trailingAnchor constraintEqualToAnchor:buttonPlaceHolder.trailingAnchor],
+        [self.jailbreakBtn.leadingAnchor constraintEqualToAnchor:buttonPlaceHolder.leadingAnchor constant:jailbreakHorizontalInset],
+        [self.jailbreakBtn.trailingAnchor constraintEqualToAnchor:buttonPlaceHolder.trailingAnchor constant:-jailbreakHorizontalInset],
         [self.jailbreakBtn.heightAnchor constraintEqualToAnchor:buttonPlaceHolder.heightAnchor],
-        [self.jailbreakBtn.centerYAnchor constraintEqualToAnchor:buttonPlaceHolder.centerYAnchor]
+        self.customGlassJailbreakCenterYConstraint
     ])];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
@@ -790,6 +803,12 @@
 {
     if (self.jailbreakBtn.didExpand)
         return;
+
+    if (self.customGlassJailbreakCenterYConstraint &&
+        self.customGlassJailbreakCenterYConstraint.constant != 0.0) {
+        self.customGlassJailbreakCenterYConstraint.constant = 0.0;
+        [self.view layoutIfNeeded];
+    }
 
     NSString *title = environmentUpdate ? DOLocalizedString(@"Button_Update_Environment") : DOLocalizedString(@"Button_Update_Available");
     
