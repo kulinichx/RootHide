@@ -20,9 +20,383 @@
 #pragma mark - Custom Glass Theme Settings V1
 
 static NSString * const DOCustomGlassBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
+static NSString * const DOCustomGlassBlurIntensityKey = @"DOCustomGlassTheme.GlassBlurIntensity";
+static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.GlassTransparency";
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
+
+@interface DOCustomGlassAppearanceViewController : UIViewController
+
+@property UIVisualEffectView *backgroundBlurView;
+@property UIVisualEffectView *previewGlassView;
+@property UIView *previewShadeView;
+@property UIView *previewTintView;
+@property UIViewPropertyAnimator *backgroundBlurAnimator;
+@property UIViewPropertyAnimator *glassBlurAnimator;
+
+@property UISlider *backgroundBlurSlider;
+@property UISlider *glassBlurSlider;
+@property UISlider *glassTransparencySlider;
+@property UISlider *glassTintSlider;
+
+@property UILabel *backgroundBlurValueLabel;
+@property UILabel *glassBlurValueLabel;
+@property UILabel *glassTransparencyValueLabel;
+@property UILabel *glassTintValueLabel;
+
+@end
+
+@implementation DOCustomGlassAppearanceViewController
+
+- (UIVisualEffectView *)fixedGlassViewWithCornerRadius:(CGFloat)cornerRadius tintAlpha:(CGFloat)tintAlpha
+{
+    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    UIVisualEffectView *glassView = [[UIVisualEffectView alloc] initWithEffect:blur];
+    glassView.translatesAutoresizingMaskIntoConstraints = NO;
+    glassView.layer.cornerRadius = cornerRadius;
+    glassView.layer.cornerCurve = kCACornerCurveContinuous;
+    glassView.layer.masksToBounds = YES;
+    glassView.layer.borderWidth = 0.7;
+    glassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
+    glassView.contentView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:tintAlpha];
+    return glassView;
+}
+
+- (UILabel *)valueLabel
+{
+    UILabel *label = [[UILabel alloc] init];
+    label.textColor = [UIColor colorWithWhite:1.0 alpha:0.68];
+    label.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+    label.textAlignment = NSTextAlignmentRight;
+    [label.widthAnchor constraintEqualToConstant:48.0].active = YES;
+    return label;
+}
+
+- (UISlider *)appearanceSlider
+{
+    UISlider *slider = [[UISlider alloc] init];
+    slider.minimumTrackTintColor = [UIColor colorWithWhite:1.0 alpha:0.88];
+    slider.maximumTrackTintColor = [UIColor colorWithWhite:1.0 alpha:0.24];
+    [slider addTarget:self action:@selector(appearanceSliderChanged:) forControlEvents:UIControlEventValueChanged];
+    return slider;
+}
+
+- (UIView *)controlRowWithTitle:(NSString *)title
+                      subtitle:(NSString *)subtitle
+                        slider:(UISlider *)slider
+                    valueLabel:(UILabel *)valueLabel
+{
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = title;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+
+    UILabel *subtitleLabel = [[UILabel alloc] init];
+    subtitleLabel.text = subtitle;
+    subtitleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.52];
+    subtitleLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightRegular];
+
+    UIStackView *titleStack = [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, subtitleLabel]];
+    titleStack.axis = UILayoutConstraintAxisVertical;
+    titleStack.spacing = 2.0;
+
+    UIStackView *headerRow = [[UIStackView alloc] initWithArrangedSubviews:@[titleStack, valueLabel]];
+    headerRow.axis = UILayoutConstraintAxisHorizontal;
+    headerRow.alignment = UIStackViewAlignmentCenter;
+    headerRow.spacing = 10.0;
+
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[headerRow, slider]];
+    row.axis = UILayoutConstraintAxisVertical;
+    row.spacing = 7.0;
+    return row;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+
+    self.title = @"外观效果";
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    self.view.backgroundColor = UIColor.clearColor;
+
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        DOCustomGlassBackgroundBlurKey : @0.10,
+        DOCustomGlassBlurIntensityKey : @0.85,
+        DOCustomGlassTransparencyKey : @0.70,
+        DOCustomGlassTintAlphaKey : @0.05
+    }];
+
+    BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+
+    // This view stays transparent so the currently active app wallpaper remains
+    // visible across the entire editor. The first visual-effect view applies
+    // only the user-selected wallpaper blur.
+    self.backgroundBlurView = [[UIVisualEffectView alloc] initWithEffect:nil];
+    self.backgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.backgroundBlurView.userInteractionEnabled = NO;
+    [self.view addSubview:self.backgroundBlurView];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.backgroundBlurView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.backgroundBlurView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.backgroundBlurView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.backgroundBlurView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+
+    UIScrollView *scrollView = [[UIScrollView alloc] init];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.alwaysBounceVertical = YES;
+    scrollView.showsVerticalScrollIndicator = NO;
+    [self.view addSubview:scrollView];
+
+    UIStackView *contentStack = [[UIStackView alloc] init];
+    contentStack.axis = UILayoutConstraintAxisVertical;
+    contentStack.alignment = UIStackViewAlignmentCenter;
+    contentStack.spacing = isPad ? 24.0 : 20.0;
+    contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [scrollView addSubview:contentStack];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        [contentStack.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:(isPad ? 28.0 : 22.0)],
+        [contentStack.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor constant:-34.0],
+        [contentStack.centerXAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.centerXAnchor],
+        [contentStack.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor]
+    ]];
+
+    UILabel *previewLabel = [[UILabel alloc] init];
+    previewLabel.text = @"实时预览";
+    previewLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.70];
+    previewLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+    [contentStack addArrangedSubview:previewLabel];
+
+    // A real home-card-shaped preview. Its blur, density and tint are changed
+    // live by the controls below while the wallpaper remains visible behind it.
+    self.previewGlassView = [[UIVisualEffectView alloc] initWithEffect:nil];
+    self.previewGlassView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.previewGlassView.layer.cornerRadius = 24.0;
+    self.previewGlassView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.previewGlassView.layer.masksToBounds = YES;
+    self.previewGlassView.layer.borderWidth = 0.7;
+    [contentStack addArrangedSubview:self.previewGlassView];
+
+    CGFloat previewWidth = isPad ? 330.0 : 250.0;
+    CGFloat previewHeight = isPad ? 190.0 : 158.0;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.previewGlassView.widthAnchor constraintEqualToConstant:previewWidth],
+        [self.previewGlassView.heightAnchor constraintEqualToConstant:previewHeight]
+    ]];
+
+    self.previewShadeView = [[UIView alloc] init];
+    self.previewShadeView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.previewShadeView.userInteractionEnabled = NO;
+    [self.previewGlassView.contentView addSubview:self.previewShadeView];
+
+    self.previewTintView = [[UIView alloc] init];
+    self.previewTintView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.previewTintView.userInteractionEnabled = NO;
+    [self.previewGlassView.contentView addSubview:self.previewTintView];
+
+    UIImageSymbolConfiguration *previewSymbolConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 27.0 : 23.0)
+                                                        weight:UIImageSymbolWeightMedium
+                                                         scale:UIImageSymbolScaleMedium];
+    UIImageView *previewIcon = [[UIImageView alloc] initWithImage:
+        [UIImage systemImageNamed:@"gearshape" withConfiguration:previewSymbolConfiguration]];
+    previewIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    previewIcon.tintColor = UIColor.whiteColor;
+
+    UILabel *previewTitle = [[UILabel alloc] init];
+    previewTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    previewTitle.text = @"设置";
+    previewTitle.textColor = UIColor.whiteColor;
+    previewTitle.font = [UIFont systemFontOfSize:(isPad ? 21.0 : 18.0) weight:UIFontWeightSemibold];
+
+    UIStackView *previewContent = [[UIStackView alloc] initWithArrangedSubviews:@[previewIcon, previewTitle]];
+    previewContent.translatesAutoresizingMaskIntoConstraints = NO;
+    previewContent.axis = UILayoutConstraintAxisHorizontal;
+    previewContent.alignment = UIStackViewAlignmentCenter;
+    previewContent.spacing = 12.0;
+    [self.previewGlassView.contentView addSubview:previewContent];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.previewShadeView.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor],
+        [self.previewShadeView.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor],
+        [self.previewShadeView.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor],
+        [self.previewShadeView.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor],
+
+        [self.previewTintView.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor],
+        [self.previewTintView.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor],
+        [self.previewTintView.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor],
+        [self.previewTintView.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor],
+
+        [previewContent.centerXAnchor constraintEqualToAnchor:self.previewGlassView.contentView.centerXAnchor],
+        [previewContent.centerYAnchor constraintEqualToAnchor:self.previewGlassView.contentView.centerYAnchor],
+        [previewIcon.widthAnchor constraintEqualToConstant:(isPad ? 31.0 : 27.0)],
+        [previewIcon.heightAnchor constraintEqualToConstant:(isPad ? 31.0 : 27.0)]
+    ]];
+
+    UIVisualEffectView *controlsCard = [self fixedGlassViewWithCornerRadius:26.0 tintAlpha:0.065];
+    [contentStack addArrangedSubview:controlsCard];
+
+    NSLayoutConstraint *controlsWidth =
+        [controlsCard.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor
+                                                 constant:(isPad ? -80.0 : -40.0)];
+    controlsWidth.priority = UILayoutPriorityDefaultHigh;
+    controlsWidth.active = YES;
+    [controlsCard.widthAnchor constraintLessThanOrEqualToConstant:560.0].active = YES;
+
+    UIStackView *controlsStack = [[UIStackView alloc] init];
+    controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
+    controlsStack.axis = UILayoutConstraintAxisVertical;
+    controlsStack.spacing = 17.0;
+    [controlsCard.contentView addSubview:controlsStack];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [controlsStack.leadingAnchor constraintEqualToAnchor:controlsCard.contentView.leadingAnchor constant:20.0],
+        [controlsStack.trailingAnchor constraintEqualToAnchor:controlsCard.contentView.trailingAnchor constant:-20.0],
+        [controlsStack.topAnchor constraintEqualToAnchor:controlsCard.contentView.topAnchor constant:20.0],
+        [controlsStack.bottomAnchor constraintEqualToAnchor:controlsCard.contentView.bottomAnchor constant:-18.0]
+    ]];
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+    self.backgroundBlurSlider = [self appearanceSlider];
+    self.backgroundBlurSlider.minimumValue = 0.0;
+    self.backgroundBlurSlider.maximumValue = 1.0;
+    self.backgroundBlurSlider.value = [defaults floatForKey:DOCustomGlassBackgroundBlurKey];
+    self.backgroundBlurValueLabel = [self valueLabel];
+    [controlsStack addArrangedSubview:[self controlRowWithTitle:@"壁纸模糊"
+                                                       subtitle:@"整张背景的模糊程度"
+                                                         slider:self.backgroundBlurSlider
+                                                     valueLabel:self.backgroundBlurValueLabel]];
+
+    self.glassBlurSlider = [self appearanceSlider];
+    self.glassBlurSlider.minimumValue = 0.0;
+    self.glassBlurSlider.maximumValue = 1.0;
+    self.glassBlurSlider.value = [defaults floatForKey:DOCustomGlassBlurIntensityKey];
+    self.glassBlurValueLabel = [self valueLabel];
+    [controlsStack addArrangedSubview:[self controlRowWithTitle:@"Glass 模糊"
+                                                       subtitle:@"预览玻璃自身的模糊强度"
+                                                         slider:self.glassBlurSlider
+                                                     valueLabel:self.glassBlurValueLabel]];
+
+    self.glassTransparencySlider = [self appearanceSlider];
+    self.glassTransparencySlider.minimumValue = 0.0;
+    self.glassTransparencySlider.maximumValue = 1.0;
+    self.glassTransparencySlider.value = [defaults floatForKey:DOCustomGlassTransparencyKey];
+    self.glassTransparencyValueLabel = [self valueLabel];
+    [controlsStack addArrangedSubview:[self controlRowWithTitle:@"Glass 透明度"
+                                                       subtitle:@"越高越通透"
+                                                         slider:self.glassTransparencySlider
+                                                     valueLabel:self.glassTransparencyValueLabel]];
+
+    self.glassTintSlider = [self appearanceSlider];
+    self.glassTintSlider.minimumValue = 0.0;
+    self.glassTintSlider.maximumValue = 0.16;
+    self.glassTintSlider.value = [defaults floatForKey:DOCustomGlassTintAlphaKey];
+    self.glassTintValueLabel = [self valueLabel];
+    [controlsStack addArrangedSubview:[self controlRowWithTitle:@"Glass 高光"
+                                                       subtitle:@"玻璃表面的白色高光强度"
+                                                         slider:self.glassTintSlider
+                                                     valueLabel:self.glassTintValueLabel]];
+
+    UIButtonConfiguration *resetConfiguration = [UIButtonConfiguration plainButtonConfiguration];
+    resetConfiguration.title = @"恢复推荐值";
+    resetConfiguration.image = [UIImage systemImageNamed:@"arrow.counterclockwise"];
+    resetConfiguration.imagePadding = 7.0;
+    resetConfiguration.baseForegroundColor = [UIColor colorWithWhite:1.0 alpha:0.86];
+
+    UIButton *resetButton = [UIButton buttonWithConfiguration:resetConfiguration primaryAction:
+        [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+            [self restoreRecommendedAppearanceValues];
+        }]];
+    [controlsStack addArrangedSubview:resetButton];
+    [resetButton.heightAnchor constraintEqualToConstant:38.0].active = YES;
+
+    __weak typeof(self) weakSelf = self;
+    UIBlurEffect *backgroundBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleRegular];
+    self.backgroundBlurAnimator =
+        [[UIViewPropertyAnimator alloc] initWithDuration:1.0 curve:UIViewAnimationCurveLinear animations:^{
+            weakSelf.backgroundBlurView.effect = backgroundBlur;
+        }];
+    [self.backgroundBlurAnimator pauseAnimation];
+
+    UIBlurEffect *glassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    self.glassBlurAnimator =
+        [[UIViewPropertyAnimator alloc] initWithDuration:1.0 curve:UIViewAnimationCurveLinear animations:^{
+            weakSelf.previewGlassView.effect = glassBlur;
+        }];
+    [self.glassBlurAnimator pauseAnimation];
+
+    [self applyAppearancePreviewAndPersist:NO];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self applyAppearancePreviewAndPersist:NO];
+}
+
+- (void)appearanceSliderChanged:(UISlider *)slider
+{
+    [self applyAppearancePreviewAndPersist:YES];
+}
+
+- (void)applyAppearancePreviewAndPersist:(BOOL)persist
+{
+    CGFloat backgroundBlur = self.backgroundBlurSlider.value;
+    CGFloat glassBlur = self.glassBlurSlider.value;
+    CGFloat transparency = self.glassTransparencySlider.value;
+    CGFloat tintAlpha = self.glassTintSlider.value;
+
+    self.backgroundBlurAnimator.fractionComplete = backgroundBlur;
+    self.glassBlurAnimator.fractionComplete = glassBlur;
+
+    // Transparency changes the dark density independently from blur. This gives
+    // the preview a useful "more solid <-> more transparent" control.
+    CGFloat shadeAlpha = 0.20 * (1.0 - transparency);
+    self.previewShadeView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:shadeAlpha];
+    self.previewTintView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:tintAlpha];
+
+    CGFloat borderAlpha = 0.12 + ((1.0 - transparency) * 0.16);
+    self.previewGlassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:borderAlpha].CGColor;
+
+    self.backgroundBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", backgroundBlur * 100.0];
+    self.glassBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", glassBlur * 100.0];
+    self.glassTransparencyValueLabel.text = [NSString stringWithFormat:@"%.0f%%", transparency * 100.0];
+    self.glassTintValueLabel.text = [NSString stringWithFormat:@"%.0f%%", (tintAlpha / 0.16) * 100.0];
+
+    if (persist) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setFloat:backgroundBlur forKey:DOCustomGlassBackgroundBlurKey];
+        [defaults setFloat:glassBlur forKey:DOCustomGlassBlurIntensityKey];
+        [defaults setFloat:transparency forKey:DOCustomGlassTransparencyKey];
+        [defaults setFloat:tintAlpha forKey:DOCustomGlassTintAlphaKey];
+    }
+}
+
+- (void)restoreRecommendedAppearanceValues
+{
+    self.backgroundBlurSlider.value = 0.10;
+    self.glassBlurSlider.value = 0.85;
+    self.glassTransparencySlider.value = 0.70;
+    self.glassTintSlider.value = 0.05;
+    [self applyAppearancePreviewAndPersist:YES];
+}
+
+- (void)dealloc
+{
+    [self.backgroundBlurAnimator stopAnimation:YES];
+    [self.glassBlurAnimator stopAnimation:YES];
+}
+
+@end
 
 @interface DOCustomGlassThemeSettingsViewController : UIViewController
 @end
@@ -156,7 +530,9 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
     self.view.backgroundColor = UIColor.clearColor;
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-        DOCustomGlassBackgroundBlurKey : @0.0,
+        DOCustomGlassBackgroundBlurKey : @0.10,
+        DOCustomGlassBlurIntensityKey : @0.85,
+        DOCustomGlassTransparencyKey : @0.70,
         DOCustomGlassTintAlphaKey : @0.05,
         DOCustomGlassUsernameKey : @"",
         DOCustomGlassMottoKey : @""
@@ -216,7 +592,7 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 
     UILabel *heroSubtitle = [[UILabel alloc] init];
     heroSubtitle.translatesAutoresizingMaskIntoConstraints = NO;
-    heroSubtitle.text = @"背景、个人资料与 Glass 参数";
+    heroSubtitle.text = @"背景、个人资料与外观效果";
     heroSubtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.62];
     heroSubtitle.font = [UIFont systemFontOfSize:(isPad ? 14.0 : 13.0) weight:UIFontWeightRegular];
 
@@ -254,11 +630,13 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
         [weakSelf showThemePlaceholderForTitle:@"背景"];
     }]]];
 
-    [contentStack addArrangedSubview:[self themeRowWithTitle:@"背景模糊"
-                                                    subtitle:@"调整背景的模糊程度"
-                                                   imageName:@"drop"
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"外观效果"
+                                                    subtitle:@"实时调整壁纸模糊与 Glass"
+                                                   imageName:@"slider.horizontal.3"
                                                       action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [weakSelf showThemePlaceholderForTitle:@"背景模糊"];
+        DOCustomGlassAppearanceViewController *appearanceController =
+            [[DOCustomGlassAppearanceViewController alloc] init];
+        [weakSelf.navigationController pushViewController:appearanceController animated:YES];
     }]]];
 
     UIView *profileSpacer = [[UIView alloc] init];
@@ -280,20 +658,6 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
                                                    imageName:@"textformat"
                                                       action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         [weakSelf showThemePlaceholderForTitle:@"个人资料"];
-    }]]];
-
-    UIView *glassSpacer = [[UIView alloc] init];
-    [contentStack addArrangedSubview:glassSpacer];
-    [glassSpacer.heightAnchor constraintEqualToConstant:8.0].active = YES;
-
-    UILabel *glassLabel = [self themeSectionLabelWithText:@"Glass"];
-    [contentStack addArrangedSubview:glassLabel];
-
-    [contentStack addArrangedSubview:[self themeRowWithTitle:@"Glass 参数"
-                                                    subtitle:@"模糊、透明度与材质强度"
-                                                   imageName:@"slider.horizontal.3"
-                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [weakSelf showThemePlaceholderForTitle:@"Glass 参数"];
     }]]];
 
     UIView *manageSpacer = [[UIView alloc] init];
