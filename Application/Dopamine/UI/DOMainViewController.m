@@ -26,6 +26,23 @@ static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTi
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 
+static UIButton *DOCustomGlassBackButton(UIViewController *controller)
+{
+    UIButtonConfiguration *configuration = [UIButtonConfiguration plainButtonConfiguration];
+    configuration.image = [UIImage systemImageNamed:@"chevron.left"];
+    configuration.baseForegroundColor = UIColor.whiteColor;
+    configuration.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 10.0, 8.0, 10.0);
+
+    __weak UIViewController *weakController = controller;
+    UIButton *button = [UIButton buttonWithConfiguration:configuration
+                                           primaryAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakController.navigationController popViewControllerAnimated:YES];
+    }]];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.accessibilityLabel = @"返回";
+    return button;
+}
+
 @interface DOCustomGlassAppearanceViewController : UIViewController
 
 @property UIVisualEffectView *backgroundBlurView;
@@ -129,6 +146,15 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
 
+    UIButton *backButton = DOCustomGlassBackButton(self);
+    [self.view addSubview:backButton];
+    [NSLayoutConstraint activateConstraints:@[
+        [backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:12.0],
+        [backButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4.0],
+        [backButton.widthAnchor constraintEqualToConstant:44.0],
+        [backButton.heightAnchor constraintEqualToConstant:40.0]
+    ]];
+
     // This view stays transparent so the currently active app wallpaper remains
     // visible across the entire editor. The first visual-effect view applies
     // only the user-selected wallpaper blur.
@@ -153,44 +179,38 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
     UIStackView *contentStack = [[UIStackView alloc] init];
     contentStack.axis = UILayoutConstraintAxisVertical;
     contentStack.alignment = UIStackViewAlignmentCenter;
-    contentStack.spacing = isPad ? 24.0 : 20.0;
+    contentStack.spacing = isPad ? 18.0 : 14.0;
     contentStack.translatesAutoresizingMaskIntoConstraints = NO;
     [scrollView addSubview:contentStack];
 
     [NSLayoutConstraint activateConstraints:@[
         [scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:48.0],
         [scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
-        [contentStack.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:(isPad ? 28.0 : 22.0)],
+        [contentStack.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:(isPad ? 18.0 : 12.0)],
         [contentStack.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor constant:-34.0],
         [contentStack.centerXAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.centerXAnchor],
         [contentStack.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor]
     ]];
 
-    UILabel *previewLabel = [[UILabel alloc] init];
-    previewLabel.text = @"实时预览";
-    previewLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.70];
-    previewLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
-    [contentStack addArrangedSubview:previewLabel];
-
-    // A real home-card-shaped preview. Its blur, density and tint are changed
-    // live by the controls below while the wallpaper remains visible behind it.
+    // The adjustment panel is also the live Glass preview, so wallpaper and
+    // material changes can be judged together without a redundant preview card.
     self.previewGlassView = [[UIVisualEffectView alloc] initWithEffect:nil];
     self.previewGlassView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.previewGlassView.layer.cornerRadius = 24.0;
+    self.previewGlassView.layer.cornerRadius = 26.0;
     self.previewGlassView.layer.cornerCurve = kCACornerCurveContinuous;
     self.previewGlassView.layer.masksToBounds = YES;
     self.previewGlassView.layer.borderWidth = 0.7;
     [contentStack addArrangedSubview:self.previewGlassView];
 
-    CGFloat previewWidth = isPad ? 330.0 : 250.0;
-    CGFloat previewHeight = isPad ? 190.0 : 158.0;
-    [NSLayoutConstraint activateConstraints:@[
-        [self.previewGlassView.widthAnchor constraintEqualToConstant:previewWidth],
-        [self.previewGlassView.heightAnchor constraintEqualToConstant:previewHeight]
-    ]];
+    NSLayoutConstraint *controlsWidth =
+        [self.previewGlassView.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor
+                                                          constant:(isPad ? -80.0 : -40.0)];
+    controlsWidth.priority = UILayoutPriorityDefaultHigh;
+    controlsWidth.active = YES;
+    [self.previewGlassView.widthAnchor constraintLessThanOrEqualToConstant:560.0].active = YES;
 
     self.previewShadeView = [[UIView alloc] init];
     self.previewShadeView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -202,28 +222,6 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
     self.previewTintView.userInteractionEnabled = NO;
     [self.previewGlassView.contentView addSubview:self.previewTintView];
 
-    UIImageSymbolConfiguration *previewSymbolConfiguration =
-        [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 27.0 : 23.0)
-                                                        weight:UIImageSymbolWeightMedium
-                                                         scale:UIImageSymbolScaleMedium];
-    UIImageView *previewIcon = [[UIImageView alloc] initWithImage:
-        [UIImage systemImageNamed:@"gearshape" withConfiguration:previewSymbolConfiguration]];
-    previewIcon.translatesAutoresizingMaskIntoConstraints = NO;
-    previewIcon.tintColor = UIColor.whiteColor;
-
-    UILabel *previewTitle = [[UILabel alloc] init];
-    previewTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    previewTitle.text = @"设置";
-    previewTitle.textColor = UIColor.whiteColor;
-    previewTitle.font = [UIFont systemFontOfSize:(isPad ? 21.0 : 18.0) weight:UIFontWeightSemibold];
-
-    UIStackView *previewContent = [[UIStackView alloc] initWithArrangedSubviews:@[previewIcon, previewTitle]];
-    previewContent.translatesAutoresizingMaskIntoConstraints = NO;
-    previewContent.axis = UILayoutConstraintAxisHorizontal;
-    previewContent.alignment = UIStackViewAlignmentCenter;
-    previewContent.spacing = 12.0;
-    [self.previewGlassView.contentView addSubview:previewContent];
-
     [NSLayoutConstraint activateConstraints:@[
         [self.previewShadeView.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor],
         [self.previewShadeView.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor],
@@ -233,35 +231,20 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
         [self.previewTintView.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor],
         [self.previewTintView.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor],
         [self.previewTintView.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor],
-        [self.previewTintView.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor],
-
-        [previewContent.centerXAnchor constraintEqualToAnchor:self.previewGlassView.contentView.centerXAnchor],
-        [previewContent.centerYAnchor constraintEqualToAnchor:self.previewGlassView.contentView.centerYAnchor],
-        [previewIcon.widthAnchor constraintEqualToConstant:(isPad ? 31.0 : 27.0)],
-        [previewIcon.heightAnchor constraintEqualToConstant:(isPad ? 31.0 : 27.0)]
+        [self.previewTintView.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor]
     ]];
-
-    UIVisualEffectView *controlsCard = [self fixedGlassViewWithCornerRadius:26.0 tintAlpha:0.065];
-    [contentStack addArrangedSubview:controlsCard];
-
-    NSLayoutConstraint *controlsWidth =
-        [controlsCard.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor
-                                                 constant:(isPad ? -80.0 : -40.0)];
-    controlsWidth.priority = UILayoutPriorityDefaultHigh;
-    controlsWidth.active = YES;
-    [controlsCard.widthAnchor constraintLessThanOrEqualToConstant:560.0].active = YES;
 
     UIStackView *controlsStack = [[UIStackView alloc] init];
     controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
     controlsStack.axis = UILayoutConstraintAxisVertical;
     controlsStack.spacing = 17.0;
-    [controlsCard.contentView addSubview:controlsStack];
+    [self.previewGlassView.contentView addSubview:controlsStack];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlsStack.leadingAnchor constraintEqualToAnchor:controlsCard.contentView.leadingAnchor constant:20.0],
-        [controlsStack.trailingAnchor constraintEqualToAnchor:controlsCard.contentView.trailingAnchor constant:-20.0],
-        [controlsStack.topAnchor constraintEqualToAnchor:controlsCard.contentView.topAnchor constant:20.0],
-        [controlsStack.bottomAnchor constraintEqualToAnchor:controlsCard.contentView.bottomAnchor constant:-18.0]
+        [controlsStack.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor constant:20.0],
+        [controlsStack.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor constant:-20.0],
+        [controlsStack.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor constant:20.0],
+        [controlsStack.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor constant:-18.0]
     ]];
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -540,6 +523,15 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
 
+    UIButton *backButton = DOCustomGlassBackButton(self);
+    [self.view addSubview:backButton];
+    [NSLayoutConstraint activateConstraints:@[
+        [backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:12.0],
+        [backButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4.0],
+        [backButton.widthAnchor constraintEqualToConstant:44.0],
+        [backButton.heightAnchor constraintEqualToConstant:40.0]
+    ]];
+
     UIScrollView *scrollView = [[UIScrollView alloc] init];
     scrollView.translatesAutoresizingMaskIntoConstraints = NO;
     scrollView.alwaysBounceVertical = YES;
@@ -549,17 +541,17 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
     UIStackView *contentStack = [[UIStackView alloc] init];
     contentStack.axis = UILayoutConstraintAxisVertical;
     contentStack.alignment = UIStackViewAlignmentFill;
-    contentStack.spacing = 10.0;
+    contentStack.spacing = 9.0;
     contentStack.translatesAutoresizingMaskIntoConstraints = NO;
     [scrollView addSubview:contentStack];
 
     [NSLayoutConstraint activateConstraints:@[
         [scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:48.0],
         [scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
-        [contentStack.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:(isPad ? 24.0 : 18.0)],
+        [contentStack.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:(isPad ? 12.0 : 8.0)],
         [contentStack.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor constant:-32.0],
         [contentStack.centerXAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.centerXAnchor],
         [contentStack.widthAnchor constraintLessThanOrEqualToConstant:620.0]
@@ -569,55 +561,6 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
         [contentStack.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor constant:(isPad ? -56.0 : -40.0)];
     responsiveWidth.priority = UILayoutPriorityDefaultHigh;
     responsiveWidth.active = YES;
-
-    UIVisualEffectView *heroCard = [self themeGlassViewWithCornerRadius:28.0 tintAlpha:0.065];
-    [contentStack addArrangedSubview:heroCard];
-    [heroCard.heightAnchor constraintEqualToConstant:(isPad ? 124.0 : 112.0)].active = YES;
-
-    UIImageSymbolConfiguration *heroSymbolConfiguration =
-        [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 34.0 : 30.0)
-                                                        weight:UIImageSymbolWeightMedium
-                                                         scale:UIImageSymbolScaleMedium];
-    UIImageView *heroIcon = [[UIImageView alloc] initWithImage:
-        [UIImage systemImageNamed:@"slider.horizontal.3" withConfiguration:heroSymbolConfiguration]];
-    heroIcon.translatesAutoresizingMaskIntoConstraints = NO;
-    heroIcon.tintColor = UIColor.whiteColor;
-    heroIcon.contentMode = UIViewContentModeScaleAspectFit;
-
-    UILabel *heroTitle = [[UILabel alloc] init];
-    heroTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    heroTitle.text = @"Custom Glass";
-    heroTitle.textColor = UIColor.whiteColor;
-    heroTitle.font = [UIFont systemFontOfSize:(isPad ? 24.0 : 22.0) weight:UIFontWeightBold];
-
-    UILabel *heroSubtitle = [[UILabel alloc] init];
-    heroSubtitle.translatesAutoresizingMaskIntoConstraints = NO;
-    heroSubtitle.text = @"背景、个人资料与外观效果";
-    heroSubtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.62];
-    heroSubtitle.font = [UIFont systemFontOfSize:(isPad ? 14.0 : 13.0) weight:UIFontWeightRegular];
-
-    [heroCard.contentView addSubview:heroIcon];
-    [heroCard.contentView addSubview:heroTitle];
-    [heroCard.contentView addSubview:heroSubtitle];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [heroIcon.leadingAnchor constraintEqualToAnchor:heroCard.contentView.leadingAnchor constant:22.0],
-        [heroIcon.centerYAnchor constraintEqualToAnchor:heroCard.contentView.centerYAnchor],
-        [heroIcon.widthAnchor constraintEqualToConstant:(isPad ? 44.0 : 40.0)],
-        [heroIcon.heightAnchor constraintEqualToConstant:(isPad ? 44.0 : 40.0)],
-
-        [heroTitle.leadingAnchor constraintEqualToAnchor:heroIcon.trailingAnchor constant:18.0],
-        [heroTitle.trailingAnchor constraintLessThanOrEqualToAnchor:heroCard.contentView.trailingAnchor constant:-20.0],
-        [heroTitle.bottomAnchor constraintEqualToAnchor:heroCard.contentView.centerYAnchor constant:-2.0],
-
-        [heroSubtitle.leadingAnchor constraintEqualToAnchor:heroTitle.leadingAnchor],
-        [heroSubtitle.trailingAnchor constraintLessThanOrEqualToAnchor:heroCard.contentView.trailingAnchor constant:-20.0],
-        [heroSubtitle.topAnchor constraintEqualToAnchor:heroCard.contentView.centerYAnchor constant:6.0]
-    ]];
-
-    UIView *topSpacer = [[UIView alloc] init];
-    [contentStack addArrangedSubview:topSpacer];
-    [topSpacer.heightAnchor constraintEqualToConstant:4.0].active = YES;
 
     UILabel *appearanceLabel = [self themeSectionLabelWithText:@"外观"];
     [contentStack addArrangedSubview:appearanceLabel];

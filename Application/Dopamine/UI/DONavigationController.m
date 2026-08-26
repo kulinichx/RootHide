@@ -25,6 +25,11 @@
 
 @implementation DONavigationController
 
+- (BOOL)isCustomGlassFullScreenViewController:(UIViewController *)viewController
+{
+    return [NSStringFromClass(viewController.class) hasPrefix:@"DOCustomGlass"];
+}
+
 - (void)viewDidLoad
 {
     [self setupBackground];
@@ -96,7 +101,9 @@
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated
 {
-    [self setBackgroundDimmed:![viewController isKindOfClass:[DOMainViewController class]]];
+    BOOL isMainView = [viewController isKindOfClass:[DOMainViewController class]];
+    BOOL isCustomGlassView = [self isCustomGlassFullScreenViewController:viewController];
+    [self setBackgroundDimmed:!(isMainView || isCustomGlassView)];
     [self.backAction setIgnoreFrame:[self _frameForViewController:viewController]];
 }
 
@@ -105,7 +112,8 @@
 -(CGRect)_frameForViewController:(id)viewController
 {
     CGRect orig = [super _frameForViewController: viewController];
-    if ([[viewController class] isEqual: [DOMainViewController class]])
+    if ([[viewController class] isEqual:[DOMainViewController class]] ||
+        [self isCustomGlassFullScreenViewController:viewController])
         return orig;
     
     orig.size.width = fmin(orig.size.width - UI_MODAL_PADDING * 2, UI_IPAD_MAX_WIDTH);
