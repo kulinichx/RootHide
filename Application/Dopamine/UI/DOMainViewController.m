@@ -17,6 +17,302 @@
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
 
+#pragma mark - Custom Glass Theme Settings V1
+
+static NSString * const DOCustomGlassBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
+static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
+static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
+static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
+
+@interface DOCustomGlassThemeSettingsViewController : UIViewController
+@end
+
+@implementation DOCustomGlassThemeSettingsViewController
+
+- (UIVisualEffectView *)themeGlassViewWithCornerRadius:(CGFloat)cornerRadius tintAlpha:(CGFloat)tintAlpha
+{
+    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    UIVisualEffectView *glassView = [[UIVisualEffectView alloc] initWithEffect:blur];
+    glassView.translatesAutoresizingMaskIntoConstraints = NO;
+    glassView.layer.cornerRadius = cornerRadius;
+    glassView.layer.cornerCurve = kCACornerCurveContinuous;
+    glassView.layer.masksToBounds = YES;
+    glassView.layer.borderWidth = 0.7;
+    glassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
+    glassView.contentView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:tintAlpha];
+    return glassView;
+}
+
+- (UILabel *)themeSectionLabelWithText:(NSString *)text
+{
+    UILabel *label = [[UILabel alloc] init];
+    label.text = text;
+    label.textColor = [UIColor colorWithWhite:1.0 alpha:0.72];
+    label.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+    return label;
+}
+
+- (UIVisualEffectView *)themeRowWithTitle:(NSString *)title
+                                 subtitle:(NSString *)subtitle
+                                imageName:(NSString *)imageName
+                                   action:(UIAction *)action
+{
+    BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+    UIVisualEffectView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.045];
+
+    UIImageSymbolConfiguration *symbolConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 21.0 : 19.0)
+                                                        weight:UIImageSymbolWeightMedium
+                                                         scale:UIImageSymbolScaleMedium];
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:
+        [UIImage systemImageNamed:imageName withConfiguration:symbolConfiguration]];
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    iconView.tintColor = UIColor.whiteColor;
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = title;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:(isPad ? 17.0 : 16.0) weight:UIFontWeightSemibold];
+
+    UILabel *subtitleLabel = [[UILabel alloc] init];
+    subtitleLabel.text = subtitle;
+    subtitleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.58];
+    subtitleLabel.font = [UIFont systemFontOfSize:(isPad ? 13.0 : 12.0) weight:UIFontWeightRegular];
+    subtitleLabel.numberOfLines = 1;
+    subtitleLabel.adjustsFontSizeToFitWidth = YES;
+    subtitleLabel.minimumScaleFactor = 0.88;
+
+    UIStackView *textStack = [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, subtitleLabel]];
+    textStack.axis = UILayoutConstraintAxisVertical;
+    textStack.alignment = UIStackViewAlignmentFill;
+    textStack.spacing = 3.0;
+    textStack.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIImageSymbolConfiguration *chevronConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:13.0
+                                                        weight:UIImageSymbolWeightSemibold
+                                                         scale:UIImageSymbolScaleSmall];
+    UIImageView *chevronView = [[UIImageView alloc] initWithImage:
+        [UIImage systemImageNamed:@"chevron.right" withConfiguration:chevronConfiguration]];
+    chevronView.translatesAutoresizingMaskIntoConstraints = NO;
+    chevronView.tintColor = [UIColor colorWithWhite:1.0 alpha:0.42];
+    chevronView.contentMode = UIViewContentModeScaleAspectFit;
+
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.accessibilityLabel = title;
+    [button addAction:action forControlEvents:UIControlEventTouchUpInside];
+
+    [row.contentView addSubview:iconView];
+    [row.contentView addSubview:textStack];
+    [row.contentView addSubview:chevronView];
+    [row.contentView addSubview:button];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [row.heightAnchor constraintEqualToConstant:(isPad ? 76.0 : 70.0)],
+
+        [iconView.leadingAnchor constraintEqualToAnchor:row.contentView.leadingAnchor constant:18.0],
+        [iconView.centerYAnchor constraintEqualToAnchor:row.contentView.centerYAnchor],
+        [iconView.widthAnchor constraintEqualToConstant:(isPad ? 28.0 : 26.0)],
+        [iconView.heightAnchor constraintEqualToConstant:(isPad ? 28.0 : 26.0)],
+
+        [textStack.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:14.0],
+        [textStack.centerYAnchor constraintEqualToAnchor:row.contentView.centerYAnchor],
+        [textStack.trailingAnchor constraintLessThanOrEqualToAnchor:chevronView.leadingAnchor constant:-12.0],
+
+        [chevronView.trailingAnchor constraintEqualToAnchor:row.contentView.trailingAnchor constant:-18.0],
+        [chevronView.centerYAnchor constraintEqualToAnchor:row.contentView.centerYAnchor],
+        [chevronView.widthAnchor constraintEqualToConstant:12.0],
+        [chevronView.heightAnchor constraintEqualToConstant:18.0],
+
+        [button.leadingAnchor constraintEqualToAnchor:row.contentView.leadingAnchor],
+        [button.trailingAnchor constraintEqualToAnchor:row.contentView.trailingAnchor],
+        [button.topAnchor constraintEqualToAnchor:row.contentView.topAnchor],
+        [button.bottomAnchor constraintEqualToAnchor:row.contentView.bottomAnchor]
+    ]];
+
+    return row;
+}
+
+- (void)showThemePlaceholderForTitle:(NSString *)title
+{
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:title
+                         message:@"基础页面已经接入；具体编辑功能会在下一阶段逐项加入。"
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close")
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+
+    self.title = @"主题设置";
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    self.view.backgroundColor = UIColor.clearColor;
+
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        DOCustomGlassBackgroundBlurKey : @0.0,
+        DOCustomGlassTintAlphaKey : @0.05,
+        DOCustomGlassUsernameKey : @"",
+        DOCustomGlassMottoKey : @""
+    }];
+
+    BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+
+    UIScrollView *scrollView = [[UIScrollView alloc] init];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.alwaysBounceVertical = YES;
+    scrollView.showsVerticalScrollIndicator = NO;
+    [self.view addSubview:scrollView];
+
+    UIStackView *contentStack = [[UIStackView alloc] init];
+    contentStack.axis = UILayoutConstraintAxisVertical;
+    contentStack.alignment = UIStackViewAlignmentFill;
+    contentStack.spacing = 10.0;
+    contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [scrollView addSubview:contentStack];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        [contentStack.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:(isPad ? 24.0 : 18.0)],
+        [contentStack.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor constant:-32.0],
+        [contentStack.centerXAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.centerXAnchor],
+        [contentStack.widthAnchor constraintLessThanOrEqualToConstant:620.0]
+    ]];
+
+    NSLayoutConstraint *responsiveWidth =
+        [contentStack.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor constant:(isPad ? -56.0 : -40.0)];
+    responsiveWidth.priority = UILayoutPriorityDefaultHigh;
+    responsiveWidth.active = YES;
+
+    UIVisualEffectView *heroCard = [self themeGlassViewWithCornerRadius:28.0 tintAlpha:0.065];
+    [contentStack addArrangedSubview:heroCard];
+    [heroCard.heightAnchor constraintEqualToConstant:(isPad ? 124.0 : 112.0)].active = YES;
+
+    UIImageSymbolConfiguration *heroSymbolConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 34.0 : 30.0)
+                                                        weight:UIImageSymbolWeightMedium
+                                                         scale:UIImageSymbolScaleMedium];
+    UIImageView *heroIcon = [[UIImageView alloc] initWithImage:
+        [UIImage systemImageNamed:@"slider.horizontal.3" withConfiguration:heroSymbolConfiguration]];
+    heroIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    heroIcon.tintColor = UIColor.whiteColor;
+    heroIcon.contentMode = UIViewContentModeScaleAspectFit;
+
+    UILabel *heroTitle = [[UILabel alloc] init];
+    heroTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    heroTitle.text = @"Custom Glass";
+    heroTitle.textColor = UIColor.whiteColor;
+    heroTitle.font = [UIFont systemFontOfSize:(isPad ? 24.0 : 22.0) weight:UIFontWeightBold];
+
+    UILabel *heroSubtitle = [[UILabel alloc] init];
+    heroSubtitle.translatesAutoresizingMaskIntoConstraints = NO;
+    heroSubtitle.text = @"背景、个人资料与 Glass 参数";
+    heroSubtitle.textColor = [UIColor colorWithWhite:1.0 alpha:0.62];
+    heroSubtitle.font = [UIFont systemFontOfSize:(isPad ? 14.0 : 13.0) weight:UIFontWeightRegular];
+
+    [heroCard.contentView addSubview:heroIcon];
+    [heroCard.contentView addSubview:heroTitle];
+    [heroCard.contentView addSubview:heroSubtitle];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [heroIcon.leadingAnchor constraintEqualToAnchor:heroCard.contentView.leadingAnchor constant:22.0],
+        [heroIcon.centerYAnchor constraintEqualToAnchor:heroCard.contentView.centerYAnchor],
+        [heroIcon.widthAnchor constraintEqualToConstant:(isPad ? 44.0 : 40.0)],
+        [heroIcon.heightAnchor constraintEqualToConstant:(isPad ? 44.0 : 40.0)],
+
+        [heroTitle.leadingAnchor constraintEqualToAnchor:heroIcon.trailingAnchor constant:18.0],
+        [heroTitle.trailingAnchor constraintLessThanOrEqualToAnchor:heroCard.contentView.trailingAnchor constant:-20.0],
+        [heroTitle.bottomAnchor constraintEqualToAnchor:heroCard.contentView.centerYAnchor constant:-2.0],
+
+        [heroSubtitle.leadingAnchor constraintEqualToAnchor:heroTitle.leadingAnchor],
+        [heroSubtitle.trailingAnchor constraintLessThanOrEqualToAnchor:heroCard.contentView.trailingAnchor constant:-20.0],
+        [heroSubtitle.topAnchor constraintEqualToAnchor:heroCard.contentView.centerYAnchor constant:6.0]
+    ]];
+
+    UIView *topSpacer = [[UIView alloc] init];
+    [contentStack addArrangedSubview:topSpacer];
+    [topSpacer.heightAnchor constraintEqualToConstant:4.0].active = YES;
+
+    UILabel *appearanceLabel = [self themeSectionLabelWithText:@"外观"];
+    [contentStack addArrangedSubview:appearanceLabel];
+
+    __weak typeof(self) weakSelf = self;
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"背景"
+                                                    subtitle:@"选择首页背景图片"
+                                                   imageName:@"photo"
+                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakSelf showThemePlaceholderForTitle:@"背景"];
+    }]]];
+
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"背景模糊"
+                                                    subtitle:@"调整背景的模糊程度"
+                                                   imageName:@"drop"
+                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakSelf showThemePlaceholderForTitle:@"背景模糊"];
+    }]]];
+
+    UIView *profileSpacer = [[UIView alloc] init];
+    [contentStack addArrangedSubview:profileSpacer];
+    [profileSpacer.heightAnchor constraintEqualToConstant:8.0].active = YES;
+
+    UILabel *profileLabel = [self themeSectionLabelWithText:@"个人资料"];
+    [contentStack addArrangedSubview:profileLabel];
+
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"头像"
+                                                    subtitle:@"选择个人头像"
+                                                   imageName:@"person.crop.circle"
+                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakSelf showThemePlaceholderForTitle:@"头像"];
+    }]]];
+
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"用户名与个性签名"
+                                                    subtitle:@"编辑首页显示的文字"
+                                                   imageName:@"textformat"
+                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakSelf showThemePlaceholderForTitle:@"个人资料"];
+    }]]];
+
+    UIView *glassSpacer = [[UIView alloc] init];
+    [contentStack addArrangedSubview:glassSpacer];
+    [glassSpacer.heightAnchor constraintEqualToConstant:8.0].active = YES;
+
+    UILabel *glassLabel = [self themeSectionLabelWithText:@"Glass"];
+    [contentStack addArrangedSubview:glassLabel];
+
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"Glass 参数"
+                                                    subtitle:@"模糊、透明度与材质强度"
+                                                   imageName:@"slider.horizontal.3"
+                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakSelf showThemePlaceholderForTitle:@"Glass 参数"];
+    }]]];
+
+    UIView *manageSpacer = [[UIView alloc] init];
+    [contentStack addArrangedSubview:manageSpacer];
+    [manageSpacer.heightAnchor constraintEqualToConstant:8.0].active = YES;
+
+    UILabel *manageLabel = [self themeSectionLabelWithText:@"管理"];
+    [contentStack addArrangedSubview:manageLabel];
+
+    [contentStack addArrangedSubview:[self themeRowWithTitle:@"恢复默认"
+                                                    subtitle:@"恢复 Custom Glass 默认配置"
+                                                   imageName:@"arrow.counterclockwise"
+                                                      action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [weakSelf showThemePlaceholderForTitle:@"恢复默认"];
+    }]]];
+}
+
+@end
+
 @interface DOMainViewController ()
 
 @property DOJailbreakButton *jailbreakBtn;
@@ -618,9 +914,9 @@
     [leftColumn addArrangedSubview:creditsCard];
 
     UIAction *themeAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Custom Glass" message:@"Theme editor will be added in the next step." preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        DOCustomGlassThemeSettingsViewController *themeSettingsController =
+            [[DOCustomGlassThemeSettingsViewController alloc] init];
+        [self.navigationController pushViewController:themeSettingsController animated:YES];
     }];
     UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"slider.horizontal.3" action:themeAction];
     themeCard.layer.cornerRadius = themeCardHeight / 2.0;
