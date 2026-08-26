@@ -253,12 +253,52 @@
 - (UIVisualEffectView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
     UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.08];
-    UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
-    button.enabled = enabled;
     innerGlass.alpha = enabled ? 1.0 : 0.45;
+
+    // Keep every restart action on the same visual grid: a fixed-width icon
+    // column and one shared text start position. The row itself stays centered.
+    UIView *contentRow = [[UIView alloc] init];
+    contentRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [innerGlass.contentView addSubview:contentRow];
+
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:imageName]];
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    iconView.tintColor = UIColor.whiteColor;
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    [contentRow addSubview:iconView];
+
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    titleLabel.text = title;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    titleLabel.textAlignment = NSTextAlignmentLeft;
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.82;
+    [contentRow addSubview:titleLabel];
+
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.enabled = enabled;
+    button.accessibilityLabel = title;
+    [button addAction:action forControlEvents:UIControlEventTouchUpInside];
     [innerGlass.contentView addSubview:button];
 
     [NSLayoutConstraint activateConstraints:@[
+        [contentRow.centerXAnchor constraintEqualToAnchor:innerGlass.contentView.centerXAnchor],
+        [contentRow.centerYAnchor constraintEqualToAnchor:innerGlass.contentView.centerYAnchor],
+        [contentRow.widthAnchor constraintEqualToAnchor:innerGlass.contentView.widthAnchor multiplier:0.72],
+        [contentRow.heightAnchor constraintEqualToConstant:28],
+
+        [iconView.leadingAnchor constraintEqualToAnchor:contentRow.leadingAnchor],
+        [iconView.centerYAnchor constraintEqualToAnchor:contentRow.centerYAnchor],
+        [iconView.widthAnchor constraintEqualToConstant:24],
+        [iconView.heightAnchor constraintEqualToConstant:24],
+
+        [titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:10],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:contentRow.trailingAnchor],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:contentRow.centerYAnchor],
+
         [button.leadingAnchor constraintEqualToAnchor:innerGlass.contentView.leadingAnchor],
         [button.trailingAnchor constraintEqualToAnchor:innerGlass.contentView.trailingAnchor],
         [button.topAnchor constraintEqualToAnchor:innerGlass.contentView.topAnchor],
@@ -318,7 +358,8 @@
     CGFloat logoHeight = isPad ? 44.0 : (compactLayout ? 40.0 : 42.0);
     CGFloat avatarSize = isPad ? 94.0 : (compactLayout ? 62.0 : 72.0);
     CGFloat avatarIconSize = avatarSize * 0.62;
-    CGFloat profileToGridSpacing = isPad ? 20.0 : (compactLayout ? 15.0 : 18.0);
+    CGFloat gridDrop = isPad ? 14.0 : (compactLayout ? 8.0 : 10.0);
+    CGFloat profileToGridSpacing = (isPad ? 20.0 : (compactLayout ? 15.0 : 18.0)) + gridDrop;
     CGFloat gridHeight = isPad ? 300.0 : (compactLayout ? 214.0 : 250.0);
     CGFloat themeCardHeight = isPad ? 60.0 : (compactLayout ? 48.0 : 52.0);
     CGFloat restartPadding = isPad ? 14.0 : (compactLayout ? 10.0 : 12.0);
@@ -565,7 +606,9 @@
     UIView *updateReserve = [[UIView alloc] init];
     updateReserve.translatesAutoresizingMaskIntoConstraints = NO;
     [mainStack addArrangedSubview:updateReserve];
-    CGFloat updateReserveHeight = [DOGlobalAppearance isHomeButtonDevice] ? 42.0 : 52.0;
+    // Move only the Glass Grid down while preserving the jailbreak bar position:
+    // the extra gap above the grid is taken back from the reserve below it.
+    CGFloat updateReserveHeight = ([DOGlobalAppearance isHomeButtonDevice] ? 42.0 : 52.0) - gridDrop;
     [updateReserve.heightAnchor constraintEqualToConstant:updateReserveHeight].active = YES;
 
     UIView *buttonPlaceHolder = [[UIView alloc] init];
