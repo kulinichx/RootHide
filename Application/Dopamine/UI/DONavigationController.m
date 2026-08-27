@@ -165,10 +165,12 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 
 static CGFloat DOCustomGlassNavigationGlobalScrimAlpha(CGFloat luminance)
 {
-    // Global intervention is deliberately tiny. It only catches wallpapers that
-    // are bright almost everywhere; local fields do the real readability work.
-    CGFloat t = DOCustomGlassNavigationClamp01((luminance - 0.62) / 0.34);
-    return 0.06 * pow(t, 1.70);
+    // Global intervention stays deliberately tiny. It only catches wallpapers
+    // that are bright almost everywhere; local fields still do the readability
+    // work. Start a little earlier so very bright media does not make clear Glass
+    // look as if its own specular highlight was increased.
+    CGFloat t = DOCustomGlassNavigationClamp01((luminance - 0.58) / 0.36);
+    return 0.08 * pow(t, 1.70);
 }
 
 static CAGradientLayer *DOCustomGlassNavigationCreateLocalizedScrimLayer(void)
@@ -193,7 +195,9 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
                                                                  CGRect viewportBounds,
                                                                  CGFloat alpha,
                                                                  CGFloat horizontalPadding,
-                                                                 CGFloat verticalPadding)
+                                                                 CGFloat verticalPadding,
+                                                                 CGFloat shoulderLocation,
+                                                                 CGFloat shoulderStrength)
 {
     if (!layer || CGRectIsEmpty(targetRect) || alpha <= 0.001) {
         layer.opacity = 0.0;
@@ -208,9 +212,10 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
     }
 
     layer.frame = fieldRect;
+    layer.locations = @[@0.0, @(DOCustomGlassNavigationClamp01(shoulderLocation)), @1.0];
     layer.colors = @[
         (id)[[UIColor blackColor] colorWithAlphaComponent:alpha].CGColor,
-        (id)[[UIColor blackColor] colorWithAlphaComponent:(alpha * 0.68)].CGColor,
+        (id)[[UIColor blackColor] colorWithAlphaComponent:(alpha * DOCustomGlassNavigationClamp01(shoulderStrength))].CGColor,
         (id)[[UIColor blackColor] colorWithAlphaComponent:0.0].CGColor,
     ];
     layer.opacity = 1.0;
@@ -595,8 +600,8 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
     CGFloat baseAlpha = DOCustomGlassNavigationGlobalScrimAlpha(globalLuminance);
     CGFloat headerAlpha = MIN(0.26, DOCustomGlassNavigationScrimAlpha(headerLuminance, 0.018) * 0.88);
     CGFloat profileAlpha = MIN(0.16, DOCustomGlassNavigationScrimAlpha(profileLuminance, 0.0) * 0.58);
-    CGFloat glassAlpha = MIN(0.31, DOCustomGlassNavigationScrimAlpha(glassLuminance, 0.030) * 1.06);
-    CGFloat jailbreakAlpha = MIN(0.29, DOCustomGlassNavigationScrimAlpha(jailbreakLuminance, 0.026) * 1.02);
+    CGFloat glassAlpha = MIN(0.35, DOCustomGlassNavigationScrimAlpha(glassLuminance, 0.035) * 1.18);
+    CGFloat jailbreakAlpha = MIN(0.35, DOCustomGlassNavigationScrimAlpha(jailbreakLuminance, 0.032) * 1.16);
 
     CGFloat baseHorizontalPadding = MAX(28.0, viewportSize.width * 0.065);
     CGFloat baseVerticalPadding = MAX(22.0, viewportSize.height * 0.026);
@@ -609,19 +614,23 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
     DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperHeaderScrimLayer,
                                                          headerFrame, viewportBounds, headerAlpha,
                                                          baseHorizontalPadding * 1.10,
-                                                         baseVerticalPadding * 1.25);
+                                                         baseVerticalPadding * 1.25,
+                                                         0.60, 0.68);
     DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperProfileScrimLayer,
                                                          profileFrame, viewportBounds, profileAlpha,
                                                          baseHorizontalPadding,
-                                                         baseVerticalPadding);
+                                                         baseVerticalPadding,
+                                                         0.56, 0.62);
     DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperGlassScrimLayer,
                                                          glassFrame, viewportBounds, glassAlpha,
-                                                         baseHorizontalPadding * 1.18,
-                                                         MAX(34.0, CGRectGetHeight(glassFrame) * 0.18));
+                                                         baseHorizontalPadding * 0.92,
+                                                         MAX(30.0, CGRectGetHeight(glassFrame) * 0.12),
+                                                         0.78, 0.88);
     DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperJailbreakScrimLayer,
                                                          jailbreakFrame, viewportBounds, jailbreakAlpha,
-                                                         baseHorizontalPadding * 1.08,
-                                                         MAX(26.0, CGRectGetHeight(jailbreakFrame) * 0.55));
+                                                         baseHorizontalPadding * 0.92,
+                                                         MAX(24.0, CGRectGetHeight(jailbreakFrame) * 0.38),
+                                                         0.76, 0.86);
     [CATransaction commit];
 
     self.customGlassWallpaperScrimSourceImage = sourceImage;
