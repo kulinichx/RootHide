@@ -17,6 +17,8 @@
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
 #import <PhotosUI/PhotosUI.h>
+#import <QuartzCore/QuartzCore.h>
+#import <math.h>
 
 #pragma mark - Custom Glass Theme Settings V1
 
@@ -26,6 +28,7 @@ static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.Glas
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
+static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
 
 static NSString *DOCustomGlassAvatarFilePath(void)
@@ -58,6 +61,263 @@ static NSString *DOCustomGlassBackgroundFilePath(void)
     return [directory stringByAppendingPathComponent:@"background.jpg"];
 }
 
+static inline CGFloat DOCustomGlassClamp01(CGFloat value)
+{
+    return MIN(1.0, MAX(0.0, value));
+}
+
+static id DOCustomGlassCreateCAFilter(NSString *type)
+{
+    Class filterClass = NSClassFromString(@"CAFilter");
+    SEL selector = NSSelectorFromString(@"filterWithType:");
+    if (!filterClass || ![filterClass respondsToSelector:selector])
+        return nil;
+
+    IMP implementation = [filterClass methodForSelector:selector];
+    typedef id (*DOCustomGlassFilterFactoryIMP)(id, SEL, id);
+    DOCustomGlassFilterFactoryIMP factory = (DOCustomGlassFilterFactoryIMP)implementation;
+    return factory(filterClass, selector, type);
+}
+
+@interface DOCustomLiquidGlassView : UIView
+
+@property(nonatomic, strong) UIView *contentView;
+@property(nonatomic, strong) UIView *neutralTintView;
+@property(nonatomic, strong) UIVisualEffectView *fallbackBlurView;
+@property(nonatomic, strong) CAGradientLayer *shoulderGradientLayer;
+@property(nonatomic, strong) CAShapeLayer *shoulderMaskLayer;
+@property(nonatomic, strong) CAGradientLayer *specularGradientLayer;
+@property(nonatomic, strong) CAShapeLayer *specularMaskLayer;
+@property(nonatomic, assign) CGFloat preferredCornerRadius;
+@property(nonatomic, assign) CGFloat baseTintAlpha;
+@property(nonatomic, assign) CGFloat materialScale;
+@property(nonatomic, assign) BOOL suppressBackdrop;
+
+- (instancetype)initWithCornerRadius:(CGFloat)cornerRadius baseTintAlpha:(CGFloat)baseTintAlpha;
+- (void)reloadMaterial;
+
+@end
+
+@implementation DOCustomLiquidGlassView
+
++ (Class)layerClass
+{
+    Class backdropClass = NSClassFromString(@"CABackdropLayer");
+    return backdropClass ?: [CALayer class];
+}
+
+- (instancetype)initWithCornerRadius:(CGFloat)cornerRadius baseTintAlpha:(CGFloat)baseTintAlpha
+{
+    self = [super initWithFrame:CGRectZero];
+    if (self) {
+        _preferredCornerRadius = MAX(0.0, cornerRadius);
+        _baseTintAlpha = MAX(0.0, baseTintAlpha);
+        _materialScale = 1.0;
+        _suppressBackdrop = NO;
+
+        self.backgroundColor = UIColor.clearColor;
+        self.clipsToBounds = YES;
+        self.layer.masksToBounds = YES;
+        self.layer.cornerRadius = _preferredCornerRadius;
+        self.layer.cornerCurve = kCACornerCurveContinuous;
+
+        _neutralTintView = [[UIView alloc] initWithFrame:CGRectZero];
+        _neutralTintView.userInteractionEnabled = NO;
+        [self addSubview:_neutralTintView];
+
+        _contentView = [[UIView alloc] initWithFrame:CGRectZero];
+        _contentView.backgroundColor = UIColor.clearColor;
+        [self addSubview:_contentView];
+
+        _shoulderGradientLayer = [CAGradientLayer layer];
+        _shoulderGradientLayer.startPoint = CGPointMake(0.02, 0.02);
+        _shoulderGradientLayer.endPoint = CGPointMake(0.98, 0.98);
+        _shoulderGradientLayer.locations = @[@0.0, @0.30, @0.58, @0.82, @1.0];
+        _shoulderGradientLayer.zPosition = 900.0;
+        _shoulderMaskLayer = [CAShapeLayer layer];
+        _shoulderMaskLayer.fillColor = UIColor.clearColor.CGColor;
+        _shoulderMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
+        _shoulderMaskLayer.lineWidth = 5.0;
+        _shoulderGradientLayer.mask = _shoulderMaskLayer;
+        [self.layer addSublayer:_shoulderGradientLayer];
+
+        _specularGradientLayer = [CAGradientLayer layer];
+        _specularGradientLayer.startPoint = CGPointMake(0.0, 0.0);
+        _specularGradientLayer.endPoint = CGPointMake(1.0, 1.0);
+        _specularGradientLayer.locations = @[@0.0, @0.24, @0.56, @0.82, @1.0];
+        _specularGradientLayer.zPosition = 901.0;
+        _specularMaskLayer = [CAShapeLayer layer];
+        _specularMaskLayer.fillColor = UIColor.clearColor.CGColor;
+        _specularMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
+        _specularMaskLayer.lineWidth = 1.05;
+        _specularGradientLayer.mask = _specularMaskLayer;
+        [self.layer addSublayer:_specularGradientLayer];
+
+        [self reloadMaterial];
+    }
+    return self;
+}
+
+- (BOOL)usesDarkAppearance
+{
+    UIUserInterfaceStyle style = self.traitCollection.userInterfaceStyle;
+    if (style == UIUserInterfaceStyleUnspecified)
+        style = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
+    return style == UIUserInterfaceStyleDark;
+}
+
+- (void)reloadMaterial
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+    CGFloat blurStrength = [defaults objectForKey:DOCustomGlassBlurIntensityKey] ?
+        [defaults floatForKey:DOCustomGlassBlurIntensityKey] : 0.85;
+    CGFloat transparency = [defaults objectForKey:DOCustomGlassTransparencyKey] ?
+        [defaults floatForKey:DOCustomGlassTransparencyKey] : 0.70;
+    CGFloat highlight = [defaults objectForKey:DOCustomGlassTintAlphaKey] ?
+        [defaults floatForKey:DOCustomGlassTintAlphaKey] : 0.05;
+
+    blurStrength = DOCustomGlassClamp01(blurStrength);
+    transparency = DOCustomGlassClamp01(transparency);
+    CGFloat highlightResponse = DOCustomGlassClamp01(highlight / 0.16);
+    CGFloat materialScale = MAX(0.0, self.materialScale);
+
+    // Keep the three controls independent:
+    // Glass blur owns the local backdrop kernel; transparency owns only the
+    // neutral transmission/body lift; highlight owns the optical rim. This
+    // avoids the old grey-material behaviour where every slider changed alpha.
+    CGFloat blurResponse = pow(blurStrength, 1.10);
+    CGFloat opticalInput = DOCustomGlassClamp01((0.68 * blurStrength) + (0.32 * highlightResponse));
+    CGFloat opticalResponse = 0.12 * opticalInput + 0.88 * pow(opticalInput, 1.80);
+    BOOL darkAppearance = [self usesDarkAppearance];
+
+    BOOL isBackdropLayer = [NSStringFromClass(self.layer.class) containsString:@"Backdrop"];
+    if (isBackdropLayer && !self.suppressBackdrop) {
+        CGFloat blurRadius = (1.0 + (10.5 * blurResponse)) * materialScale;
+        CGFloat saturation = 1.04 + (0.24 * blurResponse * MIN(1.0, materialScale));
+        CGFloat brightness = darkAppearance ?
+            (0.004 + (0.012 * blurResponse)) :
+            (0.001 + (0.005 * blurResponse));
+
+        id saturate = DOCustomGlassCreateCAFilter(@"colorSaturate");
+        id brighten = DOCustomGlassCreateCAFilter(@"colorBrightness");
+        id blur = DOCustomGlassCreateCAFilter(@"gaussianBlur");
+        NSMutableArray *filters = [NSMutableArray array];
+
+        if (saturate) {
+            [saturate setValue:@(saturation) forKey:@"inputAmount"];
+            [filters addObject:saturate];
+        }
+        if (brighten) {
+            [brighten setValue:@(brightness) forKey:@"inputAmount"];
+            [filters addObject:brighten];
+        }
+        if (blur && blurRadius > 0.05) {
+            [blur setValue:@(blurRadius) forKey:@"inputRadius"];
+            [blur setValue:@YES forKey:@"inputNormalizeEdges"];
+            [blur setValue:@YES forKey:@"inputHardEdges"];
+            [filters addObject:blur];
+        }
+
+        [self.layer setValue:filters forKey:@"filters"];
+        [self.layer setValue:@1.0 forKey:@"scale"];
+        [self.fallbackBlurView removeFromSuperview];
+        self.fallbackBlurView = nil;
+    }
+    else if (isBackdropLayer) {
+        // Used by the restart-group shell: keep only the optical boundary and
+        // do not blur a second time underneath the three real glass pills.
+        [self.layer setValue:@[] forKey:@"filters"];
+        [self.fallbackBlurView removeFromSuperview];
+        self.fallbackBlurView = nil;
+    }
+    else {
+        if (!self.fallbackBlurView) {
+            UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
+            self.fallbackBlurView = [[UIVisualEffectView alloc] initWithEffect:effect];
+            self.fallbackBlurView.userInteractionEnabled = NO;
+            [self insertSubview:self.fallbackBlurView atIndex:0];
+        }
+        self.fallbackBlurView.hidden = self.suppressBackdrop;
+        self.fallbackBlurView.alpha = self.suppressBackdrop ? 0.0 :
+            MIN(0.62, 0.16 + (0.46 * blurResponse * MIN(1.0, materialScale)));
+    }
+
+    // Transparency changes only the amount of neutral lift. At 100% the
+    // wallpaper remains almost untouched; at lower values the glass becomes
+    // slightly more substantial without acquiring a grey/brown body tint.
+    CGFloat bodyAuthority = 1.0 - transparency;
+    CGFloat tintAlpha =
+        0.003 +
+        (0.042 * bodyAuthority * MIN(1.0, materialScale)) +
+        (0.028 * self.baseTintAlpha);
+    if (darkAppearance)
+        tintAlpha += 0.003 * bodyAuthority;
+    if (self.suppressBackdrop)
+        tintAlpha *= 0.32;
+    self.neutralTintView.backgroundColor = UIColor.whiteColor;
+    self.neutralTintView.alpha = MIN(0.055, tintAlpha);
+
+    CGFloat opticalScale = self.suppressBackdrop ? MIN(0.42, materialScale) : MIN(1.08, materialScale);
+    CGFloat upperRailAlpha = MIN(0.58,
+        (0.15 + (0.26 * opticalResponse) + (0.16 * highlightResponse)) * opticalScale);
+    CGFloat secondaryRailAlpha = MIN(0.26,
+        (0.045 + (0.14 * opticalResponse) + (0.05 * highlightResponse)) * opticalScale);
+    CGFloat shoulderAlpha = MIN(0.20,
+        (0.028 + (0.10 * opticalResponse) + (0.035 * highlightResponse)) * opticalScale);
+
+    self.shoulderGradientLayer.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha * 0.82].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.34].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.62].CGColor
+    ];
+    self.specularGradientLayer.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.90].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.055 * opticalScale].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.70].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
+    ];
+
+    self.layer.borderWidth = self.suppressBackdrop ? 0.30 : 0.36;
+    self.layer.borderColor = [UIColor colorWithWhite:1.0
+                                             alpha:(0.045 + (0.085 * opticalResponse)) * opticalScale].CGColor;
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+
+    self.layer.cornerRadius = self.preferredCornerRadius;
+    self.neutralTintView.frame = self.bounds;
+    self.contentView.frame = self.bounds;
+    self.fallbackBlurView.frame = self.bounds;
+
+    CGRect rimRect = CGRectInset(self.bounds, 0.55, 0.55);
+    CGFloat rimRadius = MAX(0.0, self.preferredCornerRadius - 0.55);
+    UIBezierPath *rimPath = [UIBezierPath bezierPathWithRoundedRect:rimRect
+                                                      cornerRadius:rimRadius];
+
+    self.shoulderGradientLayer.frame = self.bounds;
+    self.shoulderMaskLayer.frame = self.bounds;
+    self.shoulderMaskLayer.path = rimPath.CGPath;
+
+    self.specularGradientLayer.frame = self.bounds;
+    self.specularMaskLayer.frame = self.bounds;
+    self.specularMaskLayer.path = rimPath.CGPath;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (previousTraitCollection.userInterfaceStyle != self.traitCollection.userInterfaceStyle)
+        [self reloadMaterial];
+}
+
+@end
+
 static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     UIButtonConfiguration *configuration = [UIButtonConfiguration plainButtonConfiguration];
@@ -79,11 +339,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 @property UIImageView *customGlassBackgroundImageView;
 @property UIVisualEffectView *backgroundBlurView;
-@property UIVisualEffectView *previewGlassView;
-@property UIView *previewShadeView;
-@property UIView *previewTintView;
+@property DOCustomLiquidGlassView *previewGlassView;
 @property UIViewPropertyAnimator *backgroundBlurAnimator;
-@property UIViewPropertyAnimator *glassBlurAnimator;
 
 @property UISlider *backgroundBlurSlider;
 @property UISlider *glassBlurSlider;
@@ -99,18 +356,21 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 @implementation DOCustomGlassThemeSettingsViewController
 
-- (UIVisualEffectView *)themeGlassViewWithCornerRadius:(CGFloat)cornerRadius tintAlpha:(CGFloat)tintAlpha
+- (DOCustomLiquidGlassView *)themeGlassViewWithCornerRadius:(CGFloat)cornerRadius tintAlpha:(CGFloat)tintAlpha
 {
-    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    UIVisualEffectView *glassView = [[UIVisualEffectView alloc] initWithEffect:blur];
+    DOCustomLiquidGlassView *glassView =
+        [[DOCustomLiquidGlassView alloc] initWithCornerRadius:cornerRadius baseTintAlpha:tintAlpha];
     glassView.translatesAutoresizingMaskIntoConstraints = NO;
-    glassView.layer.cornerRadius = cornerRadius;
-    glassView.layer.cornerCurve = kCACornerCurveContinuous;
-    glassView.layer.masksToBounds = YES;
-    glassView.layer.borderWidth = 0.7;
-    glassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
-    glassView.contentView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:tintAlpha];
     return glassView;
+}
+
+- (void)refreshLiquidGlassInView:(UIView *)view
+{
+    if ([view isKindOfClass:[DOCustomLiquidGlassView class]])
+        [(DOCustomLiquidGlassView *)view reloadMaterial];
+
+    for (UIView *subview in view.subviews)
+        [self refreshLiquidGlassInView:subview];
 }
 
 - (UILabel *)themeSectionLabelWithText:(NSString *)text
@@ -122,13 +382,13 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return label;
 }
 
-- (UIVisualEffectView *)themeRowWithTitle:(NSString *)title
+- (DOCustomLiquidGlassView *)themeRowWithTitle:(NSString *)title
                                  subtitle:(NSString *)subtitle
                                 imageName:(NSString *)imageName
                                    action:(UIAction *)action
 {
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
-    UIVisualEffectView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.045];
+    DOCustomLiquidGlassView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.045];
 
     UIImageSymbolConfiguration *symbolConfiguration =
         [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 21.0 : 19.0)
@@ -304,6 +564,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
             weakSelf.customGlassBackgroundImageView.image = image;
             weakSelf.customGlassBackgroundImageView.hidden = NO;
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
         });
     }];
 }
@@ -435,25 +697,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     UILabel *appearanceLabel = [self themeSectionLabelWithText:@"外观效果"];
     [contentStack addArrangedSubview:appearanceLabel];
 
-    // This panel is the live Glass preview and the control surface at the same
-    // time. All four current appearance options therefore remain visible here.
-    self.previewGlassView = [[UIVisualEffectView alloc] initWithEffect:nil];
-    self.previewGlassView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.previewGlassView.layer.cornerRadius = 26.0;
-    self.previewGlassView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.previewGlassView.layer.masksToBounds = YES;
-    self.previewGlassView.layer.borderWidth = 0.7;
+    // The control panel is the actual Liquid Glass renderer used by the home
+    // cards. Slider changes therefore preview the same material rather than an
+    // unrelated UIVisualEffectView approximation.
+    self.previewGlassView = [self themeGlassViewWithCornerRadius:26.0 tintAlpha:0.05];
     [contentStack addArrangedSubview:self.previewGlassView];
-
-    self.previewShadeView = [[UIView alloc] init];
-    self.previewShadeView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.previewShadeView.userInteractionEnabled = NO;
-    [self.previewGlassView.contentView addSubview:self.previewShadeView];
-
-    self.previewTintView = [[UIView alloc] init];
-    self.previewTintView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.previewTintView.userInteractionEnabled = NO;
-    [self.previewGlassView.contentView addSubview:self.previewTintView];
 
     UIStackView *controlsStack = [[UIStackView alloc] init];
     controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -462,16 +710,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [self.previewGlassView.contentView addSubview:controlsStack];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.previewShadeView.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor],
-        [self.previewShadeView.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor],
-        [self.previewShadeView.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor],
-        [self.previewShadeView.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor],
-
-        [self.previewTintView.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor],
-        [self.previewTintView.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor],
-        [self.previewTintView.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor],
-        [self.previewTintView.bottomAnchor constraintEqualToAnchor:self.previewGlassView.contentView.bottomAnchor],
-
         [controlsStack.leadingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.leadingAnchor constant:20.0],
         [controlsStack.trailingAnchor constraintEqualToAnchor:self.previewGlassView.contentView.trailingAnchor constant:-20.0],
         [controlsStack.topAnchor constraintEqualToAnchor:self.previewGlassView.contentView.topAnchor constant:18.0],
@@ -538,14 +776,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [[UIViewPropertyAnimator alloc] initWithDuration:1.0 curve:UIViewAnimationCurveLinear animations:^{
             weakSelf.backgroundBlurView.effect = backgroundBlur;
         }];
+    [self.backgroundBlurAnimator startAnimation];
     [self.backgroundBlurAnimator pauseAnimation];
-
-    UIBlurEffect *glassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    self.glassBlurAnimator =
-        [[UIViewPropertyAnimator alloc] initWithDuration:1.0 curve:UIViewAnimationCurveLinear animations:^{
-            weakSelf.previewGlassView.effect = glassBlur;
-        }];
-    [self.glassBlurAnimator pauseAnimation];
 
     UIScreenEdgePanGestureRecognizer *edgeBackGesture =
         [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeBackGesture:)];
@@ -575,19 +807,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     CGFloat tintAlpha = self.glassTintSlider.value;
 
     self.backgroundBlurAnimator.fractionComplete = backgroundBlur;
-    self.glassBlurAnimator.fractionComplete = glassBlur;
-
-    CGFloat shadeAlpha = 0.20 * (1.0 - transparency);
-    self.previewShadeView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:shadeAlpha];
-    self.previewTintView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:tintAlpha];
-
-    CGFloat borderAlpha = 0.12 + ((1.0 - transparency) * 0.16);
-    self.previewGlassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:borderAlpha].CGColor;
-
-    self.backgroundBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", backgroundBlur * 100.0];
-    self.glassBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", glassBlur * 100.0];
-    self.glassTransparencyValueLabel.text = [NSString stringWithFormat:@"%.0f%%", transparency * 100.0];
-    self.glassTintValueLabel.text = [NSString stringWithFormat:@"%.0f%%", (tintAlpha / 0.16) * 100.0];
 
     if (persist) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -595,7 +814,23 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [defaults setFloat:glassBlur forKey:DOCustomGlassBlurIntensityKey];
         [defaults setFloat:transparency forKey:DOCustomGlassTransparencyKey];
         [defaults setFloat:tintAlpha forKey:DOCustomGlassTintAlphaKey];
+
+        // DOMainViewController stays alive underneath this pushed settings page.
+        // Notify it immediately so its already-created Glass surfaces consume
+        // the same values now, rather than depending only on navigation timing.
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
     }
+
+    // Refresh every glass surface on this page, including the Background row
+    // and the live controls panel, from the exact same persisted parameters the
+    // home screen will read when it becomes visible again.
+    [self refreshLiquidGlassInView:self.view];
+
+    self.backgroundBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", backgroundBlur * 100.0];
+    self.glassBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", glassBlur * 100.0];
+    self.glassTransparencyValueLabel.text = [NSString stringWithFormat:@"%.0f%%", transparency * 100.0];
+    self.glassTintValueLabel.text = [NSString stringWithFormat:@"%.0f%%", (tintAlpha / 0.16) * 100.0];
 }
 
 - (void)restoreRecommendedAppearanceValues
@@ -621,7 +856,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)dealloc
 {
     [self.backgroundBlurAnimator stopAnimation:YES];
-    [self.glassBlurAnimator stopAnimation:YES];
 }
 
 @end
@@ -633,6 +867,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property DOActionMenuButton *updateButton;
 @property NSLayoutConstraint *customGlassJailbreakCenterYConstraint;
 @property UIImageView *customGlassBackgroundImageView;
+@property UIVisualEffectView *customGlassBackgroundBlurView;
+@property UIViewPropertyAnimator *customGlassBackgroundBlurAnimator;
 @property UIImageView *customGlassAvatarPhotoView;
 @property UILabel *customGlassMottoLabel;
 @property UIAlertController *customGlassMottoEditor;
@@ -649,6 +885,36 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     UIImage *backgroundImage = backgroundPath.length > 0 ? [UIImage imageWithContentsOfFile:backgroundPath] : nil;
     self.customGlassBackgroundImageView.image = backgroundImage;
     self.customGlassBackgroundImageView.hidden = backgroundImage == nil;
+}
+
+- (void)applyCustomGlassHomeAppearance
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    CGFloat backgroundBlur = [defaults objectForKey:DOCustomGlassBackgroundBlurKey] ?
+        [defaults floatForKey:DOCustomGlassBackgroundBlurKey] : 0.10;
+    backgroundBlur = DOCustomGlassClamp01(backgroundBlur);
+
+    if (self.customGlassBackgroundBlurAnimator)
+        self.customGlassBackgroundBlurAnimator.fractionComplete = backgroundBlur;
+
+    // Every home Glass surface is already mounted in self.view. Walking that
+    // hierarchy makes Settings / About / Theme Settings / restart pills / the
+    // restart shell / jailbreak emphasis all consume the same persisted values.
+    [self refreshCustomGlassMaterialInView:self.view];
+}
+
+- (void)customGlassThemeDidChange:(NSNotification *)notification
+{
+    if (![NSThread isMainThread]) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf customGlassThemeDidChange:notification];
+        });
+        return;
+    }
+
+    [self reloadCustomGlassBackground];
+    [self applyCustomGlassHomeAppearance];
 }
 
 - (void)presentCustomGlassAvatarPicker
@@ -924,18 +1190,21 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 #pragma mark - Custom Glass Home Prototype
 
-- (UIVisualEffectView *)customGlassViewWithCornerRadius:(CGFloat)cornerRadius tintAlpha:(CGFloat)tintAlpha
+- (DOCustomLiquidGlassView *)customGlassViewWithCornerRadius:(CGFloat)cornerRadius tintAlpha:(CGFloat)tintAlpha
 {
-    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    UIVisualEffectView *glassView = [[UIVisualEffectView alloc] initWithEffect:blur];
+    DOCustomLiquidGlassView *glassView =
+        [[DOCustomLiquidGlassView alloc] initWithCornerRadius:cornerRadius baseTintAlpha:tintAlpha];
     glassView.translatesAutoresizingMaskIntoConstraints = NO;
-    glassView.layer.cornerRadius = cornerRadius;
-    glassView.layer.cornerCurve = kCACornerCurveContinuous;
-    glassView.layer.masksToBounds = YES;
-    glassView.layer.borderWidth = 0.7;
-    glassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
-    glassView.contentView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:tintAlpha];
     return glassView;
+}
+
+- (void)refreshCustomGlassMaterialInView:(UIView *)view
+{
+    if ([view isKindOfClass:[DOCustomLiquidGlassView class]])
+        [(DOCustomLiquidGlassView *)view reloadMaterial];
+
+    for (UIView *subview in view.subviews)
+        [self refreshCustomGlassMaterialInView:subview];
 }
 
 - (UIButton *)customGlassButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
@@ -965,9 +1234,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return button;
 }
 
-- (UIVisualEffectView *)customGlassCardWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
+- (DOCustomLiquidGlassView *)customGlassCardWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
 {
-    UIVisualEffectView *card = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
+    DOCustomLiquidGlassView *card = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     [card.contentView addSubview:button];
 
@@ -980,10 +1249,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return card;
 }
 
-- (UIVisualEffectView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
+- (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
-    UIVisualEffectView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.08];
-    innerGlass.alpha = enabled ? 1.0 : 0.45;
+    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.040];
+    innerGlass.materialScale = 0.90;
+    [innerGlass reloadMaterial];
 
     // Keep all restart actions on one shared icon/text grid. On iPhone the
     // content uses almost the full pill width so the longest localized title
@@ -1020,6 +1290,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [UIImage systemImageNamed:imageName withConfiguration:restartSymbolConfiguration]];
     iconView.translatesAutoresizingMaskIntoConstraints = NO;
     iconView.tintColor = UIColor.whiteColor;
+    iconView.alpha = enabled ? 1.0 : 0.46;
     iconView.contentMode = UIViewContentModeScaleAspectFit;
     iconView.transform = CGAffineTransformMakeScale(restartIconOpticalScale, restartIconOpticalScale);
     [contentRow addSubview:iconView];
@@ -1028,6 +1299,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     titleLabel.text = title;
     titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.alpha = enabled ? 1.0 : 0.46;
     titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     titleLabel.textAlignment = NSTextAlignmentLeft;
     titleLabel.numberOfLines = 1;
@@ -1133,6 +1405,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)setupCustomGlassHome
 {
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(customGlassThemeDidChange:)
+                                                 name:DOCustomGlassThemeDidChangeNotification
+                                               object:nil];
+
     self.customGlassBackgroundImageView = [[UIImageView alloc] init];
     self.customGlassBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
     self.customGlassBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -1147,6 +1424,29 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [self.customGlassBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
     [self reloadCustomGlassBackground];
+
+    // Wallpaper blur is a page-level effect shared with Theme Settings. It sits
+    // above either the Custom Glass background.jpg or the untouched Dopamine
+    // theme background, and below every card/content layer.
+    self.customGlassBackgroundBlurView = [[UIVisualEffectView alloc] initWithEffect:nil];
+    self.customGlassBackgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassBackgroundBlurView.userInteractionEnabled = NO;
+    [self.view addSubview:self.customGlassBackgroundBlurView];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.customGlassBackgroundBlurView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.customGlassBackgroundBlurView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.customGlassBackgroundBlurView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.customGlassBackgroundBlurView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+
+    __weak typeof(self) weakSelfForBackgroundBlur = self;
+    UIBlurEffect *homeBackgroundBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleRegular];
+    self.customGlassBackgroundBlurAnimator =
+        [[UIViewPropertyAnimator alloc] initWithDuration:1.0 curve:UIViewAnimationCurveLinear animations:^{
+            weakSelfForBackgroundBlur.customGlassBackgroundBlurView.effect = homeBackgroundBlur;
+        }];
+    [self.customGlassBackgroundBlurAnimator startAnimation];
+    [self.customGlassBackgroundBlurAnimator pauseAnimation];
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
     CGFloat availableHeight = CGRectGetHeight(self.view.bounds);
@@ -1396,8 +1696,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [self.navigationController pushViewController:[[DOCreditsViewController alloc] init] animated:YES];
     }];
 
-    UIVisualEffectView *settingsCard = [self customGlassCardWithTitle:DOLocalizedString(@"Menu_Settings_Title") imageName:@"gearshape" action:settingsAction];
-    UIVisualEffectView *creditsCard = [self customGlassCardWithTitle:DOLocalizedString(@"Menu_Credits_Title") imageName:@"info.circle" action:creditsAction];
+    DOCustomLiquidGlassView *settingsCard = [self customGlassCardWithTitle:DOLocalizedString(@"Menu_Settings_Title") imageName:@"gearshape" action:settingsAction];
+    DOCustomLiquidGlassView *creditsCard = [self customGlassCardWithTitle:DOLocalizedString(@"Menu_Credits_Title") imageName:@"info.circle" action:creditsAction];
     [leftColumn addArrangedSubview:settingsCard];
     [leftColumn addArrangedSubview:creditsCard];
 
@@ -1406,12 +1706,16 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             [[DOCustomGlassThemeSettingsViewController alloc] init];
         [self.navigationController pushViewController:themeSettingsController animated:YES];
     }];
-    UIVisualEffectView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"slider.horizontal.3" action:themeAction];
-    themeCard.layer.cornerRadius = themeCardHeight / 2.0;
+    DOCustomLiquidGlassView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"slider.horizontal.3" action:themeAction];
+    themeCard.preferredCornerRadius = themeCardHeight / 2.0;
+    themeCard.layer.cornerRadius = themeCard.preferredCornerRadius;
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
 
-    UIVisualEffectView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.035];
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.008];
+    restartContainer.materialScale = 0.34;
+    restartContainer.suppressBackdrop = YES;
+    [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
 
     UIStackView *restartStack = [[UIStackView alloc] init];
@@ -1478,7 +1782,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [UIImage systemImageNamed:@"lock.slash" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
 
     __block UIColor *jailbreakExpandedBackgroundColor = nil;
-    __block UIVisualEffectView *jailbreakEmphasisGlass = nil;
+    __block DOCustomLiquidGlassView *jailbreakEmphasisGlass = nil;
 
     self.jailbreakBtn = [[DOJailbreakButton alloc] initWithAction:[UIAction actionWithTitle:jailbreakButtonTitle image:jailbreakButtonImage identifier:@"jailbreak" handler:^(__kindof UIAction * _Nonnull action) {
 /********************************** roothide specific ************************************/
@@ -1517,7 +1821,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // but with a stronger tint (0.10 vs 0.05) to keep the jailbreak CTA visually
     // more important without looking like a separate solid-blue material.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
-    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.10];
+    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.075];
+    jailbreakEmphasisGlass.materialScale = 1.05;
+    [jailbreakEmphasisGlass reloadMaterial];
     jailbreakEmphasisGlass.userInteractionEnabled = NO;
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
     [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass atIndex:0];
@@ -1539,6 +1845,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [self.jailbreakBtn.heightAnchor constraintEqualToAnchor:buttonPlaceHolder.heightAnchor],
         self.customGlassJailbreakCenterYConstraint
     ])];
+
+    [self applyCustomGlassHomeAppearance];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         if ([[DOUIManager sharedInstance] environmentUpdateAvailable]) {
@@ -1575,7 +1883,16 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     [super viewWillAppear:animated];
     [self reloadCustomGlassBackground];
+    [self applyCustomGlassHomeAppearance];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
+}
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:DOCustomGlassThemeDidChangeNotification
+                                                  object:nil];
+    [self.customGlassBackgroundBlurAnimator stopAnimation:YES];
 }
 
 - (void)startJailbreak
