@@ -105,20 +105,23 @@ static NSString *DOCustomGlassAvatarFilePath(void)
 
 static NSString *DOCustomGlassBackgroundDirectoryPath(void)
 {
-    NSString *home = NSHomeDirectory();
-    if (home.length == 0)
+    NSString *documents =
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (documents.length == 0)
         return nil;
 
-    // Match Dopamine's own persistent-file strategy (for example bootlogo.png):
-    // keep the user-selected wallpaper under the app container's Documents
-    // directory instead of Application Support. One fixed pathname means there
-    // is no secondary preference/pointer that can be lost between launches.
-    NSString *directory = [home stringByAppendingPathComponent:@"Documents/CustomGlass"];
+    NSString *directory = [documents stringByAppendingPathComponent:@"CustomGlass"];
     [[NSFileManager defaultManager] createDirectoryAtPath:directory
                               withIntermediateDirectories:YES
                                                attributes:nil
                                                     error:nil];
     return directory;
+}
+
+static NSString *DOCustomGlassBackgroundFilePath(void)
+{
+    NSString *directory = DOCustomGlassBackgroundDirectoryPath();
+    return directory.length > 0 ? [directory stringByAppendingPathComponent:@"background.jpg"] : nil;
 }
 
 static inline CGFloat DOCustomGlassClamp01(CGFloat value)
@@ -851,9 +854,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         UIImage *image = (UIImage *)object;
         NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
 
-        NSString *backgroundDirectory = DOCustomGlassBackgroundDirectoryPath();
-        NSString *backgroundPath = backgroundDirectory.length > 0 ?
-            [backgroundDirectory stringByAppendingPathComponent:@"background.jpg"] : nil;
+        NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
 
         BOOL wrote = imageData.length > 0 &&
                      backgroundPath.length > 0 &&

@@ -26,6 +26,44 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
 }
 
+static NSString * const DOCustomGlassNavigationThemeKey = @"red";
+
+static NSString *DOCustomGlassNavigationUserWallpaperPath(void)
+{
+    NSString *documents =
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (documents.length == 0)
+        return nil;
+
+    return [[documents stringByAppendingPathComponent:@"CustomGlass"]
+        stringByAppendingPathComponent:@"background.jpg"];
+}
+
+static UIImage *DOCustomGlassNavigationLoadUserWallpaper(void)
+{
+    NSString *path = DOCustomGlassNavigationUserWallpaperPath();
+    if (path.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path])
+        return nil;
+
+    // imageWithContentsOfFile intentionally bypasses UIImage's named-image
+    // cache. User media is mutable data and must be decoded from its actual
+    // persisted path on every process launch.
+    return [UIImage imageWithContentsOfFile:path];
+}
+
+static UIImage *DOCustomGlassNavigationResolveBackground(DOTheme *theme, BOOL *usingUserWallpaper)
+{
+    BOOL isCustomGlass = [theme.key isEqualToString:DOCustomGlassNavigationThemeKey];
+    UIImage *userWallpaper = isCustomGlass ? DOCustomGlassNavigationLoadUserWallpaper() : nil;
+
+    if (usingUserWallpaper)
+        *usingUserWallpaper = (userWallpaper != nil);
+
+    // User media always has priority. DOTheme is consulted only for immutable
+    // bundle artwork (including Background_Red as Custom Glass fallback).
+    return userWallpaper ?: [theme image];
+}
+
 // Wallpaper blur is image processing, not a live backdrop. Keeping it off the
 // CABackdropLayer/CAFilter path removes the window-attachment race that was
 // unique to iPhone cold launches while preserving the same persisted control.
@@ -119,9 +157,9 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
     [self setupBackground];
     [self setNavigationBarHidden:YES];
 
-    // setupBackground already resolved enabledTheme.image before the first
-    // image view was created. Apply only the persisted Custom Glass wallpaper
-    // blur here; do not decode the theme image a second time during bootstrap.
+    // setupBackground already resolved the user-media path (or immutable
+    // theme fallback) before the first image view was created. Apply only the
+    // persisted Custom Glass wallpaper blur here.
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     CGFloat initialBlur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
         [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
@@ -137,13 +175,14 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
 - (void)setupBackground
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
+    BOOL usingUserWallpaper = NO;
 
-    // Wallpaper ownership now lives entirely in DOTheme. The Custom Glass
-    // (red) theme resolves either its user wallpaper or its compiled fallback,
-    // so Navigation never races a second background source into the first frame.
-    UIImage *sourceImage = [theme image];
+    // Resolve dynamic user media before asking DOTheme for its immutable
+    // bundle-backed fallback. This keeps Custom Glass wallpaper ownership out of
+    // the theme cache and makes the first real app frame use the persisted file.
+    UIImage *sourceImage = DOCustomGlassNavigationResolveBackground(theme, &usingUserWallpaper);
 
-    self.customGlassUsingCustomBackground = [theme.key isEqualToString:@"red"];
+    self.customGlassUsingCustomBackground = usingUserWallpaper;
     self.customGlassBackgroundSourceImage = sourceImage;
     self.customGlassBackgroundBlurGeneration = 0;
 
@@ -215,13 +254,13 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
 
 - (void)customGlassRefreshSharedBackground
 {
-    // This path is reserved for a real wallpaper replacement. Invalidate the
-    // theme cache once, then ask the enabled theme for the sole source image.
+    // A refresh re-resolves the user-media path directly. DOTheme remains only
+    // the immutable fallback provider and never caches the selected photo.
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
-    [theme invalidateImage];
-    UIImage *sourceImage = [theme image];
+    BOOL usingUserWallpaper = NO;
+    UIImage *sourceImage = DOCustomGlassNavigationResolveBackground(theme, &usingUserWallpaper);
 
-    self.customGlassUsingCustomBackground = [theme.key isEqualToString:@"red"];
+    self.customGlassUsingCustomBackground = usingUserWallpaper;
     self.customGlassBackgroundSourceImage = sourceImage;
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -241,15 +280,14 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
 - (void)customGlassReplaceSharedBackgroundWithImage:(UIImage *)sourceImage
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
-    if (!sourceImage || ![theme.key isEqualToString:@"red"]) {
+    if (!sourceImage || ![theme.key isEqualToString:DOCustomGlassNavigationThemeKey]) {
         [self customGlassRefreshSharedBackground];
         return;
     }
 
     // The picker already decoded the exact JPEG that was successfully written.
-    // Install it directly for zero-latency visual refresh and make it DOTheme's
-    // cache as well, while the persisted file remains the next-launch source.
-    theme.image = sourceImage;
+    // Install it directly for zero-latency refresh, but never inject user media
+    // into DOTheme's bundle-image cache.
     self.customGlassUsingCustomBackground = YES;
     self.customGlassBackgroundSourceImage = sourceImage;
 
