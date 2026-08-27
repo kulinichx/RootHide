@@ -182,7 +182,7 @@ typedef struct {
 	uint32_t* Subtypes;
 } preferredArchInfo;
 
-static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString *workingDir, NSMutableArray* fileCaches, NSMutableArray* rpathStack, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut, bool *collectionFailed)
+static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString *workingDir, NSMutableSet* fileCaches, NSMutableArray* rpathStack, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut, bool *collectionFailed)
 {
 @autoreleasepool {
 
@@ -381,7 +381,7 @@ int recurse_collect_untrusted_cdhashes(const char *path, const char *callerImage
 		callerImagePath = path;
 	}
 
-	NSMutableArray* fileCaches = [NSMutableArray array];
+	NSMutableSet* fileCaches = [NSMutableSet set];
 
 	recurse_handler(@(path), @(callerImagePath), @(callerExecutablePath), workingDir ? @(workingDir) : nil, fileCaches, rpathStack, preferredArch, cdhashesOut, cdhashCountOut, &collectionFailed);
 
