@@ -39,66 +39,43 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 @interface UINavigationController (DOCustomGlassSharedBackground)
 - (void)customGlassRefreshSharedBackground;
-- (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
 @end
 
 @interface DOSettingsController ()
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
-@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *customGlassSectionDarkModes;
 
 @end
 
 @implementation DOSettingsController
 
-- (UIColor *)customGlassForegroundForDarkMode:(BOOL)dark alpha:(CGFloat)alpha
+- (UIColor *)customGlassForegroundWithAlpha:(CGFloat)alpha
 {
-    return [UIColor colorWithWhite:(dark ? 0.08 : 1.0) alpha:alpha];
-}
-
-- (BOOL)customGlassDarkForegroundForView:(UIView *)view
-{
-    return [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-        [self.navigationController customGlassPrefersDarkForegroundForView:view];
-}
-
-- (BOOL)customGlassDarkForegroundForSection:(NSInteger)section fallbackView:(UIView *)fallbackView
-{
-    if (!self.customGlassSectionDarkModes)
-        self.customGlassSectionDarkModes = [NSMutableDictionary dictionary];
-
-    NSNumber *key = @(section);
-    NSNumber *cachedMode = self.customGlassSectionDarkModes[key];
-    if (cachedMode)
-        return cachedMode.boolValue;
-
-    // R10: one Section Glass owns one foreground mode for its whole lifetime on
-    // screen. Never re-sample each reused row while scrolling on iPhone.
-    UIView *samplingView = fallbackView ?: self.customGlassSectionBackdropViews[key];
-    BOOL dark = [self customGlassDarkForegroundForView:samplingView];
-    self.customGlassSectionDarkModes[key] = @(dark);
-    return dark;
-}
-
-- (void)customGlassResetSectionForegroundModes
-{
-    [self.customGlassSectionDarkModes removeAllObjects];
+    return [UIColor colorWithWhite:1.0 alpha:alpha];
 }
 
 - (void)customGlassImproveReadabilityInView:(UIView *)view
                                      header:(BOOL)isHeader
-                                   darkMode:(BOOL)dark
 {
+    // R11: Settings/About deliberately use one stable light-content style.
+    // Do not sample the wallpaper per cell or per section: UITableView cell
+    // reuse made that adaptive path oscillate between black and white on iPhone.
+    if ([view isKindOfClass:[UISwitch class]] ||
+        [view isKindOfClass:[UISlider class]] ||
+        [view isKindOfClass:[UISegmentedControl class]]) {
+        return;
+    }
+
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *label = (UILabel *)view;
-        CGFloat alpha = isHeader ? 0.72 : (label.font.pointSize >= 15.0 ? 0.96 : 0.82);
-        label.textColor = [self customGlassForegroundForDarkMode:dark alpha:alpha];
-        label.shadowColor = [UIColor colorWithWhite:(dark ? 1.0 : 0.0) alpha:(isHeader ? 0.06 : 0.08)];
-        label.shadowOffset = CGSizeMake(0.0, 0.30);
+        CGFloat alpha = isHeader ? 0.74 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
+        label.textColor = [self customGlassForegroundWithAlpha:alpha];
+        label.shadowColor = [UIColor colorWithWhite:0.0 alpha:(isHeader ? 0.10 : 0.14)];
+        label.shadowOffset = CGSizeMake(0.0, 0.35);
     }
     else if ([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;
-        UIColor *foreground = [self customGlassForegroundForDarkMode:dark alpha:0.96];
+        UIColor *foreground = [self customGlassForegroundWithAlpha:0.96];
         button.tintColor = foreground;
         if (button.configuration) {
             UIButtonConfiguration *configuration = [button.configuration copy];
@@ -110,11 +87,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     else if ([view isKindOfClass:[UIImageView class]]) {
         UIImageView *imageView = (UIImageView *)view;
         if (imageView.image.renderingMode == UIImageRenderingModeAlwaysTemplate)
-            imageView.tintColor = [self customGlassForegroundForDarkMode:dark alpha:0.92];
+            imageView.tintColor = [self customGlassForegroundWithAlpha:0.92];
     }
 
     for (UIView *subview in view.subviews)
-        [self customGlassImproveReadabilityInView:subview header:isHeader darkMode:dark];
+        [self customGlassImproveReadabilityInView:subview header:isHeader];
 }
 
 - (void)customGlassHideHeaderHairlinesInView:(UIView *)view
@@ -125,11 +102,31 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         BOOL isSimpleHairline = ![subview isKindOfClass:[UILabel class]] &&
                                 ![subview isKindOfClass:[UIButton class]] &&
                                 ![subview isKindOfClass:[UIImageView class]] &&
-                                ![subview isKindOfClass:[UISwitch class]] &&
-                                height > 0.0 && height <= 1.25 && width >= 48.0;
+                                ![subview isKindOfClass:[UIControl class]] &&
+                                height > 0.0 && height <= 2.0 && width >= 40.0;
         if (isSimpleHairline)
             subview.hidden = YES;
         [self customGlassHideHeaderHairlinesInView:subview];
+    }
+}
+
+- (void)customGlassCleanupTableHairlines
+{
+    UITableView *tableView = [self valueForKey:@"table"];
+    if (!tableView)
+        return;
+
+    // Remove only horizontal 1-2 px chrome. Vertical scroll indicators are
+    // intentionally preserved. Run after layout because Preferences header
+    // hairlines often have a zero frame earlier in the lifecycle.
+    [self customGlassHideHeaderHairlinesInView:tableView];
+    for (UITableViewCell *cell in tableView.visibleCells) {
+        if ([NSStringFromClass(cell.class) containsString:@"HeaderCell"]) {
+            cell.layer.borderWidth = 0.0;
+            cell.contentView.layer.borderWidth = 0.0;
+            cell.layer.shadowOpacity = 0.0;
+            [self customGlassHideHeaderHairlinesInView:cell];
+        }
     }
 }
 
@@ -156,26 +153,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)customGlassConfigureSeparatorForCell:(UITableViewCell *)cell
                                   indexPath:(NSIndexPath *)indexPath
 {
+    // R11: the Section Glass perimeter is the only structural line. Remove
+    // the custom 0.5pt row separators so Settings/About cannot accumulate
+    // extra horizontal rules during reuse or relayout.
     UIView *separator = [cell.contentView viewWithTag:DOCustomGlassSettingsSeparatorTag];
-    if (!separator) {
-        separator = [[UIView alloc] init];
-        separator.tag = DOCustomGlassSettingsSeparatorTag;
-        separator.translatesAutoresizingMaskIntoConstraints = NO;
-        separator.userInteractionEnabled = NO;
-        [cell.contentView addSubview:separator];
-        [NSLayoutConstraint activateConstraints:@[
-            [separator.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:18.0],
-            [separator.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-18.0],
-            [separator.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor],
-            [separator.heightAnchor constraintEqualToConstant:0.5]
-        ]];
-    }
-
-    UITableView *tableView = [self valueForKey:@"table"];
-    NSInteger rowCount = [tableView numberOfRowsInSection:indexPath.section];
-    separator.hidden = indexPath.row >= MAX(0, rowCount - 1);
-    BOOL dark = [self customGlassDarkForegroundForSection:indexPath.section fallbackView:cell];
-    separator.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.045];
+    [separator removeFromSuperview];
 }
 
 - (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
@@ -201,10 +183,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         cell.layer.shadowOpacity = 0.0;
         [self customGlassRemoveNestedChromeInView:cell.contentView];
         [self customGlassHideHeaderHairlinesInView:cell];
-
-        NSNumber *cachedMode = self.customGlassSectionDarkModes[@(indexPath.section)];
-        BOOL dark = cachedMode ? cachedMode.boolValue : [self customGlassDarkForegroundForView:cell];
-        [self customGlassImproveReadabilityInView:cell.contentView header:YES darkMode:dark];
+        [self customGlassImproveReadabilityInView:cell.contentView header:YES];
         return;
     }
 
@@ -213,12 +192,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         selected = [[UIView alloc] initWithFrame:CGRectZero];
         cell.selectedBackgroundView = selected;
     }
-    BOOL dark = [self customGlassDarkForegroundForSection:indexPath.section fallbackView:cell];
-    selected.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.045];
+    selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.050];
 
     [self customGlassRemoveNestedChromeInView:cell.contentView];
     [self customGlassConfigureSeparatorForCell:cell indexPath:indexPath];
-    [self customGlassImproveReadabilityInView:cell.contentView header:NO darkMode:dark];
+    [self customGlassImproveReadabilityInView:cell.contentView header:NO];
 }
 
 - (void)customGlassRefreshSectionBackdrops
@@ -307,8 +285,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
     UIView *backButton = [self.view viewWithTag:0xC653];
     if ([backButton isKindOfClass:[UIButton class]]) {
-        BOOL dark = [self customGlassDarkForegroundForView:backButton];
-        ((UIButton *)backButton).tintColor = [self customGlassForegroundForDarkMode:dark alpha:0.96];
+        ((UIButton *)backButton).tintColor = [self customGlassForegroundWithAlpha:0.96];
     }
 }
 
@@ -322,7 +299,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         return;
     }
 
-    [self customGlassResetSectionForegroundModes];
     [self customGlassRefreshPageAppearance];
 }
 
@@ -389,7 +365,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     tableView.layer.masksToBounds = NO;
 
     self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
-    self.customGlassSectionDarkModes = [NSMutableDictionary dictionary];
     [self customGlassInstallBackNavigation];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -414,6 +389,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 {
     [super viewDidLayoutSubviews];
     [self customGlassRefreshSectionBackdrops];
+    [self customGlassCleanupTableHairlines];
 }
 
 - (void)viewDidLoad
@@ -442,7 +418,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         }
     }
 
-    [self customGlassResetSectionForegroundModes];
     [self customGlassRefreshPageAppearance];
 
     __weak typeof(self) weakSelf = self;
@@ -455,6 +430,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 {
     [super viewDidAppear:animated];
     [self customGlassRefreshPageAppearance];
+    [self customGlassCleanupTableHairlines];
 }
 
 - (void)dealloc
