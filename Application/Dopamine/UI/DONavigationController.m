@@ -163,91 +163,20 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     return MIN(0.35, adaptive + (hierarchyBias * t));
 }
 
-static CGFloat DOCustomGlassNavigationGlobalScrimAlpha(CGFloat luminance)
-{
-    // Global intervention stays deliberately tiny. It only catches wallpapers
-    // that are bright almost everywhere; local fields still do the readability
-    // work. Start a little earlier so very bright media does not make clear Glass
-    // look as if its own specular highlight was increased.
-    CGFloat t = DOCustomGlassNavigationClamp01((luminance - 0.58) / 0.36);
-    return 0.08 * pow(t, 1.70);
-}
-
-static CAGradientLayer *DOCustomGlassNavigationCreateLocalizedScrimLayer(void)
-{
-    CAGradientLayer *layer = [CAGradientLayer layer];
-    layer.type = kCAGradientLayerRadial;
-    layer.startPoint = CGPointMake(0.5, 0.5);
-    layer.endPoint = CGPointMake(1.0, 1.0);
-    layer.locations = @[@0.0, @0.56, @1.0];
-    layer.opacity = 0.0;
-    layer.actions = @{
-        @"bounds": [NSNull null],
-        @"position": [NSNull null],
-        @"colors": [NSNull null],
-        @"opacity": [NSNull null],
-    };
-    return layer;
-}
-
-static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer *layer,
-                                                                 CGRect targetRect,
-                                                                 CGRect viewportBounds,
-                                                                 CGFloat alpha,
-                                                                 CGFloat horizontalPadding,
-                                                                 CGFloat verticalPadding,
-                                                                 CGFloat shoulderLocation,
-                                                                 CGFloat shoulderStrength)
-{
-    if (!layer || CGRectIsEmpty(targetRect) || alpha <= 0.001) {
-        layer.opacity = 0.0;
-        return;
-    }
-
-    CGRect fieldRect = CGRectInset(targetRect, -horizontalPadding, -verticalPadding);
-    fieldRect = CGRectIntersection(fieldRect, viewportBounds);
-    if (CGRectIsEmpty(fieldRect)) {
-        layer.opacity = 0.0;
-        return;
-    }
-
-    layer.frame = fieldRect;
-    layer.locations = @[@0.0, @(DOCustomGlassNavigationClamp01(shoulderLocation)), @1.0];
-    layer.colors = @[
-        (id)[[UIColor blackColor] colorWithAlphaComponent:alpha].CGColor,
-        (id)[[UIColor blackColor] colorWithAlphaComponent:(alpha * DOCustomGlassNavigationClamp01(shoulderStrength))].CGColor,
-        (id)[[UIColor blackColor] colorWithAlphaComponent:0.0].CGColor,
-    ];
-    layer.opacity = 1.0;
-}
-
 @interface DONavigationController ()
 
 @property (nonatomic) UIImageView *backgroundImageView;
 @property (nonatomic, strong) UIView *customGlassWallpaperScrimView;
-@property (nonatomic, strong) CALayer *customGlassWallpaperBaseScrimLayer;
-@property (nonatomic, strong) CAGradientLayer *customGlassWallpaperHeaderScrimLayer;
-@property (nonatomic, strong) CAGradientLayer *customGlassWallpaperProfileScrimLayer;
-@property (nonatomic, strong) CAGradientLayer *customGlassWallpaperGlassScrimLayer;
-@property (nonatomic, strong) CAGradientLayer *customGlassWallpaperJailbreakScrimLayer;
-@property (nonatomic, weak) UIView *customGlassReadabilityHeaderView;
-@property (nonatomic, weak) UIView *customGlassReadabilityProfileView;
-@property (nonatomic, weak) UIView *customGlassReadabilityGlassView;
-@property (nonatomic, weak) UIView *customGlassReadabilityJailbreakView;
+@property (nonatomic, strong) CAGradientLayer *customGlassWallpaperScrimLayer;
 @property (nonatomic, strong) UIImage *customGlassWallpaperScrimSourceImage;
 @property (nonatomic, assign) CGSize customGlassWallpaperScrimViewportSize;
-@property (nonatomic, assign) CGRect customGlassWallpaperHeaderFrame;
-@property (nonatomic, assign) CGRect customGlassWallpaperProfileFrame;
-@property (nonatomic, assign) CGRect customGlassWallpaperGlassFrame;
-@property (nonatomic, assign) CGRect customGlassWallpaperJailbreakFrame;
-@property (nonatomic, assign) BOOL customGlassReadabilityHomeVisible;
 @property (nonatomic, strong) UIImage *customGlassBackgroundSourceImage;
 @property (nonatomic, assign) BOOL customGlassUsingCustomBackground;
 @property (nonatomic, assign) NSUInteger customGlassBackgroundBlurGeneration;
 @property (nonatomic) DOMainViewController *mainView;
 @property (nonatomic) DOModalBackAction *backAction;
 
-- (CGFloat)customGlassWallpaperEffectiveLuminanceForView:(UIView *)view;
+- (CGFloat)customGlassWallpaperEffectiveLuminanceAtNormalizedY:(CGFloat)normalizedY;
 - (void)customGlassUpdateWallpaperScrimIfNeeded;
 
 @end
@@ -313,9 +242,9 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
 
     [self.view insertSubview:self.backgroundImageView atIndex:0];
 
-    // Keep readability separate from both wallpaper pixels and Glass material.
-    // R14.2 uses a tiny global safety dim plus four feathered local fields that
-    // follow the actual Home UI geometry instead of darkening full-width bands.
+    // Keep readability separate from both the wallpaper pixels and the Glass
+    // material. This transparent viewport-sized layer receives a locally
+    // adaptive vertical scrim only when a user photo is active.
     UIView *wallpaperScrimView = [[UIView alloc] init];
     wallpaperScrimView.translatesAutoresizingMaskIntoConstraints = NO;
     wallpaperScrimView.backgroundColor = UIColor.clearColor;
@@ -324,27 +253,19 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
     [self.view insertSubview:wallpaperScrimView aboveSubview:self.backgroundImageView];
     self.customGlassWallpaperScrimView = wallpaperScrimView;
 
-    CALayer *baseScrimLayer = [CALayer layer];
-    baseScrimLayer.backgroundColor = UIColor.blackColor.CGColor;
-    baseScrimLayer.opacity = 0.0;
-    baseScrimLayer.actions = @{
+    CAGradientLayer *wallpaperScrimLayer = [CAGradientLayer layer];
+    wallpaperScrimLayer.startPoint = CGPointMake(0.5, 0.0);
+    wallpaperScrimLayer.endPoint = CGPointMake(0.5, 1.0);
+    wallpaperScrimLayer.locations = @[@0.0, @0.22, @0.48, @0.74, @1.0];
+    wallpaperScrimLayer.opacity = 0.0;
+    wallpaperScrimLayer.actions = @{
         @"bounds": [NSNull null],
         @"position": [NSNull null],
+        @"colors": [NSNull null],
         @"opacity": [NSNull null],
     };
-    [wallpaperScrimView.layer addSublayer:baseScrimLayer];
-    self.customGlassWallpaperBaseScrimLayer = baseScrimLayer;
-
-    self.customGlassWallpaperHeaderScrimLayer = DOCustomGlassNavigationCreateLocalizedScrimLayer();
-    self.customGlassWallpaperProfileScrimLayer = DOCustomGlassNavigationCreateLocalizedScrimLayer();
-    self.customGlassWallpaperGlassScrimLayer = DOCustomGlassNavigationCreateLocalizedScrimLayer();
-    self.customGlassWallpaperJailbreakScrimLayer = DOCustomGlassNavigationCreateLocalizedScrimLayer();
-    [wallpaperScrimView.layer addSublayer:self.customGlassWallpaperHeaderScrimLayer];
-    [wallpaperScrimView.layer addSublayer:self.customGlassWallpaperProfileScrimLayer];
-    [wallpaperScrimView.layer addSublayer:self.customGlassWallpaperGlassScrimLayer];
-    [wallpaperScrimView.layer addSublayer:self.customGlassWallpaperJailbreakScrimLayer];
-
-    self.customGlassReadabilityHomeVisible = YES;
+    [wallpaperScrimView.layer addSublayer:wallpaperScrimLayer];
+    self.customGlassWallpaperScrimLayer = wallpaperScrimLayer;
 
     [NSLayoutConstraint activateConstraints:@[
         [wallpaperScrimView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -467,68 +388,52 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
     return self.customGlassUsingCustomBackground && self.customGlassBackgroundSourceImage != nil;
 }
 
-- (void)customGlassRegisterReadabilityHeaderView:(UIView *)headerView
-                                     profileView:(UIView *)profileView
-                                       glassView:(UIView *)glassView
-                                   jailbreakView:(UIView *)jailbreakView
-{
-    BOOL changed = self.customGlassReadabilityHeaderView != headerView ||
-                   self.customGlassReadabilityProfileView != profileView ||
-                   self.customGlassReadabilityGlassView != glassView ||
-                   self.customGlassReadabilityJailbreakView != jailbreakView;
-
-    self.customGlassReadabilityHeaderView = headerView;
-    self.customGlassReadabilityProfileView = profileView;
-    self.customGlassReadabilityGlassView = glassView;
-    self.customGlassReadabilityJailbreakView = jailbreakView;
-
-    if (changed)
-        self.customGlassWallpaperScrimSourceImage = nil;
-
-    [self customGlassUpdateWallpaperScrimIfNeeded];
-}
-
-- (CGFloat)customGlassWallpaperEffectiveLuminanceForView:(UIView *)view
+- (CGFloat)customGlassWallpaperEffectiveLuminanceAtNormalizedY:(CGFloat)normalizedY
 {
     UIImageView *imageView = self.backgroundImageView;
     UIImage *image = self.customGlassBackgroundSourceImage;
     CGImageRef cgImage = image.CGImage;
-    if (!view || !cgImage || CGRectIsEmpty(imageView.bounds))
+    if (!cgImage || CGRectIsEmpty(imageView.bounds) || CGRectIsEmpty(self.view.bounds))
         return 0.28;
 
     CGSize imagePointSize = image.size;
     if (imagePointSize.width <= 0.0 || imagePointSize.height <= 0.0)
         return 0.28;
 
-    CGRect targetInImageView = [view convertRect:view.bounds toView:imageView];
+    CGFloat viewportWidth = CGRectGetWidth(self.view.bounds);
+    CGFloat viewportHeight = CGRectGetHeight(self.view.bounds);
+    CGPoint viewportCenter = CGPointMake(CGRectGetMidX(self.view.bounds),
+                                         viewportHeight * DOCustomGlassNavigationClamp01(normalizedY));
+    CGPoint centerInImageView = [self.view convertPoint:viewportCenter toView:imageView];
+
     CGFloat scale = MAX(CGRectGetWidth(imageView.bounds) / imagePointSize.width,
                         CGRectGetHeight(imageView.bounds) / imagePointSize.height);
     CGFloat renderedWidth = imagePointSize.width * scale;
     CGFloat renderedHeight = imagePointSize.height * scale;
     CGFloat offsetX = (CGRectGetWidth(imageView.bounds) - renderedWidth) * 0.5;
     CGFloat offsetY = (CGRectGetHeight(imageView.bounds) - renderedHeight) * 0.5;
-    CGRect renderedImageRect = CGRectMake(offsetX, offsetY, renderedWidth, renderedHeight);
-    targetInImageView = CGRectIntersection(targetInImageView, renderedImageRect);
-    if (CGRectIsEmpty(targetInImageView))
-        return 0.28;
 
-    CGRect sourcePointRect = CGRectMake((CGRectGetMinX(targetInImageView) - offsetX) / MAX(scale, 0.001),
-                                        (CGRectGetMinY(targetInImageView) - offsetY) / MAX(scale, 0.001),
-                                        CGRectGetWidth(targetInImageView) / MAX(scale, 0.001),
-                                        CGRectGetHeight(targetInImageView) / MAX(scale, 0.001));
-    sourcePointRect = CGRectIntersection(sourcePointRect,
-                                         CGRectMake(0.0, 0.0, imagePointSize.width, imagePointSize.height));
-    if (CGRectIsEmpty(sourcePointRect))
-        return 0.28;
+    CGFloat normalizedX = (centerInImageView.x - offsetX) / MAX(renderedWidth, 1.0);
+    CGFloat sourceY = (centerInImageView.y - offsetY) / MAX(renderedHeight, 1.0);
+    normalizedX = DOCustomGlassNavigationClamp01(normalizedX);
+    sourceY = DOCustomGlassNavigationClamp01(sourceY);
 
     size_t pixelWidth = CGImageGetWidth(cgImage);
     size_t pixelHeight = CGImageGetHeight(cgImage);
-    CGFloat pixelScaleX = pixelWidth / MAX(imagePointSize.width, 1.0);
-    CGFloat pixelScaleY = pixelHeight / MAX(imagePointSize.height, 1.0);
-    CGRect cropRect = CGRectMake(CGRectGetMinX(sourcePointRect) * pixelScaleX,
-                                 CGRectGetMinY(sourcePointRect) * pixelScaleY,
-                                 CGRectGetWidth(sourcePointRect) * pixelScaleX,
-                                 CGRectGetHeight(sourcePointRect) * pixelScaleY);
+
+    // Average most of the visible width, not one point. A 13% screen-height
+    // band keeps the response local while avoiding flicker from tiny details.
+    CGFloat visibleWidthFraction = MIN(1.0, viewportWidth / MAX(renderedWidth, 1.0));
+    CGFloat visibleHeightFraction = MIN(1.0, viewportHeight / MAX(renderedHeight, 1.0));
+    CGFloat sampleWidth = MAX(8.0, pixelWidth * visibleWidthFraction * 0.84);
+    CGFloat sampleHeight = MAX(8.0, pixelHeight * visibleHeightFraction * 0.13);
+    CGFloat centerX = normalizedX * pixelWidth;
+    CGFloat centerY = sourceY * pixelHeight;
+
+    CGRect cropRect = CGRectMake(centerX - sampleWidth * 0.5,
+                                 centerY - sampleHeight * 0.5,
+                                 sampleWidth,
+                                 sampleHeight);
     cropRect = CGRectIntersection(cropRect, CGRectMake(0.0, 0.0, pixelWidth, pixelHeight));
     if (CGRectIsEmpty(cropRect))
         return 0.28;
@@ -542,106 +447,53 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
 
 - (void)customGlassUpdateWallpaperScrimIfNeeded
 {
-    CALayer *baseLayer = self.customGlassWallpaperBaseScrimLayer;
-    if (!baseLayer)
+    CAGradientLayer *scrimLayer = self.customGlassWallpaperScrimLayer;
+    if (!scrimLayer)
         return;
 
-    NSArray<CAGradientLayer *> *localLayers = @[
-        self.customGlassWallpaperHeaderScrimLayer,
-        self.customGlassWallpaperProfileScrimLayer,
-        self.customGlassWallpaperGlassScrimLayer,
-        self.customGlassWallpaperJailbreakScrimLayer,
-    ];
-
-    if (!self.customGlassUsingCustomBackground || !self.customGlassBackgroundSourceImage ||
-        !self.customGlassReadabilityHomeVisible) {
+    if (!self.customGlassUsingCustomBackground || !self.customGlassBackgroundSourceImage) {
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
-        baseLayer.opacity = 0.0;
-        for (CAGradientLayer *layer in localLayers)
-            layer.opacity = 0.0;
+        scrimLayer.opacity = 0.0;
         [CATransaction commit];
         self.customGlassWallpaperScrimSourceImage = nil;
         self.customGlassWallpaperScrimViewportSize = CGSizeZero;
         return;
     }
 
-    UIView *scrimView = self.customGlassWallpaperScrimView;
-    CGSize viewportSize = scrimView.bounds.size;
-    CGRect viewportBounds = scrimView.bounds;
+    CGSize viewportSize = self.customGlassWallpaperScrimView.bounds.size;
     if (viewportSize.width <= 1.0 || viewportSize.height <= 1.0)
         return;
 
-    UIView *headerView = self.customGlassReadabilityHeaderView;
-    UIView *profileView = self.customGlassReadabilityProfileView;
-    UIView *glassView = self.customGlassReadabilityGlassView;
-    UIView *jailbreakView = self.customGlassReadabilityJailbreakView;
-
-    CGRect headerFrame = headerView ? [headerView convertRect:headerView.bounds toView:scrimView] : CGRectZero;
-    CGRect profileFrame = profileView ? [profileView convertRect:profileView.bounds toView:scrimView] : CGRectZero;
-    CGRect glassFrame = glassView ? [glassView convertRect:glassView.bounds toView:scrimView] : CGRectZero;
-    CGRect jailbreakFrame = jailbreakView ? [jailbreakView convertRect:jailbreakView.bounds toView:scrimView] : CGRectZero;
-
     UIImage *sourceImage = self.customGlassBackgroundSourceImage;
     if (self.customGlassWallpaperScrimSourceImage == sourceImage &&
-        CGSizeEqualToSize(self.customGlassWallpaperScrimViewportSize, viewportSize) &&
-        CGRectEqualToRect(self.customGlassWallpaperHeaderFrame, headerFrame) &&
-        CGRectEqualToRect(self.customGlassWallpaperProfileFrame, profileFrame) &&
-        CGRectEqualToRect(self.customGlassWallpaperGlassFrame, glassFrame) &&
-        CGRectEqualToRect(self.customGlassWallpaperJailbreakFrame, jailbreakFrame))
+        CGSizeEqualToSize(self.customGlassWallpaperScrimViewportSize, viewportSize))
         return;
 
-    CGFloat globalLuminance = [self customGlassWallpaperEffectiveLuminanceForView:self.view];
-    CGFloat headerLuminance = [self customGlassWallpaperEffectiveLuminanceForView:headerView];
-    CGFloat profileLuminance = [self customGlassWallpaperEffectiveLuminanceForView:profileView];
-    CGFloat glassLuminance = [self customGlassWallpaperEffectiveLuminanceForView:glassView];
-    CGFloat jailbreakLuminance = [self customGlassWallpaperEffectiveLuminanceForView:jailbreakView];
+    static const CGFloat sampleY[] = {0.08, 0.25, 0.48, 0.72, 0.92};
+    static const CGFloat hierarchyBias[] = {0.035, 0.018, 0.0, 0.028, 0.045};
 
-    CGFloat baseAlpha = DOCustomGlassNavigationGlobalScrimAlpha(globalLuminance);
-    CGFloat headerAlpha = MIN(0.26, DOCustomGlassNavigationScrimAlpha(headerLuminance, 0.018) * 0.88);
-    CGFloat profileAlpha = MIN(0.16, DOCustomGlassNavigationScrimAlpha(profileLuminance, 0.0) * 0.58);
-    CGFloat glassAlpha = MIN(0.35, DOCustomGlassNavigationScrimAlpha(glassLuminance, 0.035) * 1.18);
-    CGFloat jailbreakAlpha = MIN(0.35, DOCustomGlassNavigationScrimAlpha(jailbreakLuminance, 0.032) * 1.16);
-
-    CGFloat baseHorizontalPadding = MAX(28.0, viewportSize.width * 0.065);
-    CGFloat baseVerticalPadding = MAX(22.0, viewportSize.height * 0.026);
+    NSMutableArray *colors = [NSMutableArray arrayWithCapacity:5];
+    CGFloat alphas[5] = {0};
+    for (NSUInteger index = 0; index < 5; index++) {
+        CGFloat luminance =
+            [self customGlassWallpaperEffectiveLuminanceAtNormalizedY:sampleY[index]];
+        CGFloat alpha = DOCustomGlassNavigationScrimAlpha(luminance, hierarchyBias[index]);
+        alphas[index] = alpha;
+        [colors addObject:(id)[[UIColor blackColor] colorWithAlphaComponent:alpha].CGColor];
+    }
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    baseLayer.frame = viewportBounds;
-    baseLayer.opacity = baseAlpha;
-
-    DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperHeaderScrimLayer,
-                                                         headerFrame, viewportBounds, headerAlpha,
-                                                         baseHorizontalPadding * 1.10,
-                                                         baseVerticalPadding * 1.25,
-                                                         0.60, 0.68);
-    DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperProfileScrimLayer,
-                                                         profileFrame, viewportBounds, profileAlpha,
-                                                         baseHorizontalPadding,
-                                                         baseVerticalPadding,
-                                                         0.56, 0.62);
-    DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperGlassScrimLayer,
-                                                         glassFrame, viewportBounds, glassAlpha,
-                                                         baseHorizontalPadding * 0.92,
-                                                         MAX(30.0, CGRectGetHeight(glassFrame) * 0.12),
-                                                         0.78, 0.88);
-    DOCustomGlassNavigationConfigureLocalizedScrimLayer(self.customGlassWallpaperJailbreakScrimLayer,
-                                                         jailbreakFrame, viewportBounds, jailbreakAlpha,
-                                                         baseHorizontalPadding * 0.92,
-                                                         MAX(24.0, CGRectGetHeight(jailbreakFrame) * 0.38),
-                                                         0.76, 0.86);
+    scrimLayer.colors = colors;
+    scrimLayer.opacity = 1.0;
     [CATransaction commit];
 
     self.customGlassWallpaperScrimSourceImage = sourceImage;
     self.customGlassWallpaperScrimViewportSize = viewportSize;
-    self.customGlassWallpaperHeaderFrame = headerFrame;
-    self.customGlassWallpaperProfileFrame = profileFrame;
-    self.customGlassWallpaperGlassFrame = glassFrame;
-    self.customGlassWallpaperJailbreakFrame = jailbreakFrame;
 
-    NSLog(@"[CustomGlass][LocalizedScrim] base=%.3f header=%.3f profile=%.3f glass=%.3f jail=%.3f",
-          baseAlpha, headerAlpha, profileAlpha, glassAlpha, jailbreakAlpha);
+    NSLog(@"[CustomGlass][Scrim] alpha=%.3f %.3f %.3f %.3f %.3f",
+          alphas[0], alphas[1], alphas[2], alphas[3], alphas[4]);
 }
 
 - (CGFloat)customGlassLuminanceForView:(UIView *)view
@@ -757,11 +609,6 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
 {
     BOOL isMainView = [viewController isKindOfClass:[DOMainViewController class]];
     BOOL isCustomGlassView = [self isCustomGlassFullScreenViewController:viewController];
-    if (self.customGlassReadabilityHomeVisible != isMainView) {
-        self.customGlassReadabilityHomeVisible = isMainView;
-        self.customGlassWallpaperScrimSourceImage = nil;
-        [self customGlassUpdateWallpaperScrimIfNeeded];
-    }
     [self setBackgroundDimmed:!(isMainView || isCustomGlassView)];
     [self.backAction setIgnoreFrame:[self _frameForViewController:viewController]];
 }
@@ -774,7 +621,7 @@ static void DOCustomGlassNavigationConfigureLocalizedScrimLayer(CAGradientLayer 
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    self.customGlassWallpaperBaseScrimLayer.frame = self.customGlassWallpaperScrimView.bounds;
+    self.customGlassWallpaperScrimLayer.frame = self.customGlassWallpaperScrimView.bounds;
     [CATransaction commit];
 
     [self customGlassUpdateWallpaperScrimIfNeeded];
