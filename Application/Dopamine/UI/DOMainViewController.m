@@ -28,6 +28,10 @@
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity;
 - (BOOL)customGlassHasSharedBackground;
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
+- (void)customGlassRegisterReadabilityHeaderView:(UIView *)headerView
+                                     profileView:(UIView *)profileView
+                                       glassView:(UIView *)glassView
+                                   jailbreakView:(UIView *)jailbreakView;
 @end
 
 static UIColor *DOCustomGlassForegroundColorForMode(BOOL darkForeground, CGFloat alpha)
@@ -1168,12 +1172,26 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property UIAlertController *customGlassUsernameEditor;
 @property UILabel *customGlassMottoLabel;
 @property UIAlertController *customGlassMottoEditor;
+@property (nonatomic, weak) UIView *customGlassReadabilityHeaderView;
+@property (nonatomic, weak) UIView *customGlassReadabilityProfileView;
+@property (nonatomic, weak) UIView *customGlassReadabilityGlassView;
 @property(nonatomic) BOOL hideStatusBar;
 @property(nonatomic) BOOL hideHomeIndicator;
 
 @end
 
 @implementation DOMainViewController
+
+- (void)customGlassRegisterReadabilityRegionsIfPossible
+{
+    if (![self.navigationController respondsToSelector:@selector(customGlassRegisterReadabilityHeaderView:profileView:glassView:jailbreakView:)])
+        return;
+
+    [self.navigationController customGlassRegisterReadabilityHeaderView:self.customGlassReadabilityHeaderView
+                                                             profileView:self.customGlassReadabilityProfileView
+                                                               glassView:self.customGlassReadabilityGlassView
+                                                           jailbreakView:self.jailbreakBtn];
+}
 
 - (void)applyCustomGlassHomeAppearance
 {
@@ -1185,6 +1203,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [self refreshCustomGlassMaterialInView:self.view];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
+    [self customGlassRegisterReadabilityRegionsIfPossible];
     DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 }
 
@@ -1838,11 +1857,13 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
     [self configureCustomGlassHeaderView:headerView logoHeight:logoHeight subtitleScale:headerSubtitleScale];
+    self.customGlassReadabilityHeaderView = headerView;
     [mainStack addArrangedSubview:headerView];
     [mainStack setCustomSpacing:headerToProfileSpacing afterView:headerView];
 
     UIView *profileView = [[UIView alloc] init];
     profileView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassReadabilityProfileView = profileView;
     [mainStack addArrangedSubview:profileView];
     [mainStack setCustomSpacing:profileToGridSpacing afterView:profileView];
 
@@ -1973,6 +1994,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
     UIView *actionGrid = [[UIView alloc] init];
     actionGrid.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassReadabilityGlassView = actionGrid;
     [mainStack addArrangedSubview:actionGrid];
     NSLayoutConstraint *gridHeightConstraint = [actionGrid.heightAnchor constraintEqualToConstant:gridHeight];
     gridHeightConstraint.priority = UILayoutPriorityRequired;
@@ -2197,6 +2219,12 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         jailbreakButtonTitle = DOLocalizedString(@"Button_Remove_Jailbreak");
     
     return jailbreakButtonTitle;
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    [self customGlassRegisterReadabilityRegionsIfPossible];
 }
 
 - (void)viewWillAppear:(BOOL)animated
