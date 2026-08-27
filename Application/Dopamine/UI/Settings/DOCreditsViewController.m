@@ -13,18 +13,8 @@
 
 #pragma mark - Custom Glass page appearance
 
-static NSString * const DOCustomGlassCreditsBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
 static NSString * const DOCustomGlassCreditsDidChangeNotification = @"DOCustomGlassTheme.DidChange";
-
-static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
-{
-    NSString *applicationSupport =
-        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    if (applicationSupport.length == 0)
-        return nil;
-    return [[applicationSupport stringByAppendingPathComponent:@"CustomGlass"]
-        stringByAppendingPathComponent:@"background.jpg"];
-}
+static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 @interface DOCustomLiquidGlassView : UIView
 @property(nonatomic, assign) CGFloat materialScale;
@@ -34,40 +24,97 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 - (void)reloadMaterial;
 @end
 
-@interface DOCustomWallpaperBlurView : UIView
-- (void)setBlurIntensity:(CGFloat)blurIntensity;
+@interface UINavigationController (DOCustomGlassSharedBackground)
+- (void)customGlassRefreshSharedBackground;
+- (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
 @end
 
 @interface DOCreditsViewController ()
 
-@property(nonatomic, strong) UIView *customGlassPageBackgroundHostView;
-@property(nonatomic, strong) UIImageView *customGlassPageBackgroundImageView;
-@property(nonatomic, strong) DOCustomWallpaperBlurView *customGlassPageBackgroundBlurView;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
 
 @end
 
 @implementation DOCreditsViewController
 
-- (void)customGlassReloadPageBackground
+- (UIColor *)customGlassAdaptiveForegroundForView:(UIView *)view alpha:(CGFloat)alpha
 {
-    NSString *path = DOCustomGlassCreditsBackgroundFilePath();
-    UIImage *image = path.length > 0 ? [UIImage imageWithContentsOfFile:path] : nil;
-    self.customGlassPageBackgroundImageView.image = image;
-    self.customGlassPageBackgroundImageView.hidden = image == nil;
+    BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+        [self.navigationController customGlassPrefersDarkForegroundForView:view];
+    return [UIColor colorWithWhite:(dark ? 0.08 : 1.0) alpha:alpha];
 }
 
 - (void)customGlassImproveReadabilityInView:(UIView *)view header:(BOOL)isHeader
 {
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *label = (UILabel *)view;
-        CGFloat alpha = isHeader ? 0.76 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
-        label.textColor = [UIColor colorWithWhite:1.0 alpha:alpha];
-        label.shadowColor = [UIColor colorWithWhite:0.0 alpha:(isHeader ? 0.18 : 0.26)];
-        label.shadowOffset = CGSizeMake(0.0, 0.5);
+        BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+            [self.navigationController customGlassPrefersDarkForegroundForView:label];
+        CGFloat alpha = isHeader ? 0.72 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
+        label.textColor = [self customGlassAdaptiveForegroundForView:label alpha:alpha];
+        label.shadowColor = [UIColor colorWithWhite:(dark ? 1.0 : 0.0) alpha:(isHeader ? 0.08 : 0.11)];
+        label.shadowOffset = CGSizeMake(0.0, 0.35);
+    }
+    else if ([view isKindOfClass:[UIButton class]]) {
+        UIButton *button = (UIButton *)view;
+        UIColor *foreground = [self customGlassAdaptiveForegroundForView:button alpha:0.96];
+        button.tintColor = foreground;
+        if (button.configuration) {
+            UIButtonConfiguration *configuration = [button.configuration copy];
+            configuration.baseForegroundColor = foreground;
+            button.configuration = configuration;
+        }
+        [button setTitleColor:foreground forState:UIControlStateNormal];
+    }
+    else if ([view isKindOfClass:[UIImageView class]]) {
+        UIImageView *imageView = (UIImageView *)view;
+        if (imageView.image.renderingMode == UIImageRenderingModeAlwaysTemplate)
+            imageView.tintColor = [self customGlassAdaptiveForegroundForView:imageView alpha:0.92];
     }
 
     for (UIView *subview in view.subviews)
         [self customGlassImproveReadabilityInView:subview header:isHeader];
+}
+
+- (void)customGlassRemoveNestedChromeInView:(UIView *)view
+{
+    if ([view isKindOfClass:[UIButton class]]) {
+        UIButton *button = (UIButton *)view;
+        button.backgroundColor = UIColor.clearColor;
+        button.layer.borderWidth = 0.0;
+        button.layer.shadowOpacity = 0.0;
+    }
+    else if (view.layer.borderWidth > 0.1) {
+        view.layer.borderWidth = 0.0;
+    }
+
+    for (UIView *subview in view.subviews)
+        [self customGlassRemoveNestedChromeInView:subview];
+}
+
+- (void)customGlassConfigureSeparatorForCell:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath
+{
+    UIView *separator = [cell.contentView viewWithTag:DOCustomGlassCreditsSeparatorTag];
+    if (!separator) {
+        separator = [[UIView alloc] init];
+        separator.tag = DOCustomGlassCreditsSeparatorTag;
+        separator.translatesAutoresizingMaskIntoConstraints = NO;
+        separator.userInteractionEnabled = NO;
+        [cell.contentView addSubview:separator];
+        [NSLayoutConstraint activateConstraints:@[
+            [separator.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:18.0],
+            [separator.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-18.0],
+            [separator.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor],
+            [separator.heightAnchor constraintEqualToConstant:0.5]
+        ]];
+    }
+
+    UITableView *tableView = [self valueForKey:@"table"];
+    NSInteger rowCount = [tableView numberOfRowsInSection:indexPath.section];
+    separator.hidden = indexPath.row >= MAX(0, rowCount - 1);
+    BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+        [self.navigationController customGlassPrefersDarkForegroundForView:cell];
+    separator.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.082];
 }
 
 - (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
@@ -76,107 +123,115 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
         return;
 
     NSString *className = NSStringFromClass(cell.class);
-    if ([className containsString:@"HeaderCell"]) {
-        cell.backgroundColor = UIColor.clearColor;
-        cell.contentView.backgroundColor = UIColor.clearColor;
-        cell.backgroundView = nil;
+    BOOL isHeader = [className containsString:@"HeaderCell"];
+
+    cell.backgroundColor = UIColor.clearColor;
+    cell.contentView.backgroundColor = UIColor.clearColor;
+    cell.backgroundView = nil;
+
+    if (isHeader) {
+        cell.selectedBackgroundView = nil;
+        UIView *separator = [cell.contentView viewWithTag:DOCustomGlassCreditsSeparatorTag];
+        separator.hidden = YES;
         [self customGlassImproveReadabilityInView:cell.contentView header:YES];
         return;
     }
 
-    BOOL isCreditsContentCell = [className containsString:@"CreditsCell"];
-    UITableView *tableView = [self valueForKey:@"table"];
-    NSInteger rowCount = indexPath ? [tableView numberOfRowsInSection:indexPath.section] : 1;
-    BOOL firstRow = !indexPath || indexPath.row == 0;
-    BOOL lastRow = !indexPath || indexPath.row == MAX(0, rowCount - 1);
-    BOOL singleRow = firstRow && lastRow;
-
-    // Links read as one compact Section Glass. DOCreditsCell is a tall custom
-    // surface containing the people groups, so give that content one coherent
-    // medium/large Glass backplate instead of letting names float directly over
-    // arbitrary bright/dark wallpaper regions.
-    DOCustomLiquidGlassView *glass = nil;
-    if ([cell.backgroundView isKindOfClass:[DOCustomLiquidGlassView class]]) {
-        glass = (DOCustomLiquidGlassView *)cell.backgroundView;
-    }
-    else {
-        CGFloat radius = isCreditsContentCell ? 24.0 : 16.0;
-        CGFloat tint = isCreditsContentCell ? 0.040 : 0.032;
-        glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:radius baseTintAlpha:tint];
-        glass.userInteractionEnabled = NO;
-        cell.backgroundView = glass;
-
-        UIView *selected = [[UIView alloc] initWithFrame:CGRectZero];
-        selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.060];
-        selected.layer.cornerCurve = kCACornerCurveContinuous;
+    UIView *selected = cell.selectedBackgroundView;
+    if (!selected) {
+        selected = [[UIView alloc] initWithFrame:CGRectZero];
         cell.selectedBackgroundView = selected;
     }
+    BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+        [self.navigationController customGlassPrefersDarkForegroundForView:cell];
+    selected.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.050];
 
-    glass.suppressBackdrop = NO;
-    glass.materialScale = isCreditsContentCell ? 0.90 : 0.78;
+    [self customGlassRemoveNestedChromeInView:cell.contentView];
+    [self customGlassConfigureSeparatorForCell:cell indexPath:indexPath];
+    [self customGlassImproveReadabilityInView:cell.contentView header:NO];
+}
 
-    if (isCreditsContentCell) {
-        glass.preferredCornerRadius = 24.0;
-        glass.layer.cornerRadius = 24.0;
+- (void)customGlassRefreshSectionBackdrops
+{
+    UITableView *tableView = [self valueForKey:@"table"];
+    if (!tableView)
+        return;
+
+    if (!self.customGlassSectionBackdropViews)
+        self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
+
+    NSInteger sectionCount = [tableView numberOfSections];
+    NSMutableSet<NSNumber *> *activeKeys = [NSMutableSet set];
+    for (NSInteger section = 0; section < sectionCount; section++) {
+        NSInteger rowCount = [tableView numberOfRowsInSection:section];
+        if (rowCount <= 0)
+            continue;
+
+        NSInteger firstMaterialRow = 0;
+        UITableViewCell *firstCell = [tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:section]];
+        if ([NSStringFromClass(firstCell.class) containsString:@"HeaderCell"] && rowCount > 1)
+            firstMaterialRow = 1;
+        if (firstMaterialRow >= rowCount)
+            continue;
+
+        NSIndexPath *firstIndexPath = [NSIndexPath indexPathForRow:firstMaterialRow inSection:section];
+        NSIndexPath *lastIndexPath = [NSIndexPath indexPathForRow:rowCount - 1 inSection:section];
+        CGRect firstRect = [tableView rectForRowAtIndexPath:firstIndexPath];
+        CGRect lastRect = [tableView rectForRowAtIndexPath:lastIndexPath];
+        CGRect sectionRect = CGRectUnion(firstRect, lastRect);
+        if (CGRectIsEmpty(sectionRect) || CGRectGetHeight(sectionRect) < 2.0)
+            continue;
+
+        NSNumber *key = @(section);
+        [activeKeys addObject:key];
+        DOCustomLiquidGlassView *glass = self.customGlassSectionBackdropViews[key];
+        if (!glass) {
+            BOOL isTallSection = CGRectGetHeight(sectionRect) > 220.0;
+            glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:(isTallSection ? 24.0 : 18.0)
+                                                             baseTintAlpha:(isTallSection ? 0.044 : 0.038)];
+            glass.userInteractionEnabled = NO;
+            glass.materialScale = isTallSection ? 0.94 : 0.88;
+            self.customGlassSectionBackdropViews[key] = glass;
+            [tableView insertSubview:glass atIndex:0];
+        }
+
+        BOOL isTallSection = CGRectGetHeight(sectionRect) > 220.0;
+        CGFloat radius = isTallSection ? 24.0 : 18.0;
+        glass.hidden = NO;
+        glass.frame = CGRectInset(sectionRect, 1.0, 0.5);
+        glass.preferredCornerRadius = radius;
+        glass.layer.cornerRadius = radius;
         glass.layer.maskedCorners =
             kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
             kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
-    }
-    else {
-        glass.preferredCornerRadius = (singleRow || firstRow || lastRow) ? 16.0 : 0.0;
-        glass.layer.cornerRadius = glass.preferredCornerRadius;
-        if (singleRow) {
-            glass.layer.maskedCorners =
-                kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
-                kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
-        }
-        else if (firstRow) {
-            glass.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
-        }
-        else if (lastRow) {
-            glass.layer.maskedCorners = kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
-        }
-        else {
-            glass.layer.maskedCorners = 0;
-        }
+        glass.materialScale = isTallSection ? 0.94 : 0.88;
+        [glass reloadMaterial];
+        [tableView sendSubviewToBack:glass];
     }
 
-    cell.selectedBackgroundView.layer.cornerRadius = glass.preferredCornerRadius;
-    cell.selectedBackgroundView.layer.maskedCorners = glass.layer.maskedCorners;
-    [glass reloadMaterial];
-
-    if (!isCreditsContentCell && !singleRow && !firstRow && !lastRow)
-        glass.layer.borderWidth *= 0.42;
-
-    cell.backgroundColor = UIColor.clearColor;
-    cell.contentView.backgroundColor = UIColor.clearColor;
-    [self customGlassImproveReadabilityInView:cell.contentView header:NO];
+    [self.customGlassSectionBackdropViews enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, DOCustomLiquidGlassView *glass, BOOL *stop) {
+        if (![activeKeys containsObject:key])
+            glass.hidden = YES;
+    }];
 }
 
 - (void)customGlassApplyPageAppearance
 {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    CGFloat blur = [defaults objectForKey:DOCustomGlassCreditsBackgroundBlurKey] ?
-        [defaults floatForKey:DOCustomGlassCreditsBackgroundBlurKey] : 0.10;
-    blur = MIN(1.0, MAX(0.0, blur));
-    [self.customGlassPageBackgroundBlurView setBlurIntensity:blur];
+    [self.navigationController customGlassRefreshSharedBackground];
 
     UITableView *tableView = [self valueForKey:@"table"];
     for (UITableViewCell *cell in tableView.visibleCells)
         [self customGlassStyleVisibleCell:cell atIndexPath:[tableView indexPathForCell:cell]];
+    [self customGlassRefreshSectionBackdrops];
 }
 
 - (void)customGlassRefreshPageAppearance
 {
-    [self customGlassReloadPageBackground];
     [self customGlassApplyPageAppearance];
-
-    [self.customGlassPageBackgroundBlurView.layer setNeedsDisplay];
-    [self.customGlassPageBackgroundBlurView setNeedsLayout];
-
     UITableView *tableView = [self valueForKey:@"table"];
     [tableView setNeedsLayout];
     [tableView layoutIfNeeded];
+    [self customGlassRefreshSectionBackdrops];
 }
 
 - (void)customGlassThemeDidChange:(NSNotification *)notification
@@ -188,49 +243,11 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
         });
         return;
     }
-
     [self customGlassRefreshPageAppearance];
 }
 
 - (void)customGlassInstallPageAppearance
 {
-    UIView *backgroundHostParent = self.navigationController.view ?: self.view;
-
-    self.customGlassPageBackgroundHostView = [[UIView alloc] init];
-    self.customGlassPageBackgroundHostView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassPageBackgroundHostView.backgroundColor = UIColor.clearColor;
-    self.customGlassPageBackgroundHostView.userInteractionEnabled = NO;
-    [backgroundHostParent insertSubview:self.customGlassPageBackgroundHostView atIndex:0];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassPageBackgroundHostView.leadingAnchor constraintEqualToAnchor:backgroundHostParent.leadingAnchor],
-        [self.customGlassPageBackgroundHostView.trailingAnchor constraintEqualToAnchor:backgroundHostParent.trailingAnchor],
-        [self.customGlassPageBackgroundHostView.topAnchor constraintEqualToAnchor:backgroundHostParent.topAnchor],
-        [self.customGlassPageBackgroundHostView.bottomAnchor constraintEqualToAnchor:backgroundHostParent.bottomAnchor]
-    ]];
-
-    self.customGlassPageBackgroundImageView = [[UIImageView alloc] init];
-    self.customGlassPageBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassPageBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
-    self.customGlassPageBackgroundImageView.clipsToBounds = YES;
-    self.customGlassPageBackgroundImageView.userInteractionEnabled = NO;
-    self.customGlassPageBackgroundImageView.hidden = YES;
-    [self.customGlassPageBackgroundHostView addSubview:self.customGlassPageBackgroundImageView];
-
-    self.customGlassPageBackgroundBlurView = [[DOCustomWallpaperBlurView alloc] initWithFrame:CGRectZero];
-    self.customGlassPageBackgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.customGlassPageBackgroundHostView addSubview:self.customGlassPageBackgroundBlurView];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassPageBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.leadingAnchor],
-        [self.customGlassPageBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.trailingAnchor],
-        [self.customGlassPageBackgroundImageView.topAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.topAnchor],
-        [self.customGlassPageBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.bottomAnchor],
-        [self.customGlassPageBackgroundBlurView.leadingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.leadingAnchor],
-        [self.customGlassPageBackgroundBlurView.trailingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.trailingAnchor],
-        [self.customGlassPageBackgroundBlurView.topAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.topAnchor],
-        [self.customGlassPageBackgroundBlurView.bottomAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.bottomAnchor]
-    ]];
-
     self.view.backgroundColor = UIColor.clearColor;
 
     UITableView *tableView = [self valueForKey:@"table"];
@@ -241,18 +258,30 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
     tableView.layer.cornerRadius = 0.0;
     tableView.layer.masksToBounds = NO;
 
+    self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
+
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(customGlassThemeDidChange:)
                                                  name:DOCustomGlassCreditsDidChangeNotification
                                                object:nil];
 
+    [self.navigationController customGlassRefreshSharedBackground];
     [self customGlassRefreshPageAppearance];
 }
-
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf customGlassRefreshSectionBackdrops];
+    });
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    [self customGlassRefreshSectionBackdrops];
 }
 
 - (void)viewDidLoad
@@ -283,7 +312,6 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:DOCustomGlassCreditsDidChangeNotification
                                                   object:nil];
-    [self.customGlassPageBackgroundHostView removeFromSuperview];
 }
 
 - (id)specifiers

@@ -20,6 +20,59 @@
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
+@interface UINavigationController (DOCustomGlassSharedBackground)
+- (void)customGlassRefreshSharedBackground;
+- (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity;
+- (BOOL)customGlassHasSharedBackground;
+- (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
+@end
+
+static UIColor *DOCustomGlassAdaptiveForegroundColor(UINavigationController *navigationController,
+                                                      UIView *view,
+                                                      CGFloat alpha)
+{
+    BOOL darkForeground = navigationController &&
+        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+        [navigationController customGlassPrefersDarkForegroundForView:view];
+    return [UIColor colorWithWhite:(darkForeground ? 0.08 : 1.0) alpha:alpha];
+}
+
+static void DOCustomGlassApplyAdaptiveForeground(UINavigationController *navigationController, UIView *view)
+{
+    if (!view)
+        return;
+
+    if ([view isKindOfClass:[UILabel class]]) {
+        UILabel *label = (UILabel *)view;
+        CGFloat alpha = label.font.pointSize >= 15.0 ? 0.96 : 0.78;
+        BOOL dark = navigationController &&
+            [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+            [navigationController customGlassPrefersDarkForegroundForView:label];
+        label.textColor = DOCustomGlassAdaptiveForegroundColor(navigationController, label, alpha);
+        label.shadowColor = [UIColor colorWithWhite:(dark ? 1.0 : 0.0) alpha:0.10];
+        label.shadowOffset = CGSizeMake(0.0, 0.35);
+    }
+    else if ([view isKindOfClass:[UIButton class]]) {
+        UIButton *button = (UIButton *)view;
+        UIColor *foreground = DOCustomGlassAdaptiveForegroundColor(navigationController, button, 0.96);
+        button.tintColor = foreground;
+        if (button.configuration) {
+            UIButtonConfiguration *configuration = [button.configuration copy];
+            configuration.baseForegroundColor = foreground;
+            button.configuration = configuration;
+        }
+        [button setTitleColor:foreground forState:UIControlStateNormal];
+    }
+    else if ([view isKindOfClass:[UIImageView class]]) {
+        UIImageView *imageView = (UIImageView *)view;
+        if (imageView.image.renderingMode == UIImageRenderingModeAlwaysTemplate)
+            imageView.tintColor = DOCustomGlassAdaptiveForegroundColor(navigationController, imageView, 0.94);
+    }
+
+    for (UIView *subview in view.subviews)
+        DOCustomGlassApplyAdaptiveForeground(navigationController, subview);
+}
+
 #pragma mark - Custom Glass Theme Settings V1
 
 static NSString * const DOCustomGlassBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
@@ -184,6 +237,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, strong) CAGradientLayer *specularGradientLayer;
 @property(nonatomic, strong) CAShapeLayer *specularMaskLayer;
 @property(nonatomic, strong) CAGradientLayer *surfaceHighlightLayer;
+@property(nonatomic, strong) CAShapeLayer *contrastContourLayer;
 @property(nonatomic, assign) CGFloat preferredCornerRadius;
 @property(nonatomic, assign) CGFloat baseTintAlpha;
 @property(nonatomic, assign) CGFloat materialScale;
@@ -233,6 +287,16 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _surfaceHighlightLayer.locations = @[@0.0, @0.30, @0.66, @1.0];
         _surfaceHighlightLayer.zPosition = 5.0;
         [self.layer addSublayer:_surfaceHighlightLayer];
+
+        // A quiet opposite-tone contour is independent from the white specular
+        // rail. On bright wallpapers it supplies the separation that a white
+        // highlight cannot; on dark wallpapers the white rail remains dominant.
+        _contrastContourLayer = [CAShapeLayer layer];
+        _contrastContourLayer.fillColor = UIColor.clearColor.CGColor;
+        _contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0 alpha:0.06].CGColor;
+        _contrastContourLayer.lineWidth = 0.32;
+        _contrastContourLayer.zPosition = 898.0;
+        [self.layer addSublayer:_contrastContourLayer];
 
         _contentView = [[UIView alloc] initWithFrame:CGRectZero];
         _contentView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -402,16 +466,30 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // Grouping shells intentionally skip the second backdrop blur, but they
     // still need enough body/edge authority to visibly contain the three pills.
     if (self.suppressBackdrop)
-        tintAlpha = 0.042 + (0.070 * bodyAuthority);
+        tintAlpha = 0.060 + (0.082 * bodyAuthority);
 
-    self.neutralTintView.backgroundColor = darkAppearance ?
-        UIColor.whiteColor : UIColor.blackColor;
-    self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.120 : 0.180,
-                                     tintAlpha);
+    // Material separation follows the *local wallpaper*, not just global
+    // Dark Mode. Bright wallpaper receives a faint dark neutral body; dark
+    // wallpaper receives a faint light body. This gives every Glass surface a
+    // reliable depth floor while preserving wallpaper chroma.
+    BOOL prefersDarkForeground = darkAppearance ? NO : YES;
+    UIWindow *window = self.window;
+    UINavigationController *navigationController = nil;
+    if ([window.rootViewController isKindOfClass:[UINavigationController class]])
+        navigationController = (UINavigationController *)window.rootViewController;
+    if (navigationController &&
+        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)]) {
+        prefersDarkForeground = [navigationController customGlassPrefersDarkForegroundForView:self];
+    }
+
+    self.neutralTintView.backgroundColor = prefersDarkForeground ?
+        UIColor.blackColor : UIColor.whiteColor;
+    self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.155 : 0.190,
+                                     tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
 
     CGFloat geometryScale = [self surfaceGeometryScale];
     CGFloat opticalScale = self.suppressBackdrop ?
-        MIN(0.78, geometryScale * 0.76) :
+        MIN(0.88, geometryScale * 0.86) :
         MIN(1.00, geometryScale);
 
     // Directional rail topology follows GlassFolders: the upper / leading rail
@@ -419,19 +497,19 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // and the side walls stay quiet. R6 widens the *luminance response*, not
     // the physical line width, so the HighLight slider is obvious without
     // bringing back the thick white-border look.
-    CGFloat upperRailAlpha = MIN(0.34,
-        (0.001 + (0.335 * opticalResponse)) * opticalScale);
-    CGFloat secondaryRailAlpha = MIN(0.105,
-        (0.001 + (0.100 * opticalResponse)) * opticalScale);
-    CGFloat shoulderAlpha = MIN(0.090,
-        (0.001 + (0.082 * opticalResponse)) * opticalScale);
+    CGFloat upperRailAlpha = MIN(0.40,
+        (0.001 + (0.395 * opticalResponse)) * opticalScale);
+    CGFloat secondaryRailAlpha = MIN(0.120,
+        (0.001 + (0.116 * opticalResponse)) * opticalScale);
+    CGFloat shoulderAlpha = MIN(0.105,
+        (0.001 + (0.096 * opticalResponse)) * opticalScale);
 
     // Broad illumination is intentionally independent of rail width. This is
     // the visible "light catching the material" response that was missing in
     // R6. It remains below labels/icons, so readability never gets washed out.
     CGFloat washAlpha = self.suppressBackdrop ?
-        MIN(0.050, (0.002 + 0.052 * opticalResponse) * opticalScale) :
-        MIN(0.115, (0.002 + 0.118 * opticalResponse) * opticalScale);
+        MIN(0.070, (0.002 + 0.072 * opticalResponse) * opticalScale) :
+        MIN(0.145, (0.002 + 0.148 * opticalResponse) * opticalScale);
     self.surfaceHighlightLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.42].CGColor,
@@ -463,17 +541,26 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     self.shoulderMaskLayer.lineWidth = shoulderWidth;
     self.specularMaskLayer.lineWidth = specularWidth;
 
+    CGFloat contrastContourAlpha = self.suppressBackdrop ?
+        (0.075 + (0.060 * bodyAuthority) + (0.045 * opticalResponse)) :
+        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale);
+    self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
+                                                            alpha:MIN(self.suppressBackdrop ? 0.18 : 0.09,
+                                                                      contrastContourAlpha)].CGColor;
+    self.contrastContourLayer.lineWidth = self.suppressBackdrop ?
+        (0.30 + (0.08 * geometryScale)) : (0.22 + (0.05 * geometryScale));
+
     // Keep a hairline structural contour independent from the specular slider.
     // This is the minimum depth cue that separates Glass from wallpaper when
     // both blur and highlight are low. Highlight adds brightness, not thickness.
     CGFloat structuralBorderAlpha = self.suppressBackdrop ?
-        (0.058 + (0.086 * opticalResponse)) :
+        (0.078 + (0.105 * opticalResponse)) :
         ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale);
     self.layer.borderWidth = self.suppressBackdrop ?
-        (0.27 + (0.08 * geometryScale)) :
+        (0.30 + (0.08 * geometryScale)) :
         (0.15 + (0.07 * geometryScale));
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(self.suppressBackdrop ? 0.16 : 0.14,
+                                             alpha:MIN(self.suppressBackdrop ? 0.20 : 0.14,
                                                        structuralBorderAlpha)].CGColor;
 
 }
@@ -498,6 +585,9 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     CGFloat rimRadius = MAX(0.0, self.preferredCornerRadius - rimInset);
     UIBezierPath *rimPath = [UIBezierPath bezierPathWithRoundedRect:rimRect
                                                       cornerRadius:rimRadius];
+
+    self.contrastContourLayer.frame = self.bounds;
+    self.contrastContourLayer.path = rimPath.CGPath;
 
     self.shoulderGradientLayer.frame = self.bounds;
     self.shoulderMaskLayer.frame = self.bounds;
@@ -734,10 +824,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)reloadCustomGlassBackground
 {
-    NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
-    UIImage *backgroundImage = backgroundPath.length > 0 ? [UIImage imageWithContentsOfFile:backgroundPath] : nil;
-    self.customGlassBackgroundImageView.image = backgroundImage;
-    self.customGlassBackgroundImageView.hidden = backgroundImage == nil;
+    [self.navigationController customGlassRefreshSharedBackground];
 }
 
 - (void)presentCustomGlassBackgroundPicker
@@ -780,8 +867,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             if (!saved)
                 return;
 
-            weakSelf.customGlassBackgroundImageView.image = image;
-            weakSelf.customGlassBackgroundImageView.hidden = NO;
+            [weakSelf.navigationController customGlassRefreshSharedBackground];
 
             // Re-arm both wallpaper and Glass sampling immediately after an
             // image swap. This uses the same refresh path as page re-entry, so
@@ -812,6 +898,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Materialize the real Custom Glass wallpaper and Glass hierarchy now so
     // the push animation never exposes Dopamine's underlying/default theme for
     // a single frame.
+    [self.navigationController customGlassRefreshSharedBackground];
     [self loadViewIfNeeded];
     [self refreshThemePageFromPersistedState];
     [self.view setNeedsLayout];
@@ -826,20 +913,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor = UIColor.clearColor;
 
-    self.customGlassBackgroundImageView = [[UIImageView alloc] init];
-    self.customGlassBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
-    self.customGlassBackgroundImageView.clipsToBounds = YES;
-    self.customGlassBackgroundImageView.userInteractionEnabled = NO;
-    self.customGlassBackgroundImageView.hidden = YES;
-    [self.view addSubview:self.customGlassBackgroundImageView];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.customGlassBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.customGlassBackgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.customGlassBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
-    ]];
-    [self reloadCustomGlassBackground];
+    // The navigation controller owns the only Custom Glass wallpaper layer.
+    // This page is fully transparent above it, eliminating transition flashes
+    // and avoiding duplicate wallpaper blur/backdrop sampling.
+    [self.navigationController customGlassRefreshSharedBackground];
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
         DOCustomGlassBackgroundBlurKey : @0.10,
@@ -852,23 +929,12 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
 
-    // Wallpaper blur is a pure backdrop gaussian layer. It never adds the
-    // material tint of UIVisualEffectView, so wallpaper blur and Glass body
-    // transparency remain visibly separate controls.
-    self.backgroundBlurView = [[DOCustomWallpaperBlurView alloc] initWithFrame:CGRectZero];
-    self.backgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.backgroundBlurView];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.backgroundBlurView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.backgroundBlurView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.backgroundBlurView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.backgroundBlurView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
-    ]];
-
     UIScrollView *scrollView = [[UIScrollView alloc] init];
     scrollView.translatesAutoresizingMaskIntoConstraints = NO;
     scrollView.alwaysBounceVertical = YES;
     scrollView.showsVerticalScrollIndicator = NO;
+    scrollView.backgroundColor = UIColor.clearColor;
+    scrollView.opaque = NO;
     [self.view addSubview:scrollView];
 
     UIStackView *contentStack = [[UIStackView alloc] init];
@@ -1045,11 +1111,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Force a full layout/display pass after the background image and all
     // CABackdropLayer filters are rebuilt. This is intentionally shared by
     // first presentation, repeated navigation entries and post-picker refresh.
-    [self.backgroundBlurView.layer setNeedsDisplay];
-    [self.backgroundBlurView setNeedsLayout];
     [self refreshLiquidGlassInView:self.view];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
+    DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -1084,7 +1149,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     CGFloat transparency = self.glassTransparencySlider.value;
     CGFloat tintAlpha = self.glassTintSlider.value;
 
-    [self.backgroundBlurView setBlurIntensity:backgroundBlur];
+    [self.navigationController customGlassApplySharedBackgroundBlurIntensity:backgroundBlur];
 
     if (persist) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -1105,6 +1170,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // and the live controls panel, from the exact same persisted parameters the
     // home screen will read when it becomes visible again.
     [self refreshLiquidGlassInView:self.view];
+    DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 
     self.backgroundBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", backgroundBlur * 100.0];
     self.glassBlurValueLabel.text = [NSString stringWithFormat:@"%.0f%%", glassBlur * 100.0];
@@ -1160,10 +1226,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)reloadCustomGlassBackground
 {
-    NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
-    UIImage *backgroundImage = backgroundPath.length > 0 ? [UIImage imageWithContentsOfFile:backgroundPath] : nil;
-    self.customGlassBackgroundImageView.image = backgroundImage;
-    self.customGlassBackgroundImageView.hidden = backgroundImage == nil;
+    [self.navigationController customGlassRefreshSharedBackground];
 }
 
 - (void)applyCustomGlassHomeAppearance
@@ -1173,12 +1236,15 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [defaults floatForKey:DOCustomGlassBackgroundBlurKey] : 0.10;
     backgroundBlur = DOCustomGlassClamp01(backgroundBlur);
 
-    [self.customGlassBackgroundBlurView setBlurIntensity:backgroundBlur];
+    [self.navigationController customGlassApplySharedBackgroundBlurIntensity:backgroundBlur];
 
     // Every home Glass surface is already mounted in self.view. Walking that
     // hierarchy makes Settings / About / Theme Settings / restart pills / the
     // restart shell / jailbreak emphasis all consume the same persisted values.
     [self refreshCustomGlassMaterialInView:self.view];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 }
 
 - (void)customGlassThemeDidChange:(NSNotification *)notification
@@ -1748,33 +1814,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                                                  name:DOCustomGlassThemeDidChangeNotification
                                                object:nil];
 
-    self.customGlassBackgroundImageView = [[UIImageView alloc] init];
-    self.customGlassBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
-    self.customGlassBackgroundImageView.clipsToBounds = YES;
-    self.customGlassBackgroundImageView.userInteractionEnabled = NO;
-    self.customGlassBackgroundImageView.hidden = YES;
-    [self.view addSubview:self.customGlassBackgroundImageView];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.customGlassBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.customGlassBackgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.customGlassBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
-    ]];
-    [self reloadCustomGlassBackground];
-
-    // Wallpaper blur is a page-level effect shared with Theme Settings. It sits
-    // above either the Custom Glass background.jpg or the untouched Dopamine
-    // theme background, and below every card/content layer.
-    self.customGlassBackgroundBlurView = [[DOCustomWallpaperBlurView alloc] initWithFrame:CGRectZero];
-    self.customGlassBackgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.customGlassBackgroundBlurView];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassBackgroundBlurView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.customGlassBackgroundBlurView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.customGlassBackgroundBlurView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.customGlassBackgroundBlurView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
-    ]];
+    // Shared wallpaper/blur lives below the navigation transition container.
+    // Home only owns foreground content and Glass surfaces.
+    [self.navigationController customGlassRefreshSharedBackground];
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
     CGFloat availableHeight = CGRectGetHeight(self.view.bounds);
@@ -2028,9 +2070,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     ]];
 
     UIAction *settingsAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [self.navigationController customGlassRefreshSharedBackground];
         [self.navigationController pushViewController:[[DOSettingsController alloc] init] animated:YES];
     }];
     UIAction *creditsAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [self.navigationController customGlassRefreshSharedBackground];
         [self.navigationController pushViewController:[[DOCreditsViewController alloc] init] animated:YES];
     }];
 
@@ -2040,6 +2084,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [leftColumn addArrangedSubview:creditsCard];
 
     UIAction *themeAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        [self.navigationController customGlassRefreshSharedBackground];
         DOCustomGlassThemeSettingsViewController *themeSettingsController =
             [[DOCustomGlassThemeSettingsViewController alloc] init];
         [themeSettingsController prepareForPresentation];
@@ -2055,7 +2100,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Visible grouping shell: keep a clear total frame around the three restart
     // actions, but never apply a second backdrop blur. Its optical rail is
     // intentionally lighter than the three inner pills.
-    restartContainer.materialScale = 0.96;
+    restartContainer.materialScale = 1.04;
     restartContainer.suppressBackdrop = YES;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
