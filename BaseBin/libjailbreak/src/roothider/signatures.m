@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <os/log.h>
+#include <dispatch/dispatch.h>
 #import <Foundation/Foundation.h>
 
 #define DEBUG_LOG(...) //JBLogDebug(__VA_ARGS__)
@@ -59,6 +60,60 @@ NSString* resolveLoaderExecutablePaths(NSString *loadPath, NSString *loaderPath,
 	return nil;
 };
 
+static NSString *rpathCacheIdentity(const struct stat *st)
+{
+	return [NSString stringWithFormat:@"%llu:%llu:%lld:%lld:%ld:%ld:%ld:%ld",
+		(unsigned long long)st->st_dev,
+		(unsigned long long)st->st_ino,
+		(long long)st->st_size,
+		(long long)st->st_blocks,
+		(long)st->st_mtimespec.tv_sec,
+		(long)st->st_mtimespec.tv_nsec,
+		(long)st->st_ctimespec.tv_sec,
+		(long)st->st_ctimespec.tv_nsec];
+}
+
+static NSArray *cachedRpathsForLoader(NSString *loaderPath)
+{
+	if (!loaderPath) return nil;
+
+	struct stat st = {0};
+	if (stat(loaderPath.fileSystemRepresentation, &st) != 0) return nil;
+
+	static NSCache *rpathCache = nil;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		rpathCache = [NSCache new];
+		rpathCache.countLimit = 256;
+	});
+
+	NSString *identity = rpathCacheIdentity(&st);
+	NSDictionary *cached = [rpathCache objectForKey:loaderPath];
+	if ([cached[@"identity"] isEqualToString:identity]) {
+		return cached[@"rpaths"];
+	}
+
+	Fat *fat = fat_init_from_path(loaderPath.fileSystemRepresentation);
+	if (!fat) return nil;
+
+	MachO *macho = fat_find_preferred_slice(fat);
+	if (!macho) {
+		fat_free(fat);
+		return nil;
+	}
+
+	NSMutableArray *rpaths = [NSMutableArray array];
+	macho_enumerate_rpaths(macho, ^(const char *rpathCStr, bool *stop) {
+		(void)stop;
+		if (rpathCStr) [rpaths addObject:@(rpathCStr)];
+	});
+	fat_free(fat);
+
+	NSArray *snapshot = [NSArray arrayWithArray:rpaths];
+	[rpathCache setObject:@{ @"identity" : identity, @"rpaths" : snapshot } forKey:loaderPath];
+	return snapshot;
+}
+
 NSString* resolveRpaths(NSString *loadPath, NSString *mainExecutablePath, NSArray* rpathStack)
 {
 @autoreleasepool {
@@ -69,25 +124,18 @@ NSString* resolveRpaths(NSString *loadPath, NSString *mainExecutablePath, NSArra
 
 	for (NSString* loaderPath in rpathStack.reverseObjectEnumerator)
 	{
-		Fat *fat = fat_init_from_path(loaderPath.fileSystemRepresentation);
-		if (fat) {
-			MachO *macho = fat_find_preferred_slice(fat);
-			if (macho) {
-				macho_enumerate_rpaths(macho, ^(const char *rpathCStr, bool *stop) {
-					NSString* possiblePath = [loadPath stringByReplacingCharactersInRange:NSMakeRange(0,sizeof("@rpath")-1) withString:@(rpathCStr)];
-					possiblePath = resolveLoaderExecutablePaths(possiblePath, loaderPath, mainExecutablePath) ?: possiblePath;
-					if(![possiblePath hasPrefix:@"/"]) { // dyld only supports relative path in rpath on macOS
-						JBLogDebug("Skipping relative rpath: %s -> %s", loadPath.fileSystemRepresentation, possiblePath.fileSystemRepresentation);
-						return;
-					}
-					if (_dyld_shared_cache_contains_path(possiblePath.fileSystemRepresentation)
-					 || [[NSFileManager defaultManager] fileExistsAtPath:possiblePath]) {
-						rpathResolvedPath = possiblePath;
-						*stop = true;
-					}
-				});
+		for (NSString *rpath in cachedRpathsForLoader(loaderPath)) {
+			NSString* possiblePath = [loadPath stringByReplacingCharactersInRange:NSMakeRange(0,sizeof("@rpath")-1) withString:rpath];
+			possiblePath = resolveLoaderExecutablePaths(possiblePath, loaderPath, mainExecutablePath) ?: possiblePath;
+			if(![possiblePath hasPrefix:@"/"]) { // dyld only supports relative path in rpath on macOS
+				JBLogDebug("Skipping relative rpath: %s -> %s", loadPath.fileSystemRepresentation, possiblePath.fileSystemRepresentation);
+				continue;
 			}
-			fat_free(fat);
+			if (_dyld_shared_cache_contains_path(possiblePath.fileSystemRepresentation)
+			 || [[NSFileManager defaultManager] fileExistsAtPath:possiblePath]) {
+				rpathResolvedPath = possiblePath;
+				break;
+			}
 		}
 
 		if(rpathResolvedPath)
