@@ -1046,7 +1046,28 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)refreshJailbreakAppsPressed
 {
-    [[DOEnvironmentManager sharedManager] refreshJailbreakApps];
+    static BOOL repairInProgress = NO;
+    if (repairInProgress) return;
+    repairInProgress = YES;
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *repairError = [[DOEnvironmentManager sharedManager] repairJailbreakApps];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            repairInProgress = NO;
+
+            NSString *title = repairError ? @"Jailbreak App Repair Failed" : DOLocalizedString(@"Button_Refresh_Jailbreak_Apps");
+            NSString *message = repairError.localizedDescription ?: @"Jailbreak app registrations are healthy and up to date.";
+
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                           message:message
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK")
+                                                     style:UIAlertActionStyleDefault
+                                                   handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        });
+    });
 }
 
 - (void)reinstallPackageManagersPressed
