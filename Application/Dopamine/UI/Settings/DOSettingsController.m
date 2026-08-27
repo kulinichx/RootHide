@@ -42,6 +42,7 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
 @property(nonatomic, strong) UIView *contentView;
 @property(nonatomic, assign) CGFloat materialScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
+@property(nonatomic, assign) CGFloat preferredCornerRadius;
 - (instancetype)initWithCornerRadius:(CGFloat)cornerRadius baseTintAlpha:(CGFloat)baseTintAlpha;
 - (void)reloadMaterial;
 @end
@@ -68,7 +69,21 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
     self.customGlassPageBackgroundImageView.hidden = image == nil;
 }
 
-- (void)customGlassStyleVisibleCell:(UITableViewCell *)cell
+- (void)customGlassImproveReadabilityInView:(UIView *)view header:(BOOL)isHeader
+{
+    if ([view isKindOfClass:[UILabel class]]) {
+        UILabel *label = (UILabel *)view;
+        CGFloat alpha = isHeader ? 0.74 : (label.font.pointSize >= 15.0 ? 0.96 : 0.80);
+        label.textColor = [UIColor colorWithWhite:1.0 alpha:alpha];
+        label.shadowColor = [UIColor colorWithWhite:0.0 alpha:(isHeader ? 0.18 : 0.24)];
+        label.shadowOffset = CGSizeMake(0.0, 0.5);
+    }
+
+    for (UIView *subview in view.subviews)
+        [self customGlassImproveReadabilityInView:subview header:isHeader];
+}
+
+- (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
 {
     if (!cell)
         return;
@@ -78,33 +93,68 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
         cell.backgroundColor = UIColor.clearColor;
         cell.contentView.backgroundColor = UIColor.clearColor;
         cell.backgroundView = nil;
+        [self customGlassImproveReadabilityInView:cell.contentView header:YES];
         return;
     }
 
+    UITableView *tableView = [self valueForKey:@"table"];
+    NSInteger rowCount = indexPath ? [tableView numberOfRowsInSection:indexPath.section] : 1;
+    BOOL firstRow = !indexPath || indexPath.row == 0;
+    BOOL lastRow = !indexPath || indexPath.row == MAX(0, rowCount - 1);
+    BOOL singleRow = firstRow && lastRow;
+
+    // R7 treats a Preferences section as one material region. Individual rows
+    // still own their backdrop sampling, but only the outer rows carry rounded
+    // corners; the middle rows visually merge into the same Section Glass.
     DOCustomLiquidGlassView *glass = nil;
     if ([cell.backgroundView isKindOfClass:[DOCustomLiquidGlassView class]]) {
         glass = (DOCustomLiquidGlassView *)cell.backgroundView;
     }
     else {
-        glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:12.0 baseTintAlpha:0.018];
+        glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:16.0 baseTintAlpha:0.032];
         glass.userInteractionEnabled = NO;
-        // Keep row-local Glass deliberately light, but leave backdrop sampling
-        // enabled so the global Glass Blur control still has visible authority
-        // inside Settings/About instead of only affecting the home screen.
-        glass.suppressBackdrop = NO;
-        glass.materialScale = 0.58;
         cell.backgroundView = glass;
 
         UIView *selected = [[UIView alloc] initWithFrame:CGRectZero];
-        selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.055];
-        selected.layer.cornerRadius = 12.0;
+        selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.060];
         selected.layer.cornerCurve = kCACornerCurveContinuous;
         cell.selectedBackgroundView = selected;
     }
 
+    glass.suppressBackdrop = NO;
+    glass.materialScale = 0.78;
+    glass.preferredCornerRadius = (singleRow || firstRow || lastRow) ? 16.0 : 0.0;
+    glass.layer.cornerRadius = glass.preferredCornerRadius;
+
+    if (singleRow) {
+        glass.layer.maskedCorners =
+            kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+            kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    }
+    else if (firstRow) {
+        glass.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+    }
+    else if (lastRow) {
+        glass.layer.maskedCorners = kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    }
+    else {
+        glass.layer.maskedCorners = 0;
+    }
+
+    cell.selectedBackgroundView.layer.cornerRadius = glass.preferredCornerRadius;
+    cell.selectedBackgroundView.layer.maskedCorners = glass.layer.maskedCorners;
+
     [glass reloadMaterial];
+
+    // Internal rows should read as quiet separators inside one Glass section,
+    // not as a stack of pills. Keep the material body, but suppress the repeated
+    // bright structural outline between adjacent rows.
+    if (!singleRow && !firstRow && !lastRow)
+        glass.layer.borderWidth *= 0.42;
+
     cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
+    [self customGlassImproveReadabilityInView:cell.contentView header:NO];
 }
 
 - (void)customGlassApplyPageAppearance
@@ -117,7 +167,7 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
 
     UITableView *tableView = [self valueForKey:@"table"];
     for (UITableViewCell *cell in tableView.visibleCells)
-        [self customGlassStyleVisibleCell:cell];
+        [self customGlassStyleVisibleCell:cell atIndexPath:[tableView indexPathForCell:cell]];
 }
 
 - (void)customGlassRefreshPageAppearance
@@ -209,7 +259,7 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    [self customGlassStyleVisibleCell:cell];
+    [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
 }
 
 - (void)viewDidLoad

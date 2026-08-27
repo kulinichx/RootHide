@@ -29,6 +29,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 @interface DOCustomLiquidGlassView : UIView
 @property(nonatomic, assign) CGFloat materialScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
+@property(nonatomic, assign) CGFloat preferredCornerRadius;
 - (instancetype)initWithCornerRadius:(CGFloat)cornerRadius baseTintAlpha:(CGFloat)baseTintAlpha;
 - (void)reloadMaterial;
 @end
@@ -55,7 +56,21 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
     self.customGlassPageBackgroundImageView.hidden = image == nil;
 }
 
-- (void)customGlassStyleVisibleCell:(UITableViewCell *)cell
+- (void)customGlassImproveReadabilityInView:(UIView *)view header:(BOOL)isHeader
+{
+    if ([view isKindOfClass:[UILabel class]]) {
+        UILabel *label = (UILabel *)view;
+        CGFloat alpha = isHeader ? 0.76 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
+        label.textColor = [UIColor colorWithWhite:1.0 alpha:alpha];
+        label.shadowColor = [UIColor colorWithWhite:0.0 alpha:(isHeader ? 0.18 : 0.26)];
+        label.shadowOffset = CGSizeMake(0.0, 0.5);
+    }
+
+    for (UIView *subview in view.subviews)
+        [self customGlassImproveReadabilityInView:subview header:isHeader];
+}
+
+- (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
 {
     if (!cell)
         return;
@@ -65,30 +80,77 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
         cell.backgroundColor = UIColor.clearColor;
         cell.contentView.backgroundColor = UIColor.clearColor;
         cell.backgroundView = nil;
+        [self customGlassImproveReadabilityInView:cell.contentView header:YES];
         return;
     }
 
+    BOOL isCreditsContentCell = [className containsString:@"CreditsCell"];
+    UITableView *tableView = [self valueForKey:@"table"];
+    NSInteger rowCount = indexPath ? [tableView numberOfRowsInSection:indexPath.section] : 1;
+    BOOL firstRow = !indexPath || indexPath.row == 0;
+    BOOL lastRow = !indexPath || indexPath.row == MAX(0, rowCount - 1);
+    BOOL singleRow = firstRow && lastRow;
+
+    // Links read as one compact Section Glass. DOCreditsCell is a tall custom
+    // surface containing the people groups, so give that content one coherent
+    // medium/large Glass backplate instead of letting names float directly over
+    // arbitrary bright/dark wallpaper regions.
     DOCustomLiquidGlassView *glass = nil;
     if ([cell.backgroundView isKindOfClass:[DOCustomLiquidGlassView class]]) {
         glass = (DOCustomLiquidGlassView *)cell.backgroundView;
     }
     else {
-        glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:12.0 baseTintAlpha:0.018];
+        CGFloat radius = isCreditsContentCell ? 24.0 : 16.0;
+        CGFloat tint = isCreditsContentCell ? 0.040 : 0.032;
+        glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:radius baseTintAlpha:tint];
         glass.userInteractionEnabled = NO;
-        glass.suppressBackdrop = NO;
-        glass.materialScale = 0.58;
         cell.backgroundView = glass;
 
         UIView *selected = [[UIView alloc] initWithFrame:CGRectZero];
-        selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.055];
-        selected.layer.cornerRadius = 12.0;
+        selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.060];
         selected.layer.cornerCurve = kCACornerCurveContinuous;
         cell.selectedBackgroundView = selected;
     }
 
+    glass.suppressBackdrop = NO;
+    glass.materialScale = isCreditsContentCell ? 0.90 : 0.78;
+
+    if (isCreditsContentCell) {
+        glass.preferredCornerRadius = 24.0;
+        glass.layer.cornerRadius = 24.0;
+        glass.layer.maskedCorners =
+            kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+            kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    }
+    else {
+        glass.preferredCornerRadius = (singleRow || firstRow || lastRow) ? 16.0 : 0.0;
+        glass.layer.cornerRadius = glass.preferredCornerRadius;
+        if (singleRow) {
+            glass.layer.maskedCorners =
+                kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+                kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+        }
+        else if (firstRow) {
+            glass.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+        }
+        else if (lastRow) {
+            glass.layer.maskedCorners = kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+        }
+        else {
+            glass.layer.maskedCorners = 0;
+        }
+    }
+
+    cell.selectedBackgroundView.layer.cornerRadius = glass.preferredCornerRadius;
+    cell.selectedBackgroundView.layer.maskedCorners = glass.layer.maskedCorners;
     [glass reloadMaterial];
+
+    if (!isCreditsContentCell && !singleRow && !firstRow && !lastRow)
+        glass.layer.borderWidth *= 0.42;
+
     cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
+    [self customGlassImproveReadabilityInView:cell.contentView header:NO];
 }
 
 - (void)customGlassApplyPageAppearance
@@ -101,7 +163,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 
     UITableView *tableView = [self valueForKey:@"table"];
     for (UITableViewCell *cell in tableView.visibleCells)
-        [self customGlassStyleVisibleCell:cell];
+        [self customGlassStyleVisibleCell:cell atIndexPath:[tableView indexPathForCell:cell]];
 }
 
 - (void)customGlassRefreshPageAppearance
@@ -190,7 +252,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    [self customGlassStyleVisibleCell:cell];
+    [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
 }
 
 - (void)viewDidLoad
