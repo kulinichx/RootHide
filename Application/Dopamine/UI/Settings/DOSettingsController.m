@@ -37,10 +37,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)reloadMaterial;
 @end
 
-@interface UINavigationController (DOCustomGlassSharedBackground)
-- (void)customGlassRefreshSharedBackground;
-@end
-
 @interface DOSettingsController ()
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
@@ -51,15 +47,18 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (UIColor *)customGlassForegroundWithAlpha:(CGFloat)alpha
 {
-    return [UIColor colorWithWhite:1.0 alpha:alpha];
+    return [UIColor.labelColor colorWithAlphaComponent:alpha];
 }
 
 - (void)customGlassImproveReadabilityInView:(UIView *)view
                                      header:(BOOL)isHeader
 {
-    // R11: Settings/About deliberately use one stable light-content style.
-    // Do not sample the wallpaper per cell or per section: UITableView cell
-    // reuse made that adaptive path oscillate between black and white on iPhone.
+    // Preferences may reconfigure reused cells after willDisplayCell. Make the
+    // trait environment authoritative instead of fighting it with sampled
+    // black/white colors. Semantic label colors now always resolve in Dark mode
+    // on both iPhone and iPad.
+    view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+
     if ([view isKindOfClass:[UISwitch class]] ||
         [view isKindOfClass:[UISlider class]] ||
         [view isKindOfClass:[UISegmentedControl class]]) {
@@ -165,6 +164,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     if (!cell)
         return;
 
+    cell.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    cell.contentView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+
     NSString *className = NSStringFromClass(cell.class);
     BOOL isHeader = [className containsString:@"HeaderCell"];
 
@@ -261,8 +263,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassApplyPageAppearance
 {
-    [self.navigationController customGlassRefreshSharedBackground];
-
     UITableView *tableView = [self valueForKey:@"table"];
 
     // Build the Section Glass geometry first. Every row in one surface then
@@ -352,9 +352,12 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassInstallPageAppearance
 {
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.backgroundColor = UIColor.clearColor;
 
     UITableView *tableView = [self valueForKey:@"table"];
+    tableView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     tableView.backgroundColor = UIColor.clearColor;
     tableView.opaque = NO;
     tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
@@ -372,15 +375,22 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                                  name:DOCustomGlassSettingsDidChangeNotification
                                                object:nil];
 
-    [self.navigationController customGlassRefreshSharedBackground];
     [self customGlassRefreshPageAppearance];
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
+
     __weak typeof(self) weakSelf = self;
+    __weak UITableViewCell *weakCell = cell;
     dispatch_async(dispatch_get_main_queue(), ^{
+        UITableViewCell *strongCell = weakCell;
+        if (strongCell && strongCell.window) {
+            NSIndexPath *currentIndexPath = [tableView indexPathForCell:strongCell];
+            if (currentIndexPath)
+                [weakSelf customGlassStyleVisibleCell:strongCell atIndexPath:currentIndexPath];
+        }
         [weakSelf customGlassRefreshSectionBackdrops];
     });
 }

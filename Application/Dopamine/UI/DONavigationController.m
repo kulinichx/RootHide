@@ -11,10 +11,10 @@
 #import "DOGlobalAppearance.h"
 #import "DOThemeManager.h"
 #import <QuartzCore/QuartzCore.h>
+#import <CoreImage/CoreImage.h>
 #import <math.h>
 
 static NSString * const DOCustomGlassNavigationBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
-static NSString * const DOCustomGlassNavigationDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 
 static NSString *DOCustomGlassNavigationBackgroundFilePath(void)
 {
@@ -36,17 +36,73 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
 }
 
-@interface DOCustomWallpaperBlurView : UIView
-- (void)setBlurIntensity:(CGFloat)blurIntensity;
-@end
+// Wallpaper blur is image processing, not a live backdrop. Keeping it off the
+// CABackdropLayer/CAFilter path removes the window-attachment race that was
+// unique to iPhone cold launches while preserving the same persisted control.
+static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloat blurIntensity)
+{
+    if (!image || !image.CGImage)
+        return image;
+
+    CGFloat clamped = DOCustomGlassNavigationClamp01(blurIntensity);
+    if (clamped <= 0.001)
+        return image;
+
+    CIImage *input = [CIImage imageWithCGImage:image.CGImage];
+    if (!input)
+        return image;
+
+    // Bound the working image size. Full-resolution photo assets can be tens of
+    // megapixels; blurring those during relaunch is unnecessary for a screen
+    // background and can create a large transient memory spike on iPhone.
+    CGFloat longestEdge = MAX(CGRectGetWidth(input.extent), CGRectGetHeight(input.extent));
+    if (longestEdge > 2048.0) {
+        CGFloat imageScale = 2048.0 / longestEdge;
+        CIFilter *scaleFilter = [CIFilter filterWithName:@"CILanczosScaleTransform"];
+        [scaleFilter setValue:input forKey:kCIInputImageKey];
+        [scaleFilter setValue:@(imageScale) forKey:kCIInputScaleKey];
+        [scaleFilter setValue:@1.0 forKey:kCIInputAspectRatioKey];
+        if (scaleFilter.outputImage)
+            input = scaleFilter.outputImage;
+    }
+
+    CGFloat radius = 24.0 * pow(clamped, 1.08);
+    CIImage *clampedInput = [input imageByClampingToExtent];
+    CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur"];
+    if (!filter)
+        return image;
+
+    [filter setValue:clampedInput forKey:kCIInputImageKey];
+    [filter setValue:@(radius) forKey:kCIInputRadiusKey];
+
+    CIImage *output = filter.outputImage;
+    if (!output)
+        return image;
+    output = [output imageByCroppingToRect:input.extent];
+
+    static CIContext *context;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        context = [CIContext contextWithOptions:nil];
+    });
+
+    CGImageRef outputCGImage = [context createCGImage:output fromRect:input.extent];
+    if (!outputCGImage)
+        return image;
+
+    UIImage *result = [UIImage imageWithCGImage:outputCGImage
+                                         scale:image.scale
+                                   orientation:image.imageOrientation];
+    CGImageRelease(outputCGImage);
+    return result ?: image;
+}
 
 @interface DONavigationController ()
 
 @property (nonatomic) UIImageView *backgroundImageView;
-@property (nonatomic) UIView *customGlassBackgroundHostView;
-@property (nonatomic) UIImageView *customGlassBackgroundImageView;
-@property (nonatomic) DOCustomWallpaperBlurView *customGlassBackgroundBlurView;
-@property (nonatomic, assign) CGFloat pendingCustomGlassBackgroundBlurIntensity;
+@property (nonatomic, strong) UIImage *customGlassBackgroundSourceImage;
+@property (nonatomic, assign) BOOL customGlassUsingCustomBackground;
+@property (nonatomic, assign) NSUInteger customGlassBackgroundBlurGeneration;
 @property (nonatomic) DOMainViewController *mainView;
 @property (nonatomic) DOModalBackAction *backAction;
 
@@ -73,21 +129,18 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     [self setupBackground];
     [self setNavigationBarHidden:YES];
 
-    self.pendingCustomGlassBackgroundBlurIntensity = 0.10;
-
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(customGlassThemeDidChange:)
-                                                 name:DOCustomGlassNavigationDidChangeNotification
-                                               object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(customGlassApplicationDidBecomeActive:)
                                                  name:UIApplicationDidBecomeActiveNotification
                                                object:nil];
 
-    // Load the current background.jpg synchronously before the root controller
-    // is pushed. Only the private backdrop filter is deferred until a window is
-    // attached; the image itself is ready for the very first visible frame.
-    [self customGlassRefreshSharedBackground];
+    // setupBackground already resolved the current background.jpg before the
+    // first image view was created. Apply only the persisted blur here; do not
+    // decode the wallpaper a second time during cold bootstrap.
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    CGFloat initialBlur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
+        [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
+    [self customGlassApplySharedBackgroundBlurIntensity:initialBlur];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
 
@@ -99,63 +152,37 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 - (void)setupBackground
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
-    
+
+    // Resolve the real first-frame image before creating the UIImageView. There
+    // is no native-theme layer underneath a delayed Custom Glass layer anymore,
+    // so iPhone cannot briefly commit the previous/default wallpaper first.
+    NSString *customPath = DOCustomGlassNavigationBackgroundFilePath();
+    NSData *customData = customPath.length > 0 ? [NSData dataWithContentsOfFile:customPath] : nil;
+    UIImage *customImage = customData.length > 0 ? [UIImage imageWithData:customData] : nil;
+    UIImage *sourceImage = customImage ?: [theme image];
+
+    self.customGlassUsingCustomBackground = customImage != nil;
+    self.customGlassBackgroundSourceImage = sourceImage;
+    self.customGlassBackgroundBlurGeneration = 0;
+
     self.view.backgroundColor = [UIColor blackColor];
     self.backgroundImageView = [[UIImageView alloc] init];
-    self.backgroundImageView.image = [theme image];
+    self.backgroundImageView.image = sourceImage;
     self.backgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
     self.backgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
     self.backgroundImageView.userInteractionEnabled = NO;
+    self.backgroundImageView.clipsToBounds = YES;
     self.backgroundImageView.layer.zPosition = -1;
 
     [self.view insertSubview:self.backgroundImageView atIndex:0];
-    
+
+    // Keep the one shared image overscanned so modal scale/push transitions
+    // cannot expose a second wallpaper around the destination frame.
     [NSLayoutConstraint activateConstraints:@[
-        [self.backgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.backgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.backgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:-100],
-        [self.backgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:100],
-    ]];
-
-    // Custom Glass owns one persistent wallpaper layer at the navigation level.
-    // Every pushed controller stays transparent above this layer, so scale/push
-    // transitions can never expose the Dopamine theme for a single edge frame.
-    self.customGlassBackgroundHostView = [[UIView alloc] init];
-    self.customGlassBackgroundHostView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassBackgroundHostView.backgroundColor = UIColor.clearColor;
-    self.customGlassBackgroundHostView.userInteractionEnabled = NO;
-    self.customGlassBackgroundHostView.hidden = YES;
-    self.customGlassBackgroundHostView.layer.zPosition = -0.5;
-    [self.view insertSubview:self.customGlassBackgroundHostView aboveSubview:self.backgroundImageView];
-
-    self.customGlassBackgroundImageView = [[UIImageView alloc] init];
-    self.customGlassBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
-    self.customGlassBackgroundImageView.clipsToBounds = YES;
-    self.customGlassBackgroundImageView.userInteractionEnabled = NO;
-    [self.customGlassBackgroundHostView addSubview:self.customGlassBackgroundImageView];
-
-    self.customGlassBackgroundBlurView = [[DOCustomWallpaperBlurView alloc] initWithFrame:CGRectZero];
-    self.customGlassBackgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassBackgroundBlurView.userInteractionEnabled = NO;
-    [self.customGlassBackgroundHostView addSubview:self.customGlassBackgroundBlurView];
-
-    // Deliberately overscan the shared wallpaper. The custom modal-scale
-    // transition briefly reveals area outside a controller's transformed frame;
-    // overscan guarantees that area is still the same Custom Glass wallpaper.
-    [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassBackgroundHostView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:-48.0],
-        [self.customGlassBackgroundHostView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:48.0],
-        [self.customGlassBackgroundHostView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:-140.0],
-        [self.customGlassBackgroundHostView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:140.0],
-        [self.customGlassBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.leadingAnchor],
-        [self.customGlassBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.trailingAnchor],
-        [self.customGlassBackgroundImageView.topAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.topAnchor],
-        [self.customGlassBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.bottomAnchor],
-        [self.customGlassBackgroundBlurView.leadingAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.leadingAnchor],
-        [self.customGlassBackgroundBlurView.trailingAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.trailingAnchor],
-        [self.customGlassBackgroundBlurView.topAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.topAnchor],
-        [self.customGlassBackgroundBlurView.bottomAnchor constraintEqualToAnchor:self.customGlassBackgroundHostView.bottomAnchor]
+        [self.backgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:-48.0],
+        [self.backgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:48.0],
+        [self.backgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:-140.0],
+        [self.backgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:140.0],
     ]];
 
     self.backAction = [[DOModalBackAction alloc] initWithAction:^{
@@ -163,28 +190,15 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     }];
     self.backAction.translatesAutoresizingMaskIntoConstraints = NO;
     self.backAction.hidden = YES;
-    
-    [self.view insertSubview:self.backAction atIndex:2];
-    
+
+    [self.view insertSubview:self.backAction atIndex:1];
+
     [NSLayoutConstraint activateConstraints:@[
         [self.backAction.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.backAction.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.backAction.topAnchor constraintEqualToAnchor:self.view.topAnchor],
         [self.backAction.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
     ]];
-}
-
-- (void)customGlassThemeDidChange:(NSNotification *)notification
-{
-    if (![NSThread isMainThread]) {
-        __weak typeof(self) weakSelf = self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [weakSelf customGlassThemeDidChange:notification];
-        });
-        return;
-    }
-
-    [self customGlassRefreshSharedBackground];
 }
 
 - (void)customGlassApplicationDidBecomeActive:(NSNotification *)notification
@@ -198,46 +212,62 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity
 {
     CGFloat clamped = DOCustomGlassNavigationClamp01(blurIntensity);
-    self.pendingCustomGlassBackgroundBlurIntensity = clamped;
+    UIImage *sourceImage = self.customGlassBackgroundSourceImage;
+    NSUInteger generation = ++self.customGlassBackgroundBlurGeneration;
 
-    // CABackdropLayer/CAFilter is private rendering plumbing and is much safer
-    // once the navigation view belongs to a real UIWindow. Keep the wallpaper
-    // image synchronous, but defer filter installation during cold bootstrap.
-    if (!self.view.window)
+    if (!sourceImage || clamped <= 0.001) {
+        [UIView performWithoutAnimation:^{
+            self.backgroundImageView.image = sourceImage;
+        }];
         return;
+    }
 
-    [self.customGlassBackgroundBlurView setBlurIntensity:clamped];
-    [self.customGlassBackgroundBlurView.layer setNeedsDisplay];
-    [self.customGlassBackgroundBlurView setNeedsLayout];
+    // Core Image is intentionally off the main thread. Old requests are ignored
+    // with a generation token, so dragging the slider cannot race a wallpaper
+    // replacement or put an older blur result back on screen.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        UIImage *blurredImage = DOCustomGlassNavigationCreateBlurredImage(sourceImage, clamped);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != self.customGlassBackgroundBlurGeneration ||
+                sourceImage != self.customGlassBackgroundSourceImage)
+                return;
+
+            [UIView performWithoutAnimation:^{
+                self.backgroundImageView.image = blurredImage ?: sourceImage;
+            }];
+        });
+    });
 }
 
 - (void)customGlassRefreshSharedBackground
 {
     NSString *path = DOCustomGlassNavigationBackgroundFilePath();
-
-    // Decode from fresh file data rather than keeping any controller-local
-    // wallpaper state. This makes the navigation layer the single source of
-    // truth after relaunch and after an atomic background.jpg replacement.
     NSData *imageData = path.length > 0 ? [NSData dataWithContentsOfFile:path] : nil;
-    UIImage *image = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
+    UIImage *customImage = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
+
+    DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
+    UIImage *sourceImage = customImage ?: [theme image];
+
+    self.customGlassUsingCustomBackground = customImage != nil;
+    self.customGlassBackgroundSourceImage = sourceImage;
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     CGFloat blur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
         [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
 
+    // Assign the current source immediately. A persisted blur is rendered
+    // asynchronously on top of this same image, so there is never a frame where
+    // an older/native wallpaper is used as an intermediate state.
+    ++self.customGlassBackgroundBlurGeneration;
     [UIView performWithoutAnimation:^{
-        self.customGlassBackgroundImageView.image = nil;
-        self.customGlassBackgroundImageView.image = image;
-        self.customGlassBackgroundHostView.hidden = image == nil;
-        [self customGlassApplySharedBackgroundBlurIntensity:blur];
-        [self.customGlassBackgroundHostView setNeedsLayout];
-        [self.customGlassBackgroundHostView layoutIfNeeded];
+        self.backgroundImageView.image = sourceImage;
     }];
+    [self customGlassApplySharedBackgroundBlurIntensity:blur];
 }
 
 - (BOOL)customGlassHasSharedBackground
 {
-    return !self.customGlassBackgroundHostView.hidden && self.customGlassBackgroundImageView.image != nil;
+    return self.customGlassUsingCustomBackground && self.customGlassBackgroundSourceImage != nil;
 }
 
 - (CGFloat)customGlassLuminanceForView:(UIView *)view
@@ -245,9 +275,8 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     if (!view)
         return 0.28;
 
-    UIImageView *imageView = [self customGlassHasSharedBackground] ?
-        self.customGlassBackgroundImageView : self.backgroundImageView;
-    UIImage *image = imageView.image;
+    UIImageView *imageView = self.backgroundImageView;
+    UIImage *image = self.customGlassBackgroundSourceImage ?: imageView.image;
     CGImageRef cgImage = image.CGImage;
     if (!cgImage || CGRectIsEmpty(imageView.bounds))
         return 0.28;
@@ -301,10 +330,7 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     CGFloat red = pixel[0] / 255.0;
     CGFloat green = pixel[1] / 255.0;
     CGFloat blue = pixel[2] / 255.0;
-    CGFloat luminance = DOCustomGlassNavigationPerceivedLuminance(red, green, blue);
-    if (imageView == self.backgroundImageView)
-        luminance *= imageView.alpha;
-    return luminance;
+    return DOCustomGlassNavigationPerceivedLuminance(red, green, blue);
 }
 
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view
@@ -328,33 +354,16 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     return useDarkForeground;
 }
 
-- (void)viewWillAppear:(BOOL)animated
-{
-    [super viewWillAppear:animated];
-    [self customGlassRefreshSharedBackground];
-}
-
-- (void)viewDidAppear:(BOOL)animated
-{
-    [super viewDidAppear:animated];
-
-    // The window is guaranteed to exist here, so install the persisted blur
-    // filter now if cold bootstrap deferred it.
-    [self customGlassRefreshSharedBackground];
-    [self customGlassApplySharedBackgroundBlurIntensity:self.pendingCustomGlassBackgroundBlurIntensity];
-}
-
 - (void)setBackgroundDimmed:(BOOL)dimmed
 {
     [UIView animateWithDuration:0.3 animations:^{
-        self.backgroundImageView.alpha = dimmed ? 0.4 : 1;
+        // Custom Glass pages rely on the wallpaper as their page background.
+        // Preserve its luminance; only the native Dopamine fallback is dimmed.
+        self.backgroundImageView.alpha =
+            (self.customGlassUsingCustomBackground ? 1.0 : (dimmed ? 0.4 : 1.0));
     }];
 
-    // Wallpaper layers are visual-only. DOModalBackAction owns the outside-tap
-    // behavior; allowing an image view to become interactive can steal touches
-    // from transparent Custom Glass pages.
     self.backgroundImageView.userInteractionEnabled = NO;
-    self.customGlassBackgroundHostView.userInteractionEnabled = NO;
     self.backAction.hidden = !dimmed;
 }
 
@@ -365,10 +374,6 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
                         fromViewController:(UIViewController *)fromVC
                           toViewController:(UIViewController *)toVC {
 
-    // Make the persistent wallpaper current before the transition snapshot is
-    // captured. This is the last synchronous gate before any animated push/pop.
-    [self customGlassRefreshSharedBackground];
-
     if (fromVC.class == DOMainViewController.class || toVC.class == DOMainViewController.class)
         return [[DOModalTransitionScale alloc] initForwards: operation == UINavigationControllerOperationPush];
     return [[DOModalTransitionPush alloc] initForwards: operation == UINavigationControllerOperationPush];
@@ -376,7 +381,6 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated
 {
-    [self customGlassRefreshSharedBackground];
     BOOL isMainView = [viewController isKindOfClass:[DOMainViewController class]];
     BOOL isCustomGlassView = [self isCustomGlassFullScreenViewController:viewController];
     [self setBackgroundDimmed:!(isMainView || isCustomGlassView)];
@@ -404,9 +408,6 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 
 - (void)dealloc
 {
-    [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                    name:DOCustomGlassNavigationDidChangeNotification
-                                                  object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:UIApplicationDidBecomeActiveNotification
                                                   object:nil];

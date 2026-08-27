@@ -628,18 +628,9 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 - (void)didMoveToWindow
 {
     [super didMoveToWindow];
-
-    // Re-arm CABackdropLayer after navigation transitions. This fixes the
-    // intermittent "re-enter Theme Settings and Glass stops responding"
-    // state where changing wallpaper happened to wake the sampler back up.
-    if (self.window) {
-        __weak typeof(self) weakSelf = self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [weakSelf reloadMaterial];
-            [weakSelf.layer setNeedsDisplay];
-            [weakSelf setNeedsLayout];
-        });
-    }
+    // Controllers explicitly reload their mounted Glass surfaces on appearance
+    // and theme changes. Avoid a second asynchronous filter rebuild for every
+    // panel during cold launch; that burst was unnecessary on compact iPhones.
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
@@ -849,11 +840,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return row;
 }
 
-- (void)reloadCustomGlassBackground
-{
-    [self.navigationController customGlassRefreshSharedBackground];
-}
-
 - (void)presentCustomGlassBackgroundPicker
 {
     PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
@@ -894,15 +880,12 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             if (!saved)
                 return;
 
+            // Wallpaper replacement is the only event that must re-decode
+            // background.jpg. Slider/theme notifications never touch the file.
             [weakSelf.navigationController customGlassRefreshSharedBackground];
-
-            // Re-arm both wallpaper and Glass sampling immediately after an
-            // image swap. This uses the same refresh path as page re-entry, so
-            // choosing a new wallpaper is no longer a special case required to
-            // make stale backdrop layers start responding again.
-            [weakSelf applyAppearancePreviewAndPersist:NO];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
+            [weakSelf applyAppearancePreviewAndPersist:NO];
         });
     }];
 }
@@ -921,13 +904,12 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)prepareForPresentation
 {
-    // Navigation transitions capture their first frame before viewWillAppear.
-    // Materialize the real Custom Glass wallpaper and Glass hierarchy now so
-    // the push animation never exposes Dopamine's underlying/default theme for
-    // a single frame.
-    [self.navigationController customGlassRefreshSharedBackground];
+    // The navigation controller already owns the persistent first-frame
+    // wallpaper. Prime only this controller's local Glass hierarchy before the
+    // transition; do not re-decode or re-blur the shared image here.
     [self loadViewIfNeeded];
-    [self refreshThemePageFromPersistedState];
+    [self syncAppearanceControlsFromDefaults];
+    [self refreshLiquidGlassInView:self.view];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
 }
@@ -941,9 +923,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.view.backgroundColor = UIColor.clearColor;
 
     // The navigation controller owns the only Custom Glass wallpaper layer.
-    // This page is fully transparent above it, eliminating transition flashes
-    // and avoiding duplicate wallpaper blur/backdrop sampling.
-    [self.navigationController customGlassRefreshSharedBackground];
+    // This page stays transparent above that persistent source.
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
         DOCustomGlassBackgroundBlurKey : @0.10,
@@ -1131,7 +1111,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)refreshThemePageFromPersistedState
 {
-    [self reloadCustomGlassBackground];
     [self syncAppearanceControlsFromDefaults];
     [self applyAppearancePreviewAndPersist:NO];
 
@@ -1149,19 +1128,19 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [super viewWillAppear:animated];
     [self refreshThemePageFromPersistedState];
 
-    // A second pass after the navigation transition has attached this
-    // controller's backdrop layers to the window prevents stale sampling on
-    // the second / third visit to Theme Settings.
+    // One deferred local-material pass is enough after the transition attaches
+    // these Glass layers. Do not run wallpaper decode/blur a second time.
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [weakSelf refreshThemePageFromPersistedState];
+        [weakSelf refreshLiquidGlassInView:weakSelf.view];
+        [weakSelf.view setNeedsLayout];
+        [weakSelf.view layoutIfNeeded];
     });
 }
 
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
-    [self refreshThemePageFromPersistedState];
 }
 
 - (void)appearanceSliderChanged:(UISlider *)slider
@@ -1251,20 +1230,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 @implementation DOMainViewController
 
-- (void)reloadCustomGlassBackground
-{
-    [self.navigationController customGlassRefreshSharedBackground];
-}
-
 - (void)applyCustomGlassHomeAppearance
 {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    CGFloat backgroundBlur = [defaults objectForKey:DOCustomGlassBackgroundBlurKey] ?
-        [defaults floatForKey:DOCustomGlassBackgroundBlurKey] : 0.10;
-    backgroundBlur = DOCustomGlassClamp01(backgroundBlur);
-
-    [self.navigationController customGlassApplySharedBackgroundBlurIntensity:backgroundBlur];
-
+    // The navigation controller owns wallpaper source + blur. Home only updates
+    // its local Glass materials from the persisted Glass controls.
     // Every home Glass surface is already mounted in self.view. Walking that
     // hierarchy makes Settings / About / Theme Settings / restart pills / the
     // restart shell / jailbreak emphasis all consume the same persisted values.
@@ -1284,7 +1253,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         return;
     }
 
-    [self reloadCustomGlassBackground];
     [self applyCustomGlassHomeAppearance];
 }
 
@@ -1843,7 +1811,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
     // Shared wallpaper/blur lives below the navigation transition container.
     // Home only owns foreground content and Glass surfaces.
-    [self.navigationController customGlassRefreshSharedBackground];
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
     CGFloat availableHeight = CGRectGetHeight(self.view.bounds);
@@ -2097,11 +2064,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     ]];
 
     UIAction *settingsAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [self.navigationController customGlassRefreshSharedBackground];
         [self.navigationController pushViewController:[[DOSettingsController alloc] init] animated:YES];
     }];
     UIAction *creditsAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [self.navigationController customGlassRefreshSharedBackground];
         [self.navigationController pushViewController:[[DOCreditsViewController alloc] init] animated:YES];
     }];
 
@@ -2111,7 +2076,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [leftColumn addArrangedSubview:creditsCard];
 
     UIAction *themeAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [self.navigationController customGlassRefreshSharedBackground];
         DOCustomGlassThemeSettingsViewController *themeSettingsController =
             [[DOCustomGlassThemeSettingsViewController alloc] init];
         [themeSettingsController prepareForPresentation];
@@ -2296,7 +2260,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    [self reloadCustomGlassBackground];
     [self applyCustomGlassHomeAppearance];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
 }
