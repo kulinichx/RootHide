@@ -18,6 +18,7 @@ typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
     DOPackageManagerHealthStateRegistrationMissing,
     DOPackageManagerHealthStateRegistrationStale,
     DOPackageManagerHealthStateRegistrationConflict,
+    DOPackageManagerHealthStateInspectionFailed,
 };
 
 @interface DOEnvironmentManager : NSObject
@@ -91,6 +92,7 @@ typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
 - (NSError *)deleteBootstrap;
 - (NSError *)reinstallPackageManagers;
 - (NSArray<NSDictionary<NSString *, id> *> *)packageManagerHealthReport;
+- (NSError * _Nullable)repairPackageManagers;
 - (NSError *)updateBootLogo;
 - (NSArray<NSString *> *)fakeMountPaths;
 - (BOOL)saveFakeMountPaths:(NSArray<NSString *> *)paths;

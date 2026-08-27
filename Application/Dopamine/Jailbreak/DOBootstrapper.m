@@ -647,16 +647,37 @@ NSString *const bootstrapErrorDomain = @"BootstrapErrorDomain";
     return nil;
 }
 
+- (NSError *)installPackageManagerDictionary:(NSDictionary *)packageManagerDict
+{
+    NSString *packageName = packageManagerDict[@"Package"];
+    NSString *displayName = packageManagerDict[@"Display Name"] ?: packageManagerDict[@"Key"] ?: @"package manager";
+    if (!packageName.length) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Missing bundled package for %@.", displayName]}];
+    }
+
+    NSString *path = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:packageName];
+    int r = [self installPackage:path];
+    if (r != 0) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install %@: %d\n", displayName, r]}];
+    }
+    return nil;
+}
+
+- (NSError *)installPackageManagerWithKey:(NSString *)packageManagerKey
+{
+    for (NSDictionary *packageManagerDict in [[DOUIManager sharedInstance] availablePackageManagers]) {
+        if ([packageManagerDict[@"Key"] isEqualToString:packageManagerKey]) {
+            return [self installPackageManagerDictionary:packageManagerDict];
+        }
+    }
+    return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Unknown package manager: %@", packageManagerKey ?: @"(null)"]}];
+}
+
 - (NSError *)installPackageManagers
 {
-    NSArray *enabledPackageManagers = [[DOUIManager sharedInstance] enabledPackageManagers];
-    for (NSDictionary *packageManagerDict in enabledPackageManagers) {
-        NSString *path = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:packageManagerDict[@"Package"]];
-        NSString *name = packageManagerDict[@"Display Name"];
-        int r = [self installPackage:path];
-        if (r != 0) {
-            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install %@: %d\n", name, r]}];
-        }
+    for (NSDictionary *packageManagerDict in [[DOUIManager sharedInstance] enabledPackageManagers]) {
+        NSError *error = [self installPackageManagerDictionary:packageManagerDict];
+        if (error) return error;
     }
     return nil;
 }
