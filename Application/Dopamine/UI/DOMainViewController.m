@@ -16,6 +16,7 @@
 #import <pthread.h>
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
+#import <PhotosUI/PhotosUI.h>
 
 #pragma mark - Custom Glass Theme Settings V1
 
@@ -25,6 +26,22 @@ static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.Glas
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
+static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
+
+static NSString *DOCustomGlassAvatarFilePath(void)
+{
+    NSString *applicationSupport =
+        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    if (applicationSupport.length == 0)
+        return nil;
+
+    NSString *directory = [applicationSupport stringByAppendingPathComponent:@"CustomGlass"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    return [directory stringByAppendingPathComponent:@"avatar.jpg"];
+}
 
 static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
@@ -523,18 +540,122 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 @end
 
-@interface DOMainViewController ()
+@interface DOMainViewController () <PHPickerViewControllerDelegate>
 
 @property DOJailbreakButton *jailbreakBtn;
 @property NSArray<NSLayoutConstraint *> *jailbreakButtonConstraints;
 @property DOActionMenuButton *updateButton;
 @property NSLayoutConstraint *customGlassJailbreakCenterYConstraint;
+@property UIImageView *customGlassAvatarPhotoView;
+@property UILabel *customGlassMottoLabel;
+@property UIAlertController *customGlassMottoEditor;
 @property(nonatomic) BOOL hideStatusBar;
 @property(nonatomic) BOOL hideHomeIndicator;
 
 @end
 
 @implementation DOMainViewController
+
+- (void)presentCustomGlassAvatarPicker
+{
+    PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
+    configuration.filter = [PHPickerFilter imagesFilter];
+    configuration.selectionLimit = 1;
+
+    PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:configuration];
+    picker.delegate = self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results
+{
+    [picker dismissViewControllerAnimated:YES completion:nil];
+
+    PHPickerResult *result = results.firstObject;
+    if (!result)
+        return;
+
+    NSItemProvider *provider = result.itemProvider;
+    if (![provider canLoadObjectOfClass:UIImage.class])
+        return;
+
+    __weak typeof(self) weakSelf = self;
+    [provider loadObjectOfClass:UIImage.class
+              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
+        if (error || ![object isKindOfClass:UIImage.class])
+            return;
+
+        UIImage *image = (UIImage *)object;
+        NSData *imageData = [image jpegDataWithCompressionQuality:0.92];
+        NSString *avatarPath = DOCustomGlassAvatarFilePath();
+        BOOL saved = imageData.length > 0 &&
+                     avatarPath.length > 0 &&
+                     [imageData writeToFile:avatarPath atomically:YES];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!saved)
+                return;
+
+            weakSelf.customGlassAvatarPhotoView.image = image;
+            weakSelf.customGlassAvatarPhotoView.hidden = NO;
+        });
+    }];
+}
+
+- (void)presentCustomGlassMottoEditor
+{
+    NSString *currentMotto = self.customGlassMottoLabel.text ?: @"";
+
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"个性签名"
+                                            message:[NSString stringWithFormat:@"%lu / %lu",
+                                                     (unsigned long)currentMotto.length,
+                                                     (unsigned long)DOCustomGlassMottoCharacterLimit]
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.text = currentMotto;
+        textField.placeholder = @"输入个性签名";
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        [textField addTarget:self
+                      action:@selector(customGlassMottoTextChanged:)
+            forControlEvents:UIControlEventEditingChanged];
+    }];
+
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__kindof UIAlertAction * _Nonnull action) {
+        NSString *motto = alert.textFields.firstObject.text ?: @"";
+        if (motto.length > DOCustomGlassMottoCharacterLimit)
+            motto = [motto substringToIndex:DOCustomGlassMottoCharacterLimit];
+
+        [[NSUserDefaults standardUserDefaults] setObject:motto forKey:DOCustomGlassMottoKey];
+        [[NSUserDefaults standardUserDefaults] setObject:motto forKey:@"RootHideCustomHomeMotto"];
+        weakSelf.customGlassMottoLabel.text = motto;
+        weakSelf.customGlassMottoEditor = nil;
+    }]];
+
+    self.customGlassMottoEditor = alert;
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)customGlassMottoTextChanged:(UITextField *)textField
+{
+    NSString *text = textField.text ?: @"";
+    if (text.length > DOCustomGlassMottoCharacterLimit) {
+        text = [text substringToIndex:DOCustomGlassMottoCharacterLimit];
+        textField.text = text;
+    }
+
+    self.customGlassMottoEditor.message =
+        [NSString stringWithFormat:@"%lu / %lu",
+         (unsigned long)text.length,
+         (unsigned long)DOCustomGlassMottoCharacterLimit];
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -1008,8 +1129,19 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [mainStack addArrangedSubview:profileView];
     [mainStack setCustomSpacing:profileToGridSpacing afterView:profileView];
 
-    UIVisualEffectView *avatarGlass = [self customGlassViewWithCornerRadius:(avatarSize / 2.0) tintAlpha:0.06];
+    UIView *avatarGlass = [[UIView alloc] init];
+    avatarGlass.translatesAutoresizingMaskIntoConstraints = NO;
+    avatarGlass.backgroundColor = UIColor.clearColor;
+    avatarGlass.layer.cornerRadius = avatarSize / 2.0;
+    avatarGlass.layer.cornerCurve = kCACornerCurveContinuous;
+    avatarGlass.layer.borderWidth = 1.0;
+    avatarGlass.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.22].CGColor;
+    avatarGlass.layer.shadowColor = UIColor.blackColor.CGColor;
+    avatarGlass.layer.shadowOpacity = 0.16;
+    avatarGlass.layer.shadowRadius = 6.0;
+    avatarGlass.layer.shadowOffset = CGSizeMake(0.0, 3.0);
     [profileView addSubview:avatarGlass];
+
     [NSLayoutConstraint activateConstraints:@[
         [avatarGlass.widthAnchor constraintEqualToConstant:avatarSize],
         [avatarGlass.heightAnchor constraintEqualToConstant:avatarSize],
@@ -1021,17 +1153,47 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     avatarImageView.translatesAutoresizingMaskIntoConstraints = NO;
     avatarImageView.tintColor = [UIColor colorWithWhite:1.0 alpha:0.92];
     avatarImageView.contentMode = UIViewContentModeScaleAspectFit;
-    [avatarGlass.contentView addSubview:avatarImageView];
+    [avatarGlass addSubview:avatarImageView];
     [NSLayoutConstraint activateConstraints:@[
-        [avatarImageView.centerXAnchor constraintEqualToAnchor:avatarGlass.contentView.centerXAnchor],
-        [avatarImageView.centerYAnchor constraintEqualToAnchor:avatarGlass.contentView.centerYAnchor],
+        [avatarImageView.centerXAnchor constraintEqualToAnchor:avatarGlass.centerXAnchor],
+        [avatarImageView.centerYAnchor constraintEqualToAnchor:avatarGlass.centerYAnchor],
         [avatarImageView.widthAnchor constraintEqualToConstant:avatarIconSize],
         [avatarImageView.heightAnchor constraintEqualToConstant:avatarIconSize]
     ]];
 
+    self.customGlassAvatarPhotoView = [[UIImageView alloc] init];
+    self.customGlassAvatarPhotoView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassAvatarPhotoView.contentMode = UIViewContentModeScaleAspectFill;
+    self.customGlassAvatarPhotoView.clipsToBounds = YES;
+    self.customGlassAvatarPhotoView.layer.cornerRadius = (avatarSize - 2.0) / 2.0;
+    self.customGlassAvatarPhotoView.hidden = YES;
+    [avatarGlass addSubview:self.customGlassAvatarPhotoView];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.customGlassAvatarPhotoView.leadingAnchor constraintEqualToAnchor:avatarGlass.leadingAnchor constant:1.0],
+        [self.customGlassAvatarPhotoView.trailingAnchor constraintEqualToAnchor:avatarGlass.trailingAnchor constant:-1.0],
+        [self.customGlassAvatarPhotoView.topAnchor constraintEqualToAnchor:avatarGlass.topAnchor constant:1.0],
+        [self.customGlassAvatarPhotoView.bottomAnchor constraintEqualToAnchor:avatarGlass.bottomAnchor constant:-1.0]
+    ]];
+
+    NSString *avatarPath = DOCustomGlassAvatarFilePath();
+    UIImage *savedAvatar = avatarPath.length > 0 ? [UIImage imageWithContentsOfFile:avatarPath] : nil;
+    if (savedAvatar) {
+        self.customGlassAvatarPhotoView.image = savedAvatar;
+        self.customGlassAvatarPhotoView.hidden = NO;
+    }
+
+    avatarGlass.userInteractionEnabled = YES;
+    avatarGlass.isAccessibilityElement = YES;
+    avatarGlass.accessibilityLabel = @"更换头像";
+    [avatarGlass addGestureRecognizer:[[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(presentCustomGlassAvatarPicker)]];
+
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSString *username = [defaults stringForKey:@"RootHideCustomHomeUsername"] ?: @"RootHide User";
-    NSString *motto = [defaults stringForKey:@"RootHideCustomHomeMotto"] ?: @"Your motto";
+    NSString *motto = [defaults stringForKey:DOCustomGlassMottoKey];
+    if (motto.length == 0)
+        motto = [defaults stringForKey:@"RootHideCustomHomeMotto"] ?: @"Your motto";
 
     UILabel *usernameLabel = [[UILabel alloc] init];
     usernameLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1057,7 +1219,13 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     mottoLabel.font = [UIFont systemFontOfSize:mottoFontSize weight:UIFontWeightRegular];
     mottoLabel.numberOfLines = 2;
     mottoLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    mottoLabel.userInteractionEnabled = YES;
+    mottoLabel.isAccessibilityElement = YES;
+    mottoLabel.accessibilityLabel = @"编辑个性签名";
+    [mottoLabel addGestureRecognizer:[[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(presentCustomGlassMottoEditor)]];
     [profileView addSubview:mottoLabel];
+    self.customGlassMottoLabel = mottoLabel;
 
     NSLayoutConstraint *mottoMaxWidth = [mottoLabel.widthAnchor constraintLessThanOrEqualToAnchor:profileView.widthAnchor multiplier:0.78];
     mottoMaxWidth.priority = UILayoutPriorityRequired;
