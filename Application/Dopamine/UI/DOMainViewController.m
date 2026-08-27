@@ -22,6 +22,7 @@
 
 @interface UINavigationController (DOCustomGlassSharedBackground)
 - (void)customGlassRefreshSharedBackground;
+- (void)customGlassReplaceSharedBackgroundWithImage:(UIImage *)image;
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity;
 - (BOOL)customGlassHasSharedBackground;
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
@@ -30,13 +31,6 @@
 static UIColor *DOCustomGlassForegroundColorForMode(BOOL darkForeground, CGFloat alpha)
 {
     return [UIColor colorWithWhite:(darkForeground ? 0.08 : 1.0) alpha:alpha];
-}
-
-static BOOL DOCustomGlassPrefersDarkForeground(UINavigationController *navigationController, UIView *view)
-{
-    return navigationController &&
-        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-        [navigationController customGlassPrefersDarkForegroundForView:view];
 }
 
 static void DOCustomGlassApplyForegroundMode(UIView *view, BOOL darkForeground)
@@ -74,30 +68,11 @@ static void DOCustomGlassApplyForegroundMode(UIView *view, BOOL darkForeground)
 
 static void DOCustomGlassApplyAdaptiveForeground(UINavigationController *navigationController, UIView *view)
 {
-    if (!view)
-        return;
-
-    // A Glass surface is one readability unit. R8 sampled every label
-    // independently, which allowed black and white text to alternate inside the
-    // same card/preview panel. Sample the surface once, then apply one foreground
-    // mode to its complete content hierarchy.
-    Class glassClass = NSClassFromString(@"DOCustomLiquidGlassView");
-    if (glassClass && [view isKindOfClass:glassClass]) {
-        BOOL darkForeground = DOCustomGlassPrefersDarkForeground(navigationController, view);
-        DOCustomGlassApplyForegroundMode(view, darkForeground);
-        return;
-    }
-
-    if ([view isKindOfClass:[UILabel class]] ||
-        [view isKindOfClass:[UIButton class]] ||
-        [view isKindOfClass:[UIImageView class]]) {
-        BOOL darkForeground = DOCustomGlassPrefersDarkForeground(navigationController, view);
-        DOCustomGlassApplyForegroundMode(view, darkForeground);
-        return;
-    }
-
-    for (UIView *subview in view.subviews)
-        DOCustomGlassApplyAdaptiveForeground(navigationController, subview);
+    // Custom Glass uses stable Light Content. Wallpaper luminance still drives
+    // material-body separation inside DOCustomLiquidGlassView, but it must never
+    // flip labels/icons between black and white on bright photos.
+    (void)navigationController;
+    DOCustomGlassApplyForegroundMode(view, NO);
 }
 
 #pragma mark - Custom Glass Theme Settings V1
@@ -871,8 +846,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
         UIImage *image = (UIImage *)object;
         NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
+        UIImage *persistedImage = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
         NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
-        BOOL saved = imageData.length > 0 &&
+        BOOL saved = persistedImage != nil &&
                      backgroundPath.length > 0 &&
                      [imageData writeToFile:backgroundPath atomically:YES];
 
@@ -880,11 +856,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             if (!saved)
                 return;
 
-            // The selected photo now belongs to the Custom Glass theme itself.
-            // Invalidate any stale launch snapshot before refreshing the one
-            // shared theme image, so the next launch cannot reuse the old photo.
+            // Show the exact JPEG that was just persisted instead of relying on
+            // a second file decode/cache invalidation round-trip. The same file
+            // remains the Custom Glass theme source for every later launch.
             [[UIApplication sharedApplication] ignoreSnapshotOnNextApplicationLaunch];
-            [weakSelf.navigationController customGlassRefreshSharedBackground];
+            [weakSelf.navigationController customGlassReplaceSharedBackgroundWithImage:persistedImage];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
             [weakSelf applyAppearancePreviewAndPersist:NO];

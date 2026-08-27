@@ -238,6 +238,32 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
     [self customGlassApplySharedBackgroundBlurIntensity:blur];
 }
 
+- (void)customGlassReplaceSharedBackgroundWithImage:(UIImage *)sourceImage
+{
+    DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
+    if (!sourceImage || ![theme.key isEqualToString:@"red"]) {
+        [self customGlassRefreshSharedBackground];
+        return;
+    }
+
+    // The picker already decoded the exact JPEG that was successfully written.
+    // Install it directly for zero-latency visual refresh and make it DOTheme's
+    // cache as well, while the persisted file remains the next-launch source.
+    theme.image = sourceImage;
+    self.customGlassUsingCustomBackground = YES;
+    self.customGlassBackgroundSourceImage = sourceImage;
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    CGFloat blur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
+        [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
+
+    ++self.customGlassBackgroundBlurGeneration;
+    [UIView performWithoutAnimation:^{
+        self.backgroundImageView.image = sourceImage;
+    }];
+    [self customGlassApplySharedBackgroundBlurIntensity:blur];
+}
+
 - (BOOL)customGlassHasSharedBackground
 {
     return self.customGlassUsingCustomBackground && self.customGlassBackgroundSourceImage != nil;

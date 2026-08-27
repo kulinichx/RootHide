@@ -34,6 +34,8 @@ static NSString *DOCustomGlassThemeBackgroundFilePath(void)
         self.name = [dictionary objectForKey:@"name"];
         self.icon = [dictionary objectForKey:@"icon"];
         self.key = [dictionary objectForKey:@"key"];
+        if ([self.key isEqualToString:DOCustomGlassThemeKey])
+            self.icon = nil; // Keep Dopamine's primary/default blue app icon.
         self.imageName = [dictionary objectForKey:@"image"];
         self.windowColor = [self colorFromHexString:[dictionary objectForKey:@"windowColor"]];
         self.actionMenuColor = [self colorFromHexString:[dictionary objectForKey:@"actionMenuColor"]];
@@ -61,8 +63,10 @@ static NSString *DOCustomGlassThemeBackgroundFilePath(void)
         // red asset remains the deterministic fallback for first launch/reset.
         if ([self.key isEqualToString:DOCustomGlassThemeKey]) {
             NSString *customPath = DOCustomGlassThemeBackgroundFilePath();
-            if (customPath.length > 0)
-                sourceImage = [UIImage imageWithContentsOfFile:customPath];
+            NSData *customData = customPath.length > 0 ?
+                [NSData dataWithContentsOfFile:customPath] : nil;
+            if (customData.length > 0)
+                sourceImage = [UIImage imageWithData:customData];
         }
 
         if (!sourceImage)
