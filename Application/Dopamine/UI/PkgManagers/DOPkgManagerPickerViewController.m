@@ -12,6 +12,8 @@
 
 @interface DOPkgManagerPickerViewController ()
 
+@property (nonatomic, assign) BOOL repairInProgress;
+
 @end
 
 @implementation DOPkgManagerPickerViewController
@@ -19,10 +21,32 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     DOPkgManagerPickerView *picker = [[DOPkgManagerPickerView alloc] initWithCallback:^(BOOL success) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [[DOEnvironmentManager sharedManager] reinstallPackageManagers];
+        (void)success;
+        if (self.repairInProgress) return;
+        self.repairInProgress = YES;
+        self.view.userInteractionEnabled = NO;
+
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *repairError = [[DOEnvironmentManager sharedManager] repairPackageManagers];
+
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self.navigationController popViewControllerAnimated:YES];
+                self.repairInProgress = NO;
+                self.view.userInteractionEnabled = YES;
+
+                NSString *title = repairError ? @"Package Manager Repair Failed" : NSLocalizedString(@"Button_Reinstall_Package_Managers", nil);
+                NSString *message = repairError.localizedDescription ?: @"Selected package managers are healthy and up to date.";
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                               message:message
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                         style:UIAlertActionStyleDefault
+                                                       handler:^(__kindof UIAlertAction *action) {
+                    (void)action;
+                    if (!repairError) {
+                        [self.navigationController popViewControllerAnimated:YES];
+                    }
+                }]];
+                [self presentViewController:alert animated:YES completion:nil];
             });
         });
     }];
