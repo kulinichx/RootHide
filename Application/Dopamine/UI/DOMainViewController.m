@@ -83,6 +83,7 @@ static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.Glas
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
+static NSString * const DOCustomGlassCurrentWallpaperFilenameKey = @"DOCustomGlassTheme.CurrentWallpaperFilename";
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSUInteger const DOCustomGlassUsernameCharacterLimit = 20;
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
@@ -102,7 +103,7 @@ static NSString *DOCustomGlassAvatarFilePath(void)
     return [directory stringByAppendingPathComponent:@"avatar.jpg"];
 }
 
-static NSString *DOCustomGlassBackgroundFilePath(void)
+static NSString *DOCustomGlassBackgroundDirectoryPath(void)
 {
     NSString *applicationSupport =
         NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
@@ -114,7 +115,7 @@ static NSString *DOCustomGlassBackgroundFilePath(void)
                               withIntermediateDirectories:YES
                                                attributes:nil
                                                     error:nil];
-    return [directory stringByAppendingPathComponent:@"background.jpg"];
+    return directory;
 }
 
 static inline CGFloat DOCustomGlassClamp01(CGFloat value)
@@ -847,18 +848,41 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         UIImage *image = (UIImage *)object;
         NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
         UIImage *persistedImage = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
-        NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
+
+        NSString *backgroundDirectory = DOCustomGlassBackgroundDirectoryPath();
+        NSString *wallpaperFilename = [NSString stringWithFormat:@"wallpaper-%@.jpg", NSUUID.UUID.UUIDString];
+        NSString *backgroundPath = backgroundDirectory.length > 0 ?
+            [backgroundDirectory stringByAppendingPathComponent:wallpaperFilename] : nil;
         BOOL saved = persistedImage != nil &&
                      backgroundPath.length > 0 &&
                      [imageData writeToFile:backgroundPath atomically:YES];
+
+        if (saved) {
+            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+            NSString *previousFilename = [defaults stringForKey:DOCustomGlassCurrentWallpaperFilenameKey];
+
+            // Never overwrite the wallpaper currently referenced by the theme.
+            // Publish a new immutable filename only after the JPEG is fully on
+            // disk, then force the small pointer preference to disk as well.
+            [defaults setObject:wallpaperFilename forKey:DOCustomGlassCurrentWallpaperFilenameKey];
+            [defaults synchronize];
+
+            if (previousFilename.length > 0 &&
+                ![previousFilename isEqualToString:wallpaperFilename] &&
+                [previousFilename isEqualToString:previousFilename.lastPathComponent] &&
+                [previousFilename hasPrefix:@"wallpaper-"]) {
+                NSString *previousPath = [backgroundDirectory stringByAppendingPathComponent:previousFilename];
+                [[NSFileManager defaultManager] removeItemAtPath:previousPath error:nil];
+            }
+        }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!saved)
                 return;
 
-            // Show the exact JPEG that was just persisted instead of relying on
-            // a second file decode/cache invalidation round-trip. The same file
-            // remains the Custom Glass theme source for every later launch.
+            // The same immutable file now backs both the live preview and every
+            // later theme lookup. A new filename also makes stale UIImage/theme
+            // caches unambiguous when the app is closed and reopened.
             [[UIApplication sharedApplication] ignoreSnapshotOnNextApplicationLaunch];
             [weakSelf.navigationController customGlassReplaceSharedBackgroundWithImage:persistedImage];
             [[NSNotificationCenter defaultCenter]

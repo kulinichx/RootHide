@@ -9,20 +9,55 @@
 #import "UIImage+Blur.h"
 
 static NSString * const DOCustomGlassThemeKey = @"red";
+static NSString * const DOCustomGlassCurrentWallpaperFilenameKey = @"DOCustomGlassTheme.CurrentWallpaperFilename";
 
-static NSString *DOCustomGlassThemeBackgroundFilePath(void)
+static NSString *DOCustomGlassThemeBackgroundDirectoryPath(void)
 {
     NSString *applicationSupport =
         NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
     if (applicationSupport.length == 0)
         return nil;
 
-    return [[applicationSupport stringByAppendingPathComponent:@"CustomGlass"]
-        stringByAppendingPathComponent:@"background.jpg"];
+    return [applicationSupport stringByAppendingPathComponent:@"CustomGlass"];
+}
+
+static NSString *DOCustomGlassThemeResolvedBackgroundPath(NSString **identifierOut)
+{
+    NSString *directory = DOCustomGlassThemeBackgroundDirectoryPath();
+    if (directory.length == 0) {
+        if (identifierOut)
+            *identifierOut = @"compiled-fallback";
+        return nil;
+    }
+
+    NSString *filename = [[NSUserDefaults standardUserDefaults]
+        stringForKey:DOCustomGlassCurrentWallpaperFilenameKey];
+    if (filename.length > 0 && [filename isEqualToString:filename.lastPathComponent]) {
+        NSString *path = [directory stringByAppendingPathComponent:filename];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+            if (identifierOut)
+                *identifierOut = [@"current:" stringByAppendingString:filename];
+            return path;
+        }
+    }
+
+    // R13/R13.1 compatibility: preserve the last fixed-name wallpaper until
+    // the user chooses a wallpaper once under the versioned R13.2 scheme.
+    NSString *legacyPath = [directory stringByAppendingPathComponent:@"background.jpg"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:legacyPath]) {
+        if (identifierOut)
+            *identifierOut = @"legacy:background.jpg";
+        return legacyPath;
+    }
+
+    if (identifierOut)
+        *identifierOut = @"compiled-fallback";
+    return nil;
 }
 
 @interface DOTheme ()
 @property (nonatomic, retain) NSString *imageName;
+@property (nonatomic, retain) NSString *customGlassWallpaperIdentifier;
 @end
 
 @implementation DOTheme
@@ -55,31 +90,42 @@ static NSString *DOCustomGlassThemeBackgroundFilePath(void)
 
 - (UIImage *)image
 {
-    if (_image == nil) {
-        UIImage *sourceImage = nil;
+    if ([self.key isEqualToString:DOCustomGlassThemeKey]) {
+        NSString *wallpaperIdentifier = nil;
+        NSString *customPath = DOCustomGlassThemeResolvedBackgroundPath(&wallpaperIdentifier);
 
-        // The former Blood Sky slot is the single Custom Glass wallpaper owner.
-        // A user-selected wallpaper lives in Application Support; the compiled
-        // red asset remains the deterministic fallback for first launch/reset.
-        if ([self.key isEqualToString:DOCustomGlassThemeKey]) {
-            NSString *customPath = DOCustomGlassThemeBackgroundFilePath();
+        // The wallpaper filename is immutable. If the persisted pointer changes,
+        // discard the in-memory image immediately; otherwise keep the normal
+        // theme cache without ever reusing bytes from a replaced pathname.
+        if (![self.customGlassWallpaperIdentifier isEqualToString:wallpaperIdentifier]) {
+            _image = nil;
+            self.customGlassWallpaperIdentifier = wallpaperIdentifier;
+        }
+
+        if (_image == nil) {
+            UIImage *sourceImage = nil;
             NSData *customData = customPath.length > 0 ?
                 [NSData dataWithContentsOfFile:customPath] : nil;
             if (customData.length > 0)
                 sourceImage = [UIImage imageWithData:customData];
+
+            if (!sourceImage)
+                sourceImage = [UIImage imageNamed:self.imageName];
+
+            _image = [sourceImage imageWithBlur:self.blur];
         }
-
-        if (!sourceImage)
-            sourceImage = [UIImage imageNamed:self.imageName];
-
-        _image = [sourceImage imageWithBlur:self.blur];
+        return _image;
     }
+
+    if (_image == nil)
+        _image = [[UIImage imageNamed:self.imageName] imageWithBlur:self.blur];
     return _image;
 }
 
 - (void)invalidateImage
 {
     _image = nil;
+    self.customGlassWallpaperIdentifier = nil;
 }
 
 - (UIImage *)generateBootLogo
