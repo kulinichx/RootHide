@@ -7,6 +7,7 @@
 
 #import "DOMainViewController.h"
 #import "DOUIManager.h"
+#import "DOPreferenceManager.h"
 #import "DOEnvironmentManager.h"
 #import "DOJailbreaker.h"
 #import "DOGlobalAppearance.h"
@@ -858,14 +859,16 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                      [imageData writeToFile:backgroundPath atomically:YES];
 
         if (saved) {
-            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            NSString *previousFilename = [defaults stringForKey:DOCustomGlassCurrentWallpaperFilenameKey];
+            DOPreferenceManager *preferenceManager = [DOPreferenceManager sharedManager];
+            id previousValue = [preferenceManager preferenceValueForKey:DOCustomGlassCurrentWallpaperFilenameKey];
+            NSString *previousFilename = [previousValue isKindOfClass:NSString.class] ? (NSString *)previousValue : nil;
 
-            // Never overwrite the wallpaper currently referenced by the theme.
-            // Publish a new immutable filename only after the JPEG is fully on
-            // disk, then force the small pointer preference to disk as well.
-            [defaults setObject:wallpaperFilename forKey:DOCustomGlassCurrentWallpaperFilenameKey];
-            [defaults synchronize];
+            // RootHide/Dopamine already persists its critical settings through
+            // DOPreferenceManager's explicit plist. Keep the wallpaper pointer
+            // in the same store instead of NSUserDefaults, whose domain is not
+            // reliable enough for this TrollStore launch path.
+            [preferenceManager setPreferenceValue:wallpaperFilename
+                                           forKey:DOCustomGlassCurrentWallpaperFilenameKey];
 
             if (previousFilename.length > 0 &&
                 ![previousFilename isEqualToString:wallpaperFilename] &&
