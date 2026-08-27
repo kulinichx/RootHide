@@ -10,6 +10,16 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
+    DOPackageManagerHealthStateNotSelected,
+    DOPackageManagerHealthStateHealthy,
+    DOPackageManagerHealthStateAppMissing,
+    DOPackageManagerHealthStateBundleInvalid,
+    DOPackageManagerHealthStateRegistrationMissing,
+    DOPackageManagerHealthStateRegistrationStale,
+    DOPackageManagerHealthStateRegistrationConflict,
+};
+
 @interface DOEnvironmentManager : NSObject
 {
     DOBootstrapper *_bootstrapper;
@@ -80,6 +90,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSError *)finalizeBootstrap;
 - (NSError *)deleteBootstrap;
 - (NSError *)reinstallPackageManagers;
+- (NSArray<NSDictionary<NSString *, id> *> *)packageManagerHealthReport;
 - (NSError *)updateBootLogo;
 - (NSArray<NSString *> *)fakeMountPaths;
 - (BOOL)saveFakeMountPaths:(NSArray<NSString *> *)paths;

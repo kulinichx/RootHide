@@ -612,6 +612,119 @@ static NSError *DOJailbreakAppUserConflictError(NSString *bundleIdentifier, NSSt
     return repairError;
 }
 
+static NSString *DOPackageManagerHealthStateName(DOPackageManagerHealthState state)
+{
+    switch (state) {
+        case DOPackageManagerHealthStateNotSelected: return @"Not Selected";
+        case DOPackageManagerHealthStateHealthy: return @"Healthy";
+        case DOPackageManagerHealthStateAppMissing: return @"App Missing";
+        case DOPackageManagerHealthStateBundleInvalid: return @"Bundle Invalid";
+        case DOPackageManagerHealthStateRegistrationMissing: return @"Registration Missing";
+        case DOPackageManagerHealthStateRegistrationStale: return @"Registration Stale";
+        case DOPackageManagerHealthStateRegistrationConflict: return @"Registration Conflict";
+    }
+    return @"Unknown";
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)packageManagerHealthReport
+{
+    NSArray<NSDictionary *> *packageManagers = [[DOUIManager sharedInstance] availablePackageManagers];
+    NSSet<NSString *> *enabledPackageManagerKeys = [NSSet setWithArray:[[DOUIManager sharedInstance] enabledPackageManagerKeys]];
+    __block NSMutableArray<NSDictionary<NSString *, id> *> *healthReport = [NSMutableArray arrayWithCapacity:packageManagers.count];
+
+    [self runUnsandboxed:^{
+        NSString *applicationsPath = JBROOT_PATH(@"/Applications");
+        NSError *directoryError = nil;
+        NSArray<NSString *> *applicationNames = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:applicationsPath error:&directoryError];
+
+        NSMutableDictionary<NSString *, NSString *> *applicationPathsByIdentifier = [NSMutableDictionary dictionary];
+        NSMutableSet<NSString *> *duplicateIdentifiers = [NSMutableSet set];
+        for (NSString *applicationName in applicationNames ?: @[]) {
+            if (![applicationName.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
+
+            NSString *applicationPath = [applicationsPath stringByAppendingPathComponent:applicationName];
+            NSDictionary *infoDictionary = [NSDictionary dictionaryWithContentsOfFile:[applicationPath stringByAppendingPathComponent:@"Info.plist"]];
+            NSString *bundleIdentifier = infoDictionary[@"CFBundleIdentifier"];
+            if (!bundleIdentifier.length) continue;
+
+            if (applicationPathsByIdentifier[bundleIdentifier]) {
+                [duplicateIdentifiers addObject:bundleIdentifier];
+            }
+            else {
+                applicationPathsByIdentifier[bundleIdentifier] = applicationPath;
+            }
+        }
+
+        for (NSDictionary *packageManager in packageManagers) {
+            NSString *displayName = packageManager[@"Display Name"];
+            NSString *bundleIdentifier = packageManager[@"Key"];
+            BOOL selected = bundleIdentifier.length && [enabledPackageManagerKeys containsObject:bundleIdentifier];
+            DOPackageManagerHealthState state = DOPackageManagerHealthStateNotSelected;
+            NSString *applicationPath = nil;
+            NSString *registeredPath = nil;
+            NSString *detail = nil;
+
+            if (selected) {
+                if (!applicationNames) {
+                    state = DOPackageManagerHealthStateAppMissing;
+                    detail = directoryError.localizedDescription ?: @"Unable to enumerate jailbreak applications.";
+                }
+                else if ([duplicateIdentifiers containsObject:bundleIdentifier]) {
+                    state = DOPackageManagerHealthStateBundleInvalid;
+                    applicationPath = applicationPathsByIdentifier[bundleIdentifier];
+                    detail = [NSString stringWithFormat:@"Multiple jailbreak applications use the bundle identifier %@.", bundleIdentifier];
+                }
+                else {
+                    applicationPath = applicationPathsByIdentifier[bundleIdentifier];
+                    if (!applicationPath) {
+                        NSString *namedApplicationPath = displayName.length ? [applicationsPath stringByAppendingPathComponent:[displayName stringByAppendingPathExtension:@"app"]] : nil;
+                        BOOL namedApplicationExists = namedApplicationPath.length && [[NSFileManager defaultManager] fileExistsAtPath:namedApplicationPath];
+                        if (namedApplicationExists) {
+                            applicationPath = namedApplicationPath;
+                            state = DOPackageManagerHealthStateBundleInvalid;
+                            detail = [NSString stringWithFormat:@"%@ exists but its bundle identifier does not match %@.", namedApplicationPath.lastPathComponent, bundleIdentifier];
+                        }
+                        else {
+                            state = DOPackageManagerHealthStateAppMissing;
+                        }
+                    }
+                    else {
+                        DOJailbreakAppRegistrationState registrationState = DOJailbreakAppRegistrationStateForPath(bundleIdentifier, applicationPath, &registeredPath);
+                        switch (registrationState) {
+                            case DOJailbreakAppRegistrationStateMatches:
+                                state = DOPackageManagerHealthStateHealthy;
+                                break;
+                            case DOJailbreakAppRegistrationStateMissing:
+                                state = DOPackageManagerHealthStateRegistrationMissing;
+                                break;
+                            case DOJailbreakAppRegistrationStateStale:
+                                state = DOPackageManagerHealthStateRegistrationStale;
+                                break;
+                            case DOJailbreakAppRegistrationStateConflict:
+                                state = DOPackageManagerHealthStateRegistrationConflict;
+                                break;
+                        }
+                    }
+                }
+            }
+
+            NSMutableDictionary<NSString *, id> *entry = [@{
+                @"DisplayName" : displayName ?: bundleIdentifier ?: @"Package Manager",
+                @"BundleIdentifier" : bundleIdentifier ?: @"",
+                @"Selected" : @(selected),
+                @"State" : @(state),
+                @"StateName" : DOPackageManagerHealthStateName(state),
+            } mutableCopy];
+            if (applicationPath.length) entry[@"ApplicationPath"] = DOCanonicalApplicationPath(applicationPath);
+            if (registeredPath.length) entry[@"RegisteredPath"] = registeredPath;
+            if (detail.length) entry[@"Detail"] = detail;
+            [healthReport addObject:entry];
+        }
+    }];
+
+    return healthReport.copy;
+}
+
 - (void)unregisterJailbreakApps
 {
     [self runAsRoot:^{
