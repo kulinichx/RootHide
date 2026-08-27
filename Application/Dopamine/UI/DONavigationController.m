@@ -10,6 +10,7 @@
 #import "DOModalBackAction.h"
 #import "DOGlobalAppearance.h"
 #import "DOThemeManager.h"
+#import "DOCustomGlassMediaStore.h"
 #import <QuartzCore/QuartzCore.h>
 #import <CoreImage/CoreImage.h>
 #import <math.h>
@@ -28,33 +29,10 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 
 static NSString * const DOCustomGlassNavigationThemeKey = @"red";
 
-static NSString *DOCustomGlassNavigationUserWallpaperPath(void)
-{
-    NSString *documents =
-        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    if (documents.length == 0)
-        return nil;
-
-    return [[documents stringByAppendingPathComponent:@"CustomGlass"]
-        stringByAppendingPathComponent:@"background.jpg"];
-}
-
-static UIImage *DOCustomGlassNavigationLoadUserWallpaper(void)
-{
-    NSString *path = DOCustomGlassNavigationUserWallpaperPath();
-    if (path.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path])
-        return nil;
-
-    // imageWithContentsOfFile intentionally bypasses UIImage's named-image
-    // cache. User media is mutable data and must be decoded from its actual
-    // persisted path on every process launch.
-    return [UIImage imageWithContentsOfFile:path];
-}
-
 static UIImage *DOCustomGlassNavigationResolveBackground(DOTheme *theme, BOOL *usingUserWallpaper)
 {
     BOOL isCustomGlass = [theme.key isEqualToString:DOCustomGlassNavigationThemeKey];
-    UIImage *userWallpaper = isCustomGlass ? DOCustomGlassNavigationLoadUserWallpaper() : nil;
+    UIImage *userWallpaper = isCustomGlass ? DOCustomGlassMediaStoreLoadWallpaper() : nil;
 
     if (usingUserWallpaper)
         *usingUserWallpaper = (userWallpaper != nil);

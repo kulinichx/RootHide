@@ -14,6 +14,7 @@
 #import "DOActionMenuButton.h"
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
+#import "DOCustomGlassMediaStore.h"
 #import <pthread.h>
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
@@ -87,42 +88,6 @@ static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSUInteger const DOCustomGlassUsernameCharacterLimit = 20;
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
-
-static NSString *DOCustomGlassAvatarFilePath(void)
-{
-    NSString *applicationSupport =
-        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    if (applicationSupport.length == 0)
-        return nil;
-
-    NSString *directory = [applicationSupport stringByAppendingPathComponent:@"CustomGlass"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:nil];
-    return [directory stringByAppendingPathComponent:@"avatar.jpg"];
-}
-
-static NSString *DOCustomGlassBackgroundDirectoryPath(void)
-{
-    NSString *documents =
-        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    if (documents.length == 0)
-        return nil;
-
-    NSString *directory = [documents stringByAppendingPathComponent:@"CustomGlass"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:nil];
-    return directory;
-}
-
-static NSString *DOCustomGlassBackgroundFilePath(void)
-{
-    NSString *directory = DOCustomGlassBackgroundDirectoryPath();
-    return directory.length > 0 ? [directory stringByAppendingPathComponent:@"background.jpg"] : nil;
-}
 
 static inline CGFloat DOCustomGlassClamp01(CGFloat value)
 {
@@ -852,26 +817,17 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             return;
 
         UIImage *image = (UIImage *)object;
-        NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
-
-        NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
-
-        BOOL wrote = imageData.length > 0 &&
-                     backgroundPath.length > 0 &&
-                     [imageData writeToFile:backgroundPath atomically:YES];
-
-        // Verify the exact fixed-path bytes can be read back before presenting
-        // them. This makes the live preview and next-launch source identical.
-        NSData *persistedData = wrote ? [NSData dataWithContentsOfFile:backgroundPath] : nil;
-        UIImage *persistedImage = persistedData.length > 0 ? [UIImage imageWithData:persistedData] : nil;
-        BOOL saved = persistedImage != nil;
+        BOOL saved = DOCustomGlassMediaStoreSaveWallpaper(image, NULL);
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!saved)
                 return;
 
             [[UIApplication sharedApplication] ignoreSnapshotOnNextApplicationLaunch];
-            [weakSelf.navigationController customGlassReplaceSharedBackgroundWithImage:persistedImage];
+
+            // Live preview intentionally goes back through MediaStore. The image
+            // shown now and the image loaded by the next process share one path.
+            [weakSelf.navigationController customGlassRefreshSharedBackground];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
             [weakSelf applyAppearancePreviewAndPersist:NO];
@@ -1275,17 +1231,15 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             return;
 
         UIImage *image = (UIImage *)object;
-        NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
-        NSString *avatarPath = DOCustomGlassAvatarFilePath();
-        BOOL saved = imageData.length > 0 &&
-                     avatarPath.length > 0 &&
-                     [imageData writeToFile:avatarPath atomically:YES];
+        UIImage *persistedAvatar = nil;
+        BOOL saved = DOCustomGlassMediaStoreSaveAvatar(image, &persistedAvatar);
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!saved)
                 return;
 
-            weakSelf.customGlassAvatarPhotoView.image = image;
+            // Show the exact object decoded back from the committed media file.
+            weakSelf.customGlassAvatarPhotoView.image = persistedAvatar;
             weakSelf.customGlassAvatarPhotoView.hidden = NO;
         });
     }];
@@ -1939,8 +1893,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [self.customGlassAvatarPhotoView.bottomAnchor constraintEqualToAnchor:avatarGlass.bottomAnchor constant:-1.0]
     ]];
 
-    NSString *avatarPath = DOCustomGlassAvatarFilePath();
-    UIImage *savedAvatar = avatarPath.length > 0 ? [UIImage imageWithContentsOfFile:avatarPath] : nil;
+    UIImage *savedAvatar = DOCustomGlassMediaStoreLoadAvatar();
     if (savedAvatar) {
         self.customGlassAvatarPhotoView.image = savedAvatar;
         self.customGlassAvatarPhotoView.hidden = NO;
