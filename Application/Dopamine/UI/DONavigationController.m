@@ -46,6 +46,7 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 @property (nonatomic) UIView *customGlassBackgroundHostView;
 @property (nonatomic) UIImageView *customGlassBackgroundImageView;
 @property (nonatomic) DOCustomWallpaperBlurView *customGlassBackgroundBlurView;
+@property (nonatomic, assign) CGFloat pendingCustomGlassBackgroundBlurIntensity;
 @property (nonatomic) DOMainViewController *mainView;
 @property (nonatomic) DOModalBackAction *backAction;
 
@@ -64,15 +65,31 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 
 - (void)viewDidLoad
 {
-    [self setupBackground];
+    // UIKit must finish UINavigationController's own view construction before
+    // we install the shared wallpaper hierarchy. Calling self.view from
+    // setupBackground before [super viewDidLoad] can recursively touch the
+    // navigation view during cold launch and was the main R8 stability risk.
     [super viewDidLoad];
+    [self setupBackground];
     [self setNavigationBarHidden:YES];
+
+    self.pendingCustomGlassBackgroundBlurIntensity = 0.10;
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(customGlassThemeDidChange:)
                                                  name:DOCustomGlassNavigationDidChangeNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(customGlassApplicationDidBecomeActive:)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:nil];
+
+    // Load the current background.jpg synchronously before the root controller
+    // is pushed. Only the private backdrop filter is deferred until a window is
+    // attached; the image itself is ready for the very first visible frame.
     [self customGlassRefreshSharedBackground];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
 
     [self pushViewController:(self.mainView = [[DOMainViewController alloc] init]) animated:NO];
     [self setDelegate:self];
@@ -170,9 +187,26 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     [self customGlassRefreshSharedBackground];
 }
 
+- (void)customGlassApplicationDidBecomeActive:(NSNotification *)notification
+{
+    // A cold launch / foreground return must never depend on opening Theme
+    // Settings to wake the shared wallpaper. Re-read the file every time the
+    // application becomes active.
+    [self customGlassRefreshSharedBackground];
+}
+
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity
 {
-    [self.customGlassBackgroundBlurView setBlurIntensity:DOCustomGlassNavigationClamp01(blurIntensity)];
+    CGFloat clamped = DOCustomGlassNavigationClamp01(blurIntensity);
+    self.pendingCustomGlassBackgroundBlurIntensity = clamped;
+
+    // CABackdropLayer/CAFilter is private rendering plumbing and is much safer
+    // once the navigation view belongs to a real UIWindow. Keep the wallpaper
+    // image synchronous, but defer filter installation during cold bootstrap.
+    if (!self.view.window)
+        return;
+
+    [self.customGlassBackgroundBlurView setBlurIntensity:clamped];
     [self.customGlassBackgroundBlurView.layer setNeedsDisplay];
     [self.customGlassBackgroundBlurView setNeedsLayout];
 }
@@ -180,13 +214,19 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 - (void)customGlassRefreshSharedBackground
 {
     NSString *path = DOCustomGlassNavigationBackgroundFilePath();
-    UIImage *image = path.length > 0 ? [UIImage imageWithContentsOfFile:path] : nil;
+
+    // Decode from fresh file data rather than keeping any controller-local
+    // wallpaper state. This makes the navigation layer the single source of
+    // truth after relaunch and after an atomic background.jpg replacement.
+    NSData *imageData = path.length > 0 ? [NSData dataWithContentsOfFile:path] : nil;
+    UIImage *image = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     CGFloat blur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
         [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
 
     [UIView performWithoutAnimation:^{
+        self.customGlassBackgroundImageView.image = nil;
         self.customGlassBackgroundImageView.image = image;
         self.customGlassBackgroundHostView.hidden = image == nil;
         [self customGlassApplySharedBackgroundBlurIntensity:blur];
@@ -288,12 +328,33 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     return useDarkForeground;
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self customGlassRefreshSharedBackground];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+
+    // The window is guaranteed to exist here, so install the persisted blur
+    // filter now if cold bootstrap deferred it.
+    [self customGlassRefreshSharedBackground];
+    [self customGlassApplySharedBackgroundBlurIntensity:self.pendingCustomGlassBackgroundBlurIntensity];
+}
+
 - (void)setBackgroundDimmed:(BOOL)dimmed
 {
     [UIView animateWithDuration:0.3 animations:^{
         self.backgroundImageView.alpha = dimmed ? 0.4 : 1;
     }];
-    self.backgroundImageView.userInteractionEnabled = dimmed;
+
+    // Wallpaper layers are visual-only. DOModalBackAction owns the outside-tap
+    // behavior; allowing an image view to become interactive can steal touches
+    // from transparent Custom Glass pages.
+    self.backgroundImageView.userInteractionEnabled = NO;
+    self.customGlassBackgroundHostView.userInteractionEnabled = NO;
     self.backAction.hidden = !dimmed;
 }
 
@@ -345,6 +406,9 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:DOCustomGlassNavigationDidChangeNotification
+                                                  object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:UIApplicationDidBecomeActiveNotification
                                                   object:nil];
 }
 

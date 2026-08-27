@@ -27,17 +27,19 @@
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
 @end
 
-static UIColor *DOCustomGlassAdaptiveForegroundColor(UINavigationController *navigationController,
-                                                      UIView *view,
-                                                      CGFloat alpha)
+static UIColor *DOCustomGlassForegroundColorForMode(BOOL darkForeground, CGFloat alpha)
 {
-    BOOL darkForeground = navigationController &&
-        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-        [navigationController customGlassPrefersDarkForegroundForView:view];
     return [UIColor colorWithWhite:(darkForeground ? 0.08 : 1.0) alpha:alpha];
 }
 
-static void DOCustomGlassApplyAdaptiveForeground(UINavigationController *navigationController, UIView *view)
+static BOOL DOCustomGlassPrefersDarkForeground(UINavigationController *navigationController, UIView *view)
+{
+    return navigationController &&
+        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+        [navigationController customGlassPrefersDarkForegroundForView:view];
+}
+
+static void DOCustomGlassApplyForegroundMode(UIView *view, BOOL darkForeground)
 {
     if (!view)
         return;
@@ -45,16 +47,13 @@ static void DOCustomGlassApplyAdaptiveForeground(UINavigationController *navigat
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *label = (UILabel *)view;
         CGFloat alpha = label.font.pointSize >= 15.0 ? 0.96 : 0.78;
-        BOOL dark = navigationController &&
-            [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-            [navigationController customGlassPrefersDarkForegroundForView:label];
-        label.textColor = DOCustomGlassAdaptiveForegroundColor(navigationController, label, alpha);
-        label.shadowColor = [UIColor colorWithWhite:(dark ? 1.0 : 0.0) alpha:0.10];
-        label.shadowOffset = CGSizeMake(0.0, 0.35);
+        label.textColor = DOCustomGlassForegroundColorForMode(darkForeground, alpha);
+        label.shadowColor = [UIColor colorWithWhite:(darkForeground ? 1.0 : 0.0) alpha:0.08];
+        label.shadowOffset = CGSizeMake(0.0, 0.30);
     }
     else if ([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;
-        UIColor *foreground = DOCustomGlassAdaptiveForegroundColor(navigationController, button, 0.96);
+        UIColor *foreground = DOCustomGlassForegroundColorForMode(darkForeground, 0.96);
         button.tintColor = foreground;
         if (button.configuration) {
             UIButtonConfiguration *configuration = [button.configuration copy];
@@ -66,7 +65,35 @@ static void DOCustomGlassApplyAdaptiveForeground(UINavigationController *navigat
     else if ([view isKindOfClass:[UIImageView class]]) {
         UIImageView *imageView = (UIImageView *)view;
         if (imageView.image.renderingMode == UIImageRenderingModeAlwaysTemplate)
-            imageView.tintColor = DOCustomGlassAdaptiveForegroundColor(navigationController, imageView, 0.94);
+            imageView.tintColor = DOCustomGlassForegroundColorForMode(darkForeground, 0.94);
+    }
+
+    for (UIView *subview in view.subviews)
+        DOCustomGlassApplyForegroundMode(subview, darkForeground);
+}
+
+static void DOCustomGlassApplyAdaptiveForeground(UINavigationController *navigationController, UIView *view)
+{
+    if (!view)
+        return;
+
+    // A Glass surface is one readability unit. R8 sampled every label
+    // independently, which allowed black and white text to alternate inside the
+    // same card/preview panel. Sample the surface once, then apply one foreground
+    // mode to its complete content hierarchy.
+    Class glassClass = NSClassFromString(@"DOCustomLiquidGlassView");
+    if (glassClass && [view isKindOfClass:glassClass]) {
+        BOOL darkForeground = DOCustomGlassPrefersDarkForeground(navigationController, view);
+        DOCustomGlassApplyForegroundMode(view, darkForeground);
+        return;
+    }
+
+    if ([view isKindOfClass:[UILabel class]] ||
+        [view isKindOfClass:[UIButton class]] ||
+        [view isKindOfClass:[UIImageView class]]) {
+        BOOL darkForeground = DOCustomGlassPrefersDarkForeground(navigationController, view);
+        DOCustomGlassApplyForegroundMode(view, darkForeground);
+        return;
     }
 
     for (UIView *subview in view.subviews)
@@ -2096,11 +2123,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.018];
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.028];
     // Visible grouping shell: keep a clear total frame around the three restart
     // actions, but never apply a second backdrop blur. Its optical rail is
     // intentionally lighter than the three inner pills.
-    restartContainer.materialScale = 1.04;
+    restartContainer.materialScale = 1.10;
     restartContainer.suppressBackdrop = YES;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];

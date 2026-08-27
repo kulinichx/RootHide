@@ -37,27 +37,37 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 @implementation DOCreditsViewController
 
-- (UIColor *)customGlassAdaptiveForegroundForView:(UIView *)view alpha:(CGFloat)alpha
+- (UIColor *)customGlassForegroundForDarkMode:(BOOL)dark alpha:(CGFloat)alpha
 {
-    BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-        [self.navigationController customGlassPrefersDarkForegroundForView:view];
     return [UIColor colorWithWhite:(dark ? 0.08 : 1.0) alpha:alpha];
 }
 
-- (void)customGlassImproveReadabilityInView:(UIView *)view header:(BOOL)isHeader
+- (BOOL)customGlassDarkForegroundForView:(UIView *)view
+{
+    return [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
+        [self.navigationController customGlassPrefersDarkForegroundForView:view];
+}
+
+- (BOOL)customGlassDarkForegroundForSection:(NSInteger)section fallbackView:(UIView *)fallbackView
+{
+    DOCustomLiquidGlassView *glass = self.customGlassSectionBackdropViews[@(section)];
+    return [self customGlassDarkForegroundForView:(glass ?: fallbackView)];
+}
+
+- (void)customGlassImproveReadabilityInView:(UIView *)view
+                                     header:(BOOL)isHeader
+                                   darkMode:(BOOL)dark
 {
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *label = (UILabel *)view;
-        BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-            [self.navigationController customGlassPrefersDarkForegroundForView:label];
-        CGFloat alpha = isHeader ? 0.72 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
-        label.textColor = [self customGlassAdaptiveForegroundForView:label alpha:alpha];
-        label.shadowColor = [UIColor colorWithWhite:(dark ? 1.0 : 0.0) alpha:(isHeader ? 0.08 : 0.11)];
-        label.shadowOffset = CGSizeMake(0.0, 0.35);
+        CGFloat alpha = isHeader ? 0.74 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
+        label.textColor = [self customGlassForegroundForDarkMode:dark alpha:alpha];
+        label.shadowColor = [UIColor colorWithWhite:(dark ? 1.0 : 0.0) alpha:(isHeader ? 0.06 : 0.08)];
+        label.shadowOffset = CGSizeMake(0.0, 0.30);
     }
     else if ([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;
-        UIColor *foreground = [self customGlassAdaptiveForegroundForView:button alpha:0.96];
+        UIColor *foreground = [self customGlassForegroundForDarkMode:dark alpha:0.96];
         button.tintColor = foreground;
         if (button.configuration) {
             UIButtonConfiguration *configuration = [button.configuration copy];
@@ -69,11 +79,26 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     else if ([view isKindOfClass:[UIImageView class]]) {
         UIImageView *imageView = (UIImageView *)view;
         if (imageView.image.renderingMode == UIImageRenderingModeAlwaysTemplate)
-            imageView.tintColor = [self customGlassAdaptiveForegroundForView:imageView alpha:0.92];
+            imageView.tintColor = [self customGlassForegroundForDarkMode:dark alpha:0.92];
     }
 
     for (UIView *subview in view.subviews)
-        [self customGlassImproveReadabilityInView:subview header:isHeader];
+        [self customGlassImproveReadabilityInView:subview header:isHeader darkMode:dark];
+}
+
+- (void)customGlassHideHeaderHairlinesInView:(UIView *)view
+{
+    for (UIView *subview in view.subviews) {
+        CGFloat height = CGRectGetHeight(subview.bounds);
+        CGFloat width = CGRectGetWidth(subview.bounds);
+        BOOL isSimpleHairline = ![subview isKindOfClass:[UILabel class]] &&
+                                ![subview isKindOfClass:[UIButton class]] &&
+                                ![subview isKindOfClass:[UIImageView class]] &&
+                                height > 0.0 && height <= 1.25 && width >= 48.0;
+        if (isSimpleHairline)
+            subview.hidden = YES;
+        [self customGlassHideHeaderHairlinesInView:subview];
+    }
 }
 
 - (void)customGlassRemoveNestedChromeInView:(UIView *)view
@@ -112,9 +137,8 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     UITableView *tableView = [self valueForKey:@"table"];
     NSInteger rowCount = [tableView numberOfRowsInSection:indexPath.section];
     separator.hidden = indexPath.row >= MAX(0, rowCount - 1);
-    BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-        [self.navigationController customGlassPrefersDarkForegroundForView:cell];
-    separator.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.082];
+    BOOL dark = [self customGlassDarkForegroundForSection:indexPath.section fallbackView:cell];
+    separator.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.040];
 }
 
 - (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
@@ -133,7 +157,9 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
         cell.selectedBackgroundView = nil;
         UIView *separator = [cell.contentView viewWithTag:DOCustomGlassCreditsSeparatorTag];
         separator.hidden = YES;
-        [self customGlassImproveReadabilityInView:cell.contentView header:YES];
+        [self customGlassHideHeaderHairlinesInView:cell];
+        BOOL dark = [self customGlassDarkForegroundForView:cell];
+        [self customGlassImproveReadabilityInView:cell.contentView header:YES darkMode:dark];
         return;
     }
 
@@ -142,13 +168,12 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
         selected = [[UIView alloc] initWithFrame:CGRectZero];
         cell.selectedBackgroundView = selected;
     }
-    BOOL dark = [self.navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)] &&
-        [self.navigationController customGlassPrefersDarkForegroundForView:cell];
-    selected.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.050];
+    BOOL dark = [self customGlassDarkForegroundForSection:indexPath.section fallbackView:cell];
+    selected.backgroundColor = [UIColor colorWithWhite:(dark ? 0.0 : 1.0) alpha:0.042];
 
     [self customGlassRemoveNestedChromeInView:cell.contentView];
     [self customGlassConfigureSeparatorForCell:cell indexPath:indexPath];
-    [self customGlassImproveReadabilityInView:cell.contentView header:NO];
+    [self customGlassImproveReadabilityInView:cell.contentView header:NO darkMode:dark];
 }
 
 - (void)customGlassRefreshSectionBackdrops
@@ -220,6 +245,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     [self.navigationController customGlassRefreshSharedBackground];
 
     UITableView *tableView = [self valueForKey:@"table"];
+    [self customGlassRefreshSectionBackdrops];
     for (UITableViewCell *cell in tableView.visibleCells)
         [self customGlassStyleVisibleCell:cell atIndexPath:[tableView indexPathForCell:cell]];
     [self customGlassRefreshSectionBackdrops];
@@ -232,6 +258,12 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     [tableView setNeedsLayout];
     [tableView layoutIfNeeded];
     [self customGlassRefreshSectionBackdrops];
+
+    UIView *backButton = [self.view viewWithTag:0xC654];
+    if ([backButton isKindOfClass:[UIButton class]]) {
+        BOOL dark = [self customGlassDarkForegroundForView:backButton];
+        ((UIButton *)backButton).tintColor = [self customGlassForegroundForDarkMode:dark alpha:0.96];
+    }
 }
 
 - (void)customGlassThemeDidChange:(NSNotification *)notification
@@ -244,6 +276,54 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
         return;
     }
     [self customGlassRefreshPageAppearance];
+}
+
+- (void)customGlassBackPressed
+{
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)customGlassEdgeBackGesture:(UIScreenEdgePanGestureRecognizer *)gesture
+{
+    if (gesture.state != UIGestureRecognizerStateEnded)
+        return;
+
+    CGPoint translation = [gesture translationInView:self.view];
+    CGPoint velocity = [gesture velocityInView:self.view];
+    if (translation.x > 60.0 && velocity.x > 80.0)
+        [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)customGlassInstallBackNavigation
+{
+    static NSInteger const DOCustomGlassCreditsBackButtonTag = 0xC654;
+    if ([self.view viewWithTag:DOCustomGlassCreditsBackButtonTag])
+        return;
+
+    UIButton *backButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    backButton.tag = DOCustomGlassCreditsBackButtonTag;
+    backButton.translatesAutoresizingMaskIntoConstraints = NO;
+    backButton.backgroundColor = UIColor.clearColor;
+    backButton.tintColor = UIColor.whiteColor;
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:22.0 weight:UIImageSymbolWeightMedium];
+    [backButton setImage:[UIImage systemImageNamed:@"chevron.left" withConfiguration:configuration]
+                forState:UIControlStateNormal];
+    [backButton addTarget:self action:@selector(customGlassBackPressed)
+         forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:backButton];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:10.0],
+        [backButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6.0],
+        [backButton.widthAnchor constraintEqualToConstant:44.0],
+        [backButton.heightAnchor constraintEqualToConstant:44.0]
+    ]];
+
+    UIScreenEdgePanGestureRecognizer *edgeGesture =
+        [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(customGlassEdgeBackGesture:)];
+    edgeGesture.edges = UIRectEdgeLeft;
+    [self.view addGestureRecognizer:edgeGesture];
 }
 
 - (void)customGlassInstallPageAppearance
@@ -259,6 +339,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     tableView.layer.masksToBounds = NO;
 
     self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
+    [self customGlassInstallBackNavigation];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(customGlassThemeDidChange:)
