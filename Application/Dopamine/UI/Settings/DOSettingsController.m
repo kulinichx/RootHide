@@ -92,7 +92,7 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
         // enabled so the global Glass Blur control still has visible authority
         // inside Settings/About instead of only affecting the home screen.
         glass.suppressBackdrop = NO;
-        glass.materialScale = 0.40;
+        glass.materialScale = 0.58;
         cell.backgroundView = glass;
 
         UIView *selected = [[UIView alloc] initWithFrame:CGRectZero];
@@ -120,6 +120,19 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
         [self customGlassStyleVisibleCell:cell];
 }
 
+- (void)customGlassRefreshPageAppearance
+{
+    [self customGlassReloadPageBackground];
+    [self customGlassApplyPageAppearance];
+
+    [self.customGlassPageBackgroundBlurView.layer setNeedsDisplay];
+    [self.customGlassPageBackgroundBlurView setNeedsLayout];
+
+    UITableView *tableView = [self valueForKey:@"table"];
+    [tableView setNeedsLayout];
+    [tableView layoutIfNeeded];
+}
+
 - (void)customGlassThemeDidChange:(NSNotification *)notification
 {
     if (![NSThread isMainThread]) {
@@ -130,8 +143,7 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
         return;
     }
 
-    [self customGlassReloadPageBackground];
-    [self customGlassApplyPageAppearance];
+    [self customGlassRefreshPageAppearance];
 }
 
 - (void)customGlassInstallPageAppearance
@@ -191,8 +203,7 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
                                                  name:DOCustomGlassSettingsDidChangeNotification
                                                object:nil];
 
-    [self customGlassReloadPageBackground];
-    [self customGlassApplyPageAppearance];
+    [self customGlassRefreshPageAppearance];
 }
 
 
@@ -227,8 +238,22 @@ static NSString *DOCustomGlassSettingsBackgroundFilePath(void)
         }
     }
 
-    [self customGlassReloadPageBackground];
-    [self customGlassApplyPageAppearance];
+    [self customGlassRefreshPageAppearance];
+
+    // PSListController / UINavigationController transitions can leave private
+    // backdrop layers sampling their previous host until the transition is
+    // complete. Refresh once more on the next run loop so repeated Settings
+    // visits always consume the current wallpaper and Glass parameters.
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf customGlassRefreshPageAppearance];
+    });
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    [self customGlassRefreshPageAppearance];
 }
 
 - (void)dealloc

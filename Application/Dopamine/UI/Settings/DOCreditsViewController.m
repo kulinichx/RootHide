@@ -76,7 +76,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
         glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:12.0 baseTintAlpha:0.018];
         glass.userInteractionEnabled = NO;
         glass.suppressBackdrop = NO;
-        glass.materialScale = 0.40;
+        glass.materialScale = 0.58;
         cell.backgroundView = glass;
 
         UIView *selected = [[UIView alloc] initWithFrame:CGRectZero];
@@ -104,6 +104,19 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
         [self customGlassStyleVisibleCell:cell];
 }
 
+- (void)customGlassRefreshPageAppearance
+{
+    [self customGlassReloadPageBackground];
+    [self customGlassApplyPageAppearance];
+
+    [self.customGlassPageBackgroundBlurView.layer setNeedsDisplay];
+    [self.customGlassPageBackgroundBlurView setNeedsLayout];
+
+    UITableView *tableView = [self valueForKey:@"table"];
+    [tableView setNeedsLayout];
+    [tableView layoutIfNeeded];
+}
+
 - (void)customGlassThemeDidChange:(NSNotification *)notification
 {
     if (![NSThread isMainThread]) {
@@ -114,8 +127,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
         return;
     }
 
-    [self customGlassReloadPageBackground];
-    [self customGlassApplyPageAppearance];
+    [self customGlassRefreshPageAppearance];
 }
 
 - (void)customGlassInstallPageAppearance
@@ -172,8 +184,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
                                                  name:DOCustomGlassCreditsDidChangeNotification
                                                object:nil];
 
-    [self customGlassReloadPageBackground];
-    [self customGlassApplyPageAppearance];
+    [self customGlassRefreshPageAppearance];
 }
 
 
@@ -191,8 +202,18 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    [self customGlassReloadPageBackground];
-    [self customGlassApplyPageAppearance];
+    [self customGlassRefreshPageAppearance];
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf customGlassRefreshPageAppearance];
+    });
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    [self customGlassRefreshPageAppearance];
 }
 
 - (void)dealloc
