@@ -586,7 +586,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             return;
 
         UIImage *image = (UIImage *)object;
-        NSData *imageData = [image jpegDataWithCompressionQuality:0.92];
+        NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
         NSString *avatarPath = DOCustomGlassAvatarFilePath();
         BOOL saved = imageData.length > 0 &&
                      avatarPath.length > 0 &&
