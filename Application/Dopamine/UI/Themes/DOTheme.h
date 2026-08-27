@@ -23,6 +23,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (id)initWithDictionary: (NSDictionary *)dictionary;
 
+- (void)invalidateImage;
 - (UIImage *)generateBootLogo;
 
 @end

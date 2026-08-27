@@ -16,16 +16,6 @@
 
 static NSString * const DOCustomGlassNavigationBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
 
-static NSString *DOCustomGlassNavigationBackgroundFilePath(void)
-{
-    NSString *applicationSupport =
-        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    if (applicationSupport.length == 0)
-        return nil;
-    return [[applicationSupport stringByAppendingPathComponent:@"CustomGlass"]
-        stringByAppendingPathComponent:@"background.jpg"];
-}
-
 static inline CGFloat DOCustomGlassNavigationClamp01(CGFloat value)
 {
     return MIN(1.0, MAX(0.0, value));
@@ -129,14 +119,9 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
     [self setupBackground];
     [self setNavigationBarHidden:YES];
 
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(customGlassApplicationDidBecomeActive:)
-                                                 name:UIApplicationDidBecomeActiveNotification
-                                               object:nil];
-
-    // setupBackground already resolved the current background.jpg before the
-    // first image view was created. Apply only the persisted blur here; do not
-    // decode the wallpaper a second time during cold bootstrap.
+    // setupBackground already resolved enabledTheme.image before the first
+    // image view was created. Apply only the persisted Custom Glass wallpaper
+    // blur here; do not decode the theme image a second time during bootstrap.
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     CGFloat initialBlur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
         [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
@@ -153,15 +138,12 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
 
-    // Resolve the real first-frame image before creating the UIImageView. There
-    // is no native-theme layer underneath a delayed Custom Glass layer anymore,
-    // so iPhone cannot briefly commit the previous/default wallpaper first.
-    NSString *customPath = DOCustomGlassNavigationBackgroundFilePath();
-    NSData *customData = customPath.length > 0 ? [NSData dataWithContentsOfFile:customPath] : nil;
-    UIImage *customImage = customData.length > 0 ? [UIImage imageWithData:customData] : nil;
-    UIImage *sourceImage = customImage ?: [theme image];
+    // Wallpaper ownership now lives entirely in DOTheme. The Custom Glass
+    // (red) theme resolves either its user wallpaper or its compiled fallback,
+    // so Navigation never races a second background source into the first frame.
+    UIImage *sourceImage = [theme image];
 
-    self.customGlassUsingCustomBackground = customImage != nil;
+    self.customGlassUsingCustomBackground = [theme.key isEqualToString:@"red"];
     self.customGlassBackgroundSourceImage = sourceImage;
     self.customGlassBackgroundBlurGeneration = 0;
 
@@ -201,14 +183,6 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
     ]];
 }
 
-- (void)customGlassApplicationDidBecomeActive:(NSNotification *)notification
-{
-    // A cold launch / foreground return must never depend on opening Theme
-    // Settings to wake the shared wallpaper. Re-read the file every time the
-    // application becomes active.
-    [self customGlassRefreshSharedBackground];
-}
-
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity
 {
     CGFloat clamped = DOCustomGlassNavigationClamp01(blurIntensity);
@@ -241,14 +215,13 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
 
 - (void)customGlassRefreshSharedBackground
 {
-    NSString *path = DOCustomGlassNavigationBackgroundFilePath();
-    NSData *imageData = path.length > 0 ? [NSData dataWithContentsOfFile:path] : nil;
-    UIImage *customImage = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
-
+    // This path is reserved for a real wallpaper replacement. Invalidate the
+    // theme cache once, then ask the enabled theme for the sole source image.
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
-    UIImage *sourceImage = customImage ?: [theme image];
+    [theme invalidateImage];
+    UIImage *sourceImage = [theme image];
 
-    self.customGlassUsingCustomBackground = customImage != nil;
+    self.customGlassUsingCustomBackground = [theme.key isEqualToString:@"red"];
     self.customGlassBackgroundSourceImage = sourceImage;
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -403,14 +376,6 @@ static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloa
 
     return orig;
 
-}
-
-
-- (void)dealloc
-{
-    [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                    name:UIApplicationDidBecomeActiveNotification
-                                                  object:nil];
 }
 
 

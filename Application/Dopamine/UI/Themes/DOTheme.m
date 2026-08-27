@@ -8,6 +8,19 @@
 #import "DOTheme.h"
 #import "UIImage+Blur.h"
 
+static NSString * const DOCustomGlassThemeKey = @"red";
+
+static NSString *DOCustomGlassThemeBackgroundFilePath(void)
+{
+    NSString *applicationSupport =
+        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    if (applicationSupport.length == 0)
+        return nil;
+
+    return [[applicationSupport stringByAppendingPathComponent:@"CustomGlass"]
+        stringByAppendingPathComponent:@"background.jpg"];
+}
+
 @interface DOTheme ()
 @property (nonatomic, retain) NSString *imageName;
 @end
@@ -40,9 +53,29 @@
 
 - (UIImage *)image
 {
-    if (_image == nil)
-        _image = [[UIImage imageNamed:self.imageName] imageWithBlur:self.blur];
+    if (_image == nil) {
+        UIImage *sourceImage = nil;
+
+        // The former Blood Sky slot is the single Custom Glass wallpaper owner.
+        // A user-selected wallpaper lives in Application Support; the compiled
+        // red asset remains the deterministic fallback for first launch/reset.
+        if ([self.key isEqualToString:DOCustomGlassThemeKey]) {
+            NSString *customPath = DOCustomGlassThemeBackgroundFilePath();
+            if (customPath.length > 0)
+                sourceImage = [UIImage imageWithContentsOfFile:customPath];
+        }
+
+        if (!sourceImage)
+            sourceImage = [UIImage imageNamed:self.imageName];
+
+        _image = [sourceImage imageWithBlur:self.blur];
+    }
     return _image;
+}
+
+- (void)invalidateImage
+{
+    _image = nil;
 }
 
 - (UIImage *)generateBootLogo

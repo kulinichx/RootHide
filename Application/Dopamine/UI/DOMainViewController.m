@@ -880,8 +880,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             if (!saved)
                 return;
 
-            // Wallpaper replacement is the only event that must re-decode
-            // background.jpg. Slider/theme notifications never touch the file.
+            // The selected photo now belongs to the Custom Glass theme itself.
+            // Invalidate any stale launch snapshot before refreshing the one
+            // shared theme image, so the next launch cannot reuse the old photo.
+            [[UIApplication sharedApplication] ignoreSnapshotOnNextApplicationLaunch];
             [weakSelf.navigationController customGlassRefreshSharedBackground];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];

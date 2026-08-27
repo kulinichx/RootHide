@@ -60,7 +60,7 @@
 		<key>icon</key>
 		<string>AppIcon_Red</string>
 		<key>name</key>
-		<string>Blood Sky</string>
+		<string>Custom Glass</string>
 		<key>image</key>
 		<string>Background_Red.jpg</string>
 		<key>actionMenuColor</key>
@@ -68,7 +68,7 @@
 		<key>windowColor</key>
 		<string>600A0404</string>
 		<key>blur</key>
-		<integer>25</integer>
+		<integer>0</integer>
 		<key>titleShadow</key>
 		<false/>
 	</dict>
