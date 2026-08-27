@@ -43,6 +43,21 @@ static NSString *DOCustomGlassAvatarFilePath(void)
     return [directory stringByAppendingPathComponent:@"avatar.jpg"];
 }
 
+static NSString *DOCustomGlassBackgroundFilePath(void)
+{
+    NSString *applicationSupport =
+        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    if (applicationSupport.length == 0)
+        return nil;
+
+    NSString *directory = [applicationSupport stringByAppendingPathComponent:@"CustomGlass"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    return [directory stringByAppendingPathComponent:@"background.jpg"];
+}
+
 static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     UIButtonConfiguration *configuration = [UIButtonConfiguration plainButtonConfiguration];
@@ -60,8 +75,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return button;
 }
 
-@interface DOCustomGlassThemeSettingsViewController : UIViewController
+@interface DOCustomGlassThemeSettingsViewController : UIViewController <PHPickerViewControllerDelegate>
 
+@property UIImageView *customGlassBackgroundImageView;
 @property UIVisualEffectView *backgroundBlurView;
 @property UIVisualEffectView *previewGlassView;
 @property UIView *previewShadeView;
@@ -238,6 +254,60 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return row;
 }
 
+- (void)reloadCustomGlassBackground
+{
+    NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
+    UIImage *backgroundImage = backgroundPath.length > 0 ? [UIImage imageWithContentsOfFile:backgroundPath] : nil;
+    self.customGlassBackgroundImageView.image = backgroundImage;
+    self.customGlassBackgroundImageView.hidden = backgroundImage == nil;
+}
+
+- (void)presentCustomGlassBackgroundPicker
+{
+    PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
+    configuration.filter = [PHPickerFilter imagesFilter];
+    configuration.selectionLimit = 1;
+
+    PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:configuration];
+    picker.delegate = self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results
+{
+    [picker dismissViewControllerAnimated:YES completion:nil];
+
+    PHPickerResult *result = results.firstObject;
+    if (!result)
+        return;
+
+    NSItemProvider *provider = result.itemProvider;
+    if (![provider canLoadObjectOfClass:UIImage.class])
+        return;
+
+    __weak typeof(self) weakSelf = self;
+    [provider loadObjectOfClass:UIImage.class
+              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
+        if (error || ![object isKindOfClass:UIImage.class])
+            return;
+
+        UIImage *image = (UIImage *)object;
+        NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
+        NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
+        BOOL saved = imageData.length > 0 &&
+                     backgroundPath.length > 0 &&
+                     [imageData writeToFile:backgroundPath atomically:YES];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!saved)
+                return;
+
+            weakSelf.customGlassBackgroundImageView.image = image;
+            weakSelf.customGlassBackgroundImageView.hidden = NO;
+        });
+    }];
+}
+
 - (void)showThemePlaceholderForTitle:(NSString *)title
 {
     UIAlertController *alert = [UIAlertController
@@ -257,6 +327,21 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.title = @"主题设置";
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor = UIColor.clearColor;
+
+    self.customGlassBackgroundImageView = [[UIImageView alloc] init];
+    self.customGlassBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
+    self.customGlassBackgroundImageView.clipsToBounds = YES;
+    self.customGlassBackgroundImageView.userInteractionEnabled = NO;
+    self.customGlassBackgroundImageView.hidden = YES;
+    [self.view addSubview:self.customGlassBackgroundImageView];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.customGlassBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.customGlassBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.customGlassBackgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.customGlassBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+    [self reloadCustomGlassBackground];
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
         DOCustomGlassBackgroundBlurKey : @0.10,
@@ -340,7 +425,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                                                     subtitle:@"选择首页背景图片"
                                                    imageName:@"photo"
                                                       action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [weakSelf showThemePlaceholderForTitle:@"背景"];
+        [weakSelf presentCustomGlassBackgroundPicker];
     }]]];
 
     UIView *appearanceSpacer = [[UIView alloc] init];
@@ -473,6 +558,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    [self reloadCustomGlassBackground];
     [self applyAppearancePreviewAndPersist:NO];
 }
 
@@ -546,6 +632,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property NSArray<NSLayoutConstraint *> *jailbreakButtonConstraints;
 @property DOActionMenuButton *updateButton;
 @property NSLayoutConstraint *customGlassJailbreakCenterYConstraint;
+@property UIImageView *customGlassBackgroundImageView;
 @property UIImageView *customGlassAvatarPhotoView;
 @property UILabel *customGlassMottoLabel;
 @property UIAlertController *customGlassMottoEditor;
@@ -555,6 +642,14 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @end
 
 @implementation DOMainViewController
+
+- (void)reloadCustomGlassBackground
+{
+    NSString *backgroundPath = DOCustomGlassBackgroundFilePath();
+    UIImage *backgroundImage = backgroundPath.length > 0 ? [UIImage imageWithContentsOfFile:backgroundPath] : nil;
+    self.customGlassBackgroundImageView.image = backgroundImage;
+    self.customGlassBackgroundImageView.hidden = backgroundImage == nil;
+}
 
 - (void)presentCustomGlassAvatarPicker
 {
@@ -1038,6 +1133,21 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)setupCustomGlassHome
 {
+    self.customGlassBackgroundImageView = [[UIImageView alloc] init];
+    self.customGlassBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
+    self.customGlassBackgroundImageView.clipsToBounds = YES;
+    self.customGlassBackgroundImageView.userInteractionEnabled = NO;
+    self.customGlassBackgroundImageView.hidden = YES;
+    [self.view addSubview:self.customGlassBackgroundImageView];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.customGlassBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.customGlassBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.customGlassBackgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.customGlassBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+    [self reloadCustomGlassBackground];
+
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
     CGFloat availableHeight = CGRectGetHeight(self.view.bounds);
     BOOL compactLayout = !isPad && availableHeight < 720.0;
@@ -1464,6 +1574,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    [self reloadCustomGlassBackground];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
 }
 
