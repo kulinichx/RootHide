@@ -30,6 +30,7 @@
 #import "DOPreferenceManager.h"
 #import "NSData+Hex.h"
 #import <LocalAuthentication/LocalAuthentication.h>
+#import <CoreServices/LSApplicationProxy.h>
 
 int reboot3(uint64_t flags, ...);
 CFPropertyListRef MGCopyAnswer(CFStringRef);
@@ -399,6 +400,216 @@ extern char **environ;
             exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
         }];
     }];
+}
+
+static NSString *DOCanonicalApplicationPath(NSString *path)
+{
+    if (!path.length) return nil;
+    return [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
+}
+
+static NSString *DORegisteredApplicationPath(NSString *bundleIdentifier)
+{
+    if (!bundleIdentifier.length) return nil;
+
+    LSApplicationProxy *appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleIdentifier];
+    if (!appProxy.installed || !appProxy.bundleURL.path.length) return nil;
+    return DOCanonicalApplicationPath(appProxy.bundleURL.path);
+}
+
+typedef NS_ENUM(NSUInteger, DOJailbreakAppRegistrationState) {
+    DOJailbreakAppRegistrationStateMissing,
+    DOJailbreakAppRegistrationStateMatches,
+    DOJailbreakAppRegistrationStateStale,
+    DOJailbreakAppRegistrationStateConflict,
+};
+
+static DOJailbreakAppRegistrationState DOJailbreakAppRegistrationStateForPath(NSString *bundleIdentifier, NSString *expectedPath, NSString **registeredPathOut)
+{
+    NSString *registeredPath = DORegisteredApplicationPath(bundleIdentifier);
+    if (registeredPathOut) *registeredPathOut = registeredPath;
+
+    if (!registeredPath) return DOJailbreakAppRegistrationStateMissing;
+    if ([registeredPath isEqualToString:DOCanonicalApplicationPath(expectedPath)]) return DOJailbreakAppRegistrationStateMatches;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:registeredPath]) return DOJailbreakAppRegistrationStateStale;
+    return DOJailbreakAppRegistrationStateConflict;
+}
+
+static NSError *DOJailbreakAppRegistrationConflictError(NSString *bundleIdentifier, NSString *expectedPath, NSString *registeredPath)
+{
+    return [NSError errorWithDomain:@"DOJailbreakAppRepairErrorDomain"
+                               code:EEXIST
+                           userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Refusing to replace an existing app registration for %@. Expected %@, but LaunchServices is registered to %@.", bundleIdentifier, expectedPath, registeredPath]}];
+}
+
+static NSError *DOJailbreakAppUserConflictError(NSString *bundleIdentifier, NSString *expectedPath, NSString *userAppPath)
+{
+    return [NSError errorWithDomain:@"DOJailbreakAppRepairErrorDomain"
+                               code:EEXIST
+                           userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Refusing to repair %@ at %@ because a user application with the same bundle identifier exists at %@.", bundleIdentifier, expectedPath, userAppPath]}];
+}
+
+- (NSError *)repairJailbreakApps
+{
+    __block NSError *repairError = nil;
+    __block BOOL repairAttempted = NO;
+
+    [self runAsRoot:^{
+        repairAttempted = YES;
+        [self runUnsandboxed:^{
+            const char *uicachePath = JBROOT_PATH("/usr/bin/uicache");
+            if (access(uicachePath, X_OK) != 0) {
+                int errorCode = errno ? errno : ENOENT;
+                repairError = [NSError errorWithDomain:NSPOSIXErrorDomain code:errorCode userInfo:nil];
+                return;
+            }
+
+            NSString *applicationsPath = JBROOT_PATH(@"/Applications");
+            NSError *directoryError = nil;
+            NSArray<NSString *> *applicationNames = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:applicationsPath error:&directoryError];
+            if (!applicationNames) {
+                repairError = directoryError ?: [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:nil];
+                return;
+            }
+
+            // Build and validate the complete jailbreak-app set before changing LaunchServices.
+            NSMutableDictionary<NSString *, NSString *> *applicationsByIdentifier = [NSMutableDictionary dictionary];
+            for (NSString *applicationName in applicationNames) {
+                if (![applicationName.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
+
+                NSString *applicationPath = [applicationsPath stringByAppendingPathComponent:applicationName];
+                NSDictionary *infoDictionary = [NSDictionary dictionaryWithContentsOfFile:[applicationPath stringByAppendingPathComponent:@"Info.plist"]];
+                NSString *bundleIdentifier = infoDictionary[@"CFBundleIdentifier"];
+                if (!bundleIdentifier.length) {
+                    repairError = [NSError errorWithDomain:@"DOJailbreakAppRepairErrorDomain"
+                                                       code:EINVAL
+                                                   userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Jailbreak app is missing CFBundleIdentifier: %@", applicationPath]}];
+                    return;
+                }
+
+                if (applicationsByIdentifier[bundleIdentifier]) {
+                    repairError = [NSError errorWithDomain:@"DOJailbreakAppRepairErrorDomain"
+                                                       code:EEXIST
+                                                   userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Duplicate jailbreak app bundle identifier: %@", bundleIdentifier]}];
+                    return;
+                }
+                applicationsByIdentifier[bundleIdentifier] = applicationPath;
+            }
+
+            // Mirror DOJailbreaker's physical duplicate-app protection. LaunchServices can
+            // itself be stale, so checking only LSApplicationProxy is not sufficient here.
+            NSString *userAppsPath = @"/var/containers/Bundle/Application";
+            for (NSString *appUUID in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:userAppsPath error:nil]) {
+                NSString *UUIDPath = [userAppsPath stringByAppendingPathComponent:appUUID];
+                for (NSString *appCandidate in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:UUIDPath error:nil]) {
+                    if (![appCandidate.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
+
+                    NSString *userAppPath = [UUIDPath stringByAppendingPathComponent:appCandidate];
+                    NSDictionary *infoDictionary = [NSDictionary dictionaryWithContentsOfFile:[userAppPath stringByAppendingPathComponent:@"Info.plist"]];
+                    NSString *bundleIdentifier = infoDictionary[@"CFBundleIdentifier"];
+                    if (!bundleIdentifier.length) continue;
+                    NSString *jailbreakAppPath = applicationsByIdentifier[bundleIdentifier];
+                    if (jailbreakAppPath) {
+                        repairError = DOJailbreakAppUserConflictError(bundleIdentifier, jailbreakAppPath, userAppPath);
+                        return;
+                    }
+                }
+            }
+
+            // Preflight every registration before mutating any of them. A mismatched path
+            // that still exists is a real conflict; a missing old path is a repairable stale
+            // registration (for example after a jbroot rerandomization).
+            for (NSString *bundleIdentifier in applicationsByIdentifier) {
+                NSString *applicationPath = applicationsByIdentifier[bundleIdentifier];
+                NSString *registeredPath = nil;
+                DOJailbreakAppRegistrationState state = DOJailbreakAppRegistrationStateForPath(bundleIdentifier, applicationPath, &registeredPath);
+                if (state == DOJailbreakAppRegistrationStateConflict) {
+                    repairError = DOJailbreakAppRegistrationConflictError(bundleIdentifier, DOCanonicalApplicationPath(applicationPath), registeredPath);
+                    return;
+                }
+            }
+
+            BOOL needsFullRefresh = NO;
+            for (NSString *bundleIdentifier in applicationsByIdentifier) {
+                NSString *applicationPath = applicationsByIdentifier[bundleIdentifier];
+                NSString *registeredPath = nil;
+                DOJailbreakAppRegistrationState state = DOJailbreakAppRegistrationStateForPath(bundleIdentifier, applicationPath, &registeredPath);
+                if (state == DOJailbreakAppRegistrationStateMatches) continue;
+                if (state == DOJailbreakAppRegistrationStateConflict) {
+                    repairError = DOJailbreakAppRegistrationConflictError(bundleIdentifier, DOCanonicalApplicationPath(applicationPath), registeredPath);
+                    return;
+                }
+
+                // Missing and stale registrations are both safe to repair in place. uicache
+                // registration replaces the stale LS record without touching a live app path.
+                exec_cmd(uicachePath, "-p", applicationPath.fileSystemRepresentation, NULL);
+
+                state = DOJailbreakAppRegistrationStateForPath(bundleIdentifier, applicationPath, &registeredPath);
+                if (state == DOJailbreakAppRegistrationStateConflict) {
+                    repairError = DOJailbreakAppRegistrationConflictError(bundleIdentifier, DOCanonicalApplicationPath(applicationPath), registeredPath);
+                    return;
+                }
+                if (state != DOJailbreakAppRegistrationStateMatches) {
+                    needsFullRefresh = YES;
+                }
+            }
+
+            if (needsFullRefresh) {
+                // Re-check before the broad fallback so a registration that appeared
+                // concurrently is never overwritten by a full refresh.
+                needsFullRefresh = NO;
+                for (NSString *bundleIdentifier in applicationsByIdentifier) {
+                    NSString *applicationPath = applicationsByIdentifier[bundleIdentifier];
+                    NSString *registeredPath = nil;
+                    DOJailbreakAppRegistrationState state = DOJailbreakAppRegistrationStateForPath(bundleIdentifier, applicationPath, &registeredPath);
+                    if (state == DOJailbreakAppRegistrationStateMatches) continue;
+                    if (state == DOJailbreakAppRegistrationStateConflict) {
+                        repairError = DOJailbreakAppRegistrationConflictError(bundleIdentifier, DOCanonicalApplicationPath(applicationPath), registeredPath);
+                        return;
+                    }
+                    needsFullRefresh = YES;
+                }
+            }
+
+            if (needsFullRefresh) {
+                int result = exec_cmd(uicachePath, "-a", NULL);
+                if (result != 0) {
+                    repairError = [NSError errorWithDomain:@"DOJailbreakAppRepairErrorDomain"
+                                                       code:result
+                                                   userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to refresh jailbreak app registrations (uicache exit %d).", result]}];
+                    return;
+                }
+            }
+
+            NSMutableArray<NSString *> *remainingIssues = [NSMutableArray array];
+            for (NSString *bundleIdentifier in applicationsByIdentifier) {
+                NSString *applicationPath = applicationsByIdentifier[bundleIdentifier];
+                NSString *registeredPath = nil;
+                DOJailbreakAppRegistrationState state = DOJailbreakAppRegistrationStateForPath(bundleIdentifier, applicationPath, &registeredPath);
+                if (state == DOJailbreakAppRegistrationStateConflict) {
+                    repairError = DOJailbreakAppRegistrationConflictError(bundleIdentifier, DOCanonicalApplicationPath(applicationPath), registeredPath);
+                    return;
+                }
+                if (state != DOJailbreakAppRegistrationStateMatches) {
+                    [remainingIssues addObject:bundleIdentifier];
+                }
+            }
+
+            if (remainingIssues.count) {
+                repairError = [NSError errorWithDomain:@"DOJailbreakAppRepairErrorDomain"
+                                                   code:EIO
+                                               userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Jailbreak app registration is still inconsistent for: %@", [remainingIssues componentsJoinedByString:@", "]]}];
+            }
+        }];
+    }];
+
+    if (!repairAttempted && !repairError) {
+        repairError = [NSError errorWithDomain:NSPOSIXErrorDomain
+                                           code:EPERM
+                                       userInfo:@{NSLocalizedDescriptionKey : @"Failed to enter the root context required to repair jailbreak app registrations."}];
+    }
+
+    return repairError;
 }
 
 - (void)unregisterJailbreakApps
