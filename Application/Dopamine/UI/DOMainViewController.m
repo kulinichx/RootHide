@@ -84,7 +84,6 @@ static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.Glas
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
-static NSString * const DOCustomGlassCurrentWallpaperFilenameKey = @"DOCustomGlassTheme.CurrentWallpaperFilename";
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSUInteger const DOCustomGlassUsernameCharacterLimit = 20;
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
@@ -106,12 +105,15 @@ static NSString *DOCustomGlassAvatarFilePath(void)
 
 static NSString *DOCustomGlassBackgroundDirectoryPath(void)
 {
-    NSString *applicationSupport =
-        NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    if (applicationSupport.length == 0)
+    NSString *home = NSHomeDirectory();
+    if (home.length == 0)
         return nil;
 
-    NSString *directory = [applicationSupport stringByAppendingPathComponent:@"CustomGlass"];
+    // Match Dopamine's own persistent-file strategy (for example bootlogo.png):
+    // keep the user-selected wallpaper under the app container's Documents
+    // directory instead of Application Support. One fixed pathname means there
+    // is no secondary preference/pointer that can be lost between launches.
+    NSString *directory = [home stringByAppendingPathComponent:@"Documents/CustomGlass"];
     [[NSFileManager defaultManager] createDirectoryAtPath:directory
                               withIntermediateDirectories:YES
                                                attributes:nil
@@ -848,44 +850,25 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
         UIImage *image = (UIImage *)object;
         NSData *imageData = UIImageJPEGRepresentation(image, 0.92);
-        UIImage *persistedImage = imageData.length > 0 ? [UIImage imageWithData:imageData] : nil;
 
         NSString *backgroundDirectory = DOCustomGlassBackgroundDirectoryPath();
-        NSString *wallpaperFilename = [NSString stringWithFormat:@"wallpaper-%@.jpg", NSUUID.UUID.UUIDString];
         NSString *backgroundPath = backgroundDirectory.length > 0 ?
-            [backgroundDirectory stringByAppendingPathComponent:wallpaperFilename] : nil;
-        BOOL saved = persistedImage != nil &&
+            [backgroundDirectory stringByAppendingPathComponent:@"background.jpg"] : nil;
+
+        BOOL wrote = imageData.length > 0 &&
                      backgroundPath.length > 0 &&
                      [imageData writeToFile:backgroundPath atomically:YES];
 
-        if (saved) {
-            DOPreferenceManager *preferenceManager = [DOPreferenceManager sharedManager];
-            id previousValue = [preferenceManager preferenceValueForKey:DOCustomGlassCurrentWallpaperFilenameKey];
-            NSString *previousFilename = [previousValue isKindOfClass:NSString.class] ? (NSString *)previousValue : nil;
-
-            // RootHide/Dopamine already persists its critical settings through
-            // DOPreferenceManager's explicit plist. Keep the wallpaper pointer
-            // in the same store instead of NSUserDefaults, whose domain is not
-            // reliable enough for this TrollStore launch path.
-            [preferenceManager setPreferenceValue:wallpaperFilename
-                                           forKey:DOCustomGlassCurrentWallpaperFilenameKey];
-
-            if (previousFilename.length > 0 &&
-                ![previousFilename isEqualToString:wallpaperFilename] &&
-                [previousFilename isEqualToString:previousFilename.lastPathComponent] &&
-                [previousFilename hasPrefix:@"wallpaper-"]) {
-                NSString *previousPath = [backgroundDirectory stringByAppendingPathComponent:previousFilename];
-                [[NSFileManager defaultManager] removeItemAtPath:previousPath error:nil];
-            }
-        }
+        // Verify the exact fixed-path bytes can be read back before presenting
+        // them. This makes the live preview and next-launch source identical.
+        NSData *persistedData = wrote ? [NSData dataWithContentsOfFile:backgroundPath] : nil;
+        UIImage *persistedImage = persistedData.length > 0 ? [UIImage imageWithData:persistedData] : nil;
+        BOOL saved = persistedImage != nil;
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!saved)
                 return;
 
-            // The same immutable file now backs both the live preview and every
-            // later theme lookup. A new filename also makes stale UIImage/theme
-            // caches unambiguous when the app is closed and reopened.
             [[UIApplication sharedApplication] ignoreSnapshotOnNextApplicationLaunch];
             [weakSelf.navigationController customGlassReplaceSharedBackgroundWithImage:persistedImage];
             [[NSNotificationCenter defaultCenter]

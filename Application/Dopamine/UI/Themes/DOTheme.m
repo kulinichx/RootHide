@@ -7,12 +7,19 @@
 
 #import "DOTheme.h"
 #import "UIImage+Blur.h"
-#import "DOPreferenceManager.h"
 
 static NSString * const DOCustomGlassThemeKey = @"red";
-static NSString * const DOCustomGlassCurrentWallpaperFilenameKey = @"DOCustomGlassTheme.CurrentWallpaperFilename";
 
-static NSString *DOCustomGlassThemeBackgroundDirectoryPath(void)
+static NSString *DOCustomGlassDocumentsBackgroundDirectoryPath(void)
+{
+    NSString *home = NSHomeDirectory();
+    if (home.length == 0)
+        return nil;
+
+    return [home stringByAppendingPathComponent:@"Documents/CustomGlass"];
+}
+
+static NSString *DOCustomGlassLegacyBackgroundDirectoryPath(void)
 {
     NSString *applicationSupport =
         NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
@@ -22,7 +29,7 @@ static NSString *DOCustomGlassThemeBackgroundDirectoryPath(void)
     return [applicationSupport stringByAppendingPathComponent:@"CustomGlass"];
 }
 
-static BOOL DOCustomGlassWallpaperFilenameIsSafe(NSString *filename)
+static BOOL DOCustomGlassVersionedWallpaperFilename(NSString *filename)
 {
     return filename.length > 0 &&
            [filename isEqualToString:filename.lastPathComponent] &&
@@ -30,25 +37,19 @@ static BOOL DOCustomGlassWallpaperFilenameIsSafe(NSString *filename)
            [filename.pathExtension.lowercaseString isEqualToString:@"jpg"];
 }
 
-static NSString *DOCustomGlassExistingWallpaperPath(NSString *directory, NSString *filename)
+static NSString *DOCustomGlassNewestLegacyWallpaperPath(NSString *directory)
 {
-    if (!DOCustomGlassWallpaperFilenameIsSafe(filename))
+    if (directory.length == 0)
         return nil;
 
-    NSString *path = [directory stringByAppendingPathComponent:filename];
-    return [[NSFileManager defaultManager] fileExistsAtPath:path] ? path : nil;
-}
-
-static NSString *DOCustomGlassNewestVersionedWallpaperFilename(NSString *directory)
-{
     NSArray<NSString *> *entries = [[NSFileManager defaultManager]
         contentsOfDirectoryAtPath:directory
                             error:nil];
-    NSString *newestFilename = nil;
+    NSString *newestPath = nil;
     NSDate *newestDate = nil;
 
     for (NSString *entry in entries) {
-        if (!DOCustomGlassWallpaperFilenameIsSafe(entry))
+        if (!DOCustomGlassVersionedWallpaperFilename(entry))
             continue;
 
         NSString *path = [directory stringByAppendingPathComponent:entry];
@@ -56,72 +57,68 @@ static NSString *DOCustomGlassNewestVersionedWallpaperFilename(NSString *directo
             attributesOfItemAtPath:path
                              error:nil];
         NSDate *modified = attributes[NSFileModificationDate];
-        if (!newestFilename || (modified && (!newestDate || [modified compare:newestDate] == NSOrderedDescending))) {
-            newestFilename = entry;
+        if (!newestPath || (modified && (!newestDate || [modified compare:newestDate] == NSOrderedDescending))) {
+            newestPath = path;
             newestDate = modified;
         }
     }
 
-    return newestFilename;
+    if (newestPath.length > 0)
+        return newestPath;
+
+    NSString *legacyFixedPath = [directory stringByAppendingPathComponent:@"background.jpg"];
+    return [[NSFileManager defaultManager] fileExistsAtPath:legacyFixedPath] ? legacyFixedPath : nil;
+}
+
+static NSString *DOCustomGlassWallpaperIdentifierForPath(NSString *path)
+{
+    if (path.length == 0)
+        return @"compiled-fallback";
+
+    NSDictionary *attributes = [[NSFileManager defaultManager]
+        attributesOfItemAtPath:path
+                         error:nil];
+    NSNumber *size = attributes[NSFileSize] ?: @0;
+    NSDate *modified = attributes[NSFileModificationDate];
+    NSTimeInterval timestamp = modified ? modified.timeIntervalSince1970 : 0.0;
+    return [NSString stringWithFormat:@"documents:background.jpg:%@:%0.6f", size, timestamp];
 }
 
 static NSString *DOCustomGlassThemeResolvedBackgroundPath(NSString **identifierOut)
 {
-    NSString *directory = DOCustomGlassThemeBackgroundDirectoryPath();
-    if (directory.length == 0) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *documentsDirectory = DOCustomGlassDocumentsBackgroundDirectoryPath();
+    if (documentsDirectory.length == 0) {
         if (identifierOut)
             *identifierOut = @"compiled-fallback";
         return nil;
     }
 
-    DOPreferenceManager *preferenceManager = [DOPreferenceManager sharedManager];
-    id storedValue = [preferenceManager preferenceValueForKey:DOCustomGlassCurrentWallpaperFilenameKey];
-    NSString *filename = [storedValue isKindOfClass:NSString.class] ? (NSString *)storedValue : nil;
-    NSString *path = DOCustomGlassExistingWallpaperPath(directory, filename);
+    [fileManager createDirectoryAtPath:documentsDirectory
+            withIntermediateDirectories:YES
+                             attributes:nil
+                                  error:nil];
 
-    if (path.length > 0) {
-        if (identifierOut)
-            *identifierOut = [@"current:" stringByAppendingString:filename];
-        return path;
+    NSString *fixedPath = [documentsDirectory stringByAppendingPathComponent:@"background.jpg"];
+
+    // R13.4 has one authoritative wallpaper pathname and no wallpaper pointer
+    // preference. This mirrors Dopamine's existing Documents/bootlogo.png model.
+    if (![fileManager fileExistsAtPath:fixedPath]) {
+        NSString *legacyDirectory = DOCustomGlassLegacyBackgroundDirectoryPath();
+        NSString *migrationSource = DOCustomGlassNewestLegacyWallpaperPath(legacyDirectory);
+        if (migrationSource.length > 0)
+            [fileManager copyItemAtPath:migrationSource toPath:fixedPath error:nil];
     }
 
-    // One-time R13.2 migration: if the old NSUserDefaults pointer still exists,
-    // promote it into Dopamine's explicit preference plist.
-    NSString *defaultsFilename = [[NSUserDefaults standardUserDefaults]
-        stringForKey:DOCustomGlassCurrentWallpaperFilenameKey];
-    path = DOCustomGlassExistingWallpaperPath(directory, defaultsFilename);
-    if (path.length > 0) {
-        [preferenceManager setPreferenceValue:defaultsFilename
-                                       forKey:DOCustomGlassCurrentWallpaperFilenameKey];
+    if (![fileManager fileExistsAtPath:fixedPath]) {
         if (identifierOut)
-            *identifierOut = [@"migrated:" stringByAppendingString:defaultsFilename];
-        return path;
-    }
-
-    // If the pointer was lost but R13.2 already wrote a versioned JPEG, recover
-    // the newest on-disk wallpaper and persist that filename for future launches.
-    NSString *recoveredFilename = DOCustomGlassNewestVersionedWallpaperFilename(directory);
-    path = DOCustomGlassExistingWallpaperPath(directory, recoveredFilename);
-    if (path.length > 0) {
-        [preferenceManager setPreferenceValue:recoveredFilename
-                                       forKey:DOCustomGlassCurrentWallpaperFilenameKey];
-        if (identifierOut)
-            *identifierOut = [@"recovered:" stringByAppendingString:recoveredFilename];
-        return path;
-    }
-
-    // R13/R13.1 compatibility: preserve the last fixed-name wallpaper until
-    // the user chooses a wallpaper once under the versioned scheme.
-    NSString *legacyPath = [directory stringByAppendingPathComponent:@"background.jpg"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:legacyPath]) {
-        if (identifierOut)
-            *identifierOut = @"legacy:background.jpg";
-        return legacyPath;
+            *identifierOut = @"compiled-fallback";
+        return nil;
     }
 
     if (identifierOut)
-        *identifierOut = @"compiled-fallback";
-    return nil;
+        *identifierOut = DOCustomGlassWallpaperIdentifierForPath(fixedPath);
+    return fixedPath;
 }
 
 @interface DOTheme ()
