@@ -29,6 +29,7 @@ static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTi
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
+static NSUInteger const DOCustomGlassUsernameCharacterLimit = 20;
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
 
 static NSString *DOCustomGlassAvatarFilePath(void)
@@ -92,6 +93,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, assign) CGFloat baseTintAlpha;
 @property(nonatomic, assign) CGFloat materialScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
+@property(nonatomic, assign) CGFloat lastRenderedShortDimension;
 
 - (instancetype)initWithCornerRadius:(CGFloat)cornerRadius baseTintAlpha:(CGFloat)baseTintAlpha;
 - (void)reloadMaterial;
@@ -114,6 +116,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _baseTintAlpha = MAX(0.0, baseTintAlpha);
         _materialScale = 1.0;
         _suppressBackdrop = NO;
+        _lastRenderedShortDimension = 0.0;
 
         self.backgroundColor = UIColor.clearColor;
         self.clipsToBounds = YES;
@@ -126,8 +129,15 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         [self addSubview:_neutralTintView];
 
         _contentView = [[UIView alloc] initWithFrame:CGRectZero];
+        _contentView.translatesAutoresizingMaskIntoConstraints = NO;
         _contentView.backgroundColor = UIColor.clearColor;
         [self addSubview:_contentView];
+        [NSLayoutConstraint activateConstraints:@[
+            [_contentView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [_contentView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+            [_contentView.topAnchor constraintEqualToAnchor:self.topAnchor],
+            [_contentView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor]
+        ]];
 
         _shoulderGradientLayer = [CAGradientLayer layer];
         _shoulderGradientLayer.startPoint = CGPointMake(0.02, 0.02);
@@ -164,6 +174,21 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     if (style == UIUserInterfaceStyleUnspecified)
         style = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
     return style == UIUserInterfaceStyleDark;
+}
+
+- (CGFloat)surfaceGeometryScale
+{
+    CGFloat shortDimension = MIN(CGRectGetWidth(self.bounds), CGRectGetHeight(self.bounds));
+    if (shortDimension <= 1.0)
+        return MIN(0.92, MAX(0.42, 0.58 * MAX(0.35, self.materialScale)));
+
+    // GlassFolders' folder-sized optical rail is intentionally richer than a
+    // small action pill. Scale the geometry from the surface's short edge so
+    // compact controls never inherit a folder-sized shoulder/filament.
+    CGFloat normalized = DOCustomGlassClamp01((shortDimension - 42.0) / 118.0);
+    CGFloat sizeScale = 0.42 + (0.50 * normalized);
+    CGFloat roleScale = sqrt(MAX(0.18, MIN(1.15, self.materialScale)));
+    return MIN(0.96, MAX(0.24, sizeScale * roleScale));
 }
 
 - (void)reloadMaterial
@@ -258,32 +283,50 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     self.neutralTintView.backgroundColor = UIColor.whiteColor;
     self.neutralTintView.alpha = MIN(0.055, tintAlpha);
 
-    CGFloat opticalScale = self.suppressBackdrop ? MIN(0.42, materialScale) : MIN(1.08, materialScale);
-    CGFloat upperRailAlpha = MIN(0.58,
-        (0.15 + (0.26 * opticalResponse) + (0.16 * highlightResponse)) * opticalScale);
-    CGFloat secondaryRailAlpha = MIN(0.26,
-        (0.045 + (0.14 * opticalResponse) + (0.05 * highlightResponse)) * opticalScale);
-    CGFloat shoulderAlpha = MIN(0.20,
-        (0.028 + (0.10 * opticalResponse) + (0.035 * highlightResponse)) * opticalScale);
+    CGFloat geometryScale = [self surfaceGeometryScale];
+    CGFloat opticalScale = self.suppressBackdrop ?
+        MIN(0.20, 0.24 * geometryScale * MAX(0.25, materialScale)) :
+        MIN(0.90, geometryScale * (0.80 + (0.20 * MIN(1.0, materialScale))));
+
+    // The optical rail is deliberately directional rather than a full white
+    // outline: upper/leading light carries the read, lower/trailing light is a
+    // faint secondary reflection, and the long side walls stay quiet.
+    CGFloat upperRailAlpha = MIN(0.31,
+        (0.085 + (0.14 * opticalResponse) + (0.075 * highlightResponse)) * opticalScale);
+    CGFloat secondaryRailAlpha = MIN(0.12,
+        (0.020 + (0.070 * opticalResponse) + (0.022 * highlightResponse)) * opticalScale);
+    CGFloat shoulderAlpha = MIN(0.095,
+        (0.016 + (0.052 * opticalResponse) + (0.020 * highlightResponse)) * opticalScale);
 
     self.shoulderGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha * 0.82].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha * 0.78].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.34].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.62].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.24].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.54].CGColor
     ];
     self.specularGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.90].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.055 * opticalScale].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.70].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.84].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.018 * opticalScale].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.55].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
     ];
 
-    self.layer.borderWidth = self.suppressBackdrop ? 0.30 : 0.36;
+    CGFloat shoulderWidth = self.suppressBackdrop ?
+        (0.72 + (0.48 * geometryScale)) :
+        (1.10 + (1.35 * geometryScale));
+    CGFloat specularWidth = self.suppressBackdrop ?
+        (0.24 + (0.10 * geometryScale)) :
+        (0.28 + (0.34 * geometryScale));
+    self.shoulderMaskLayer.lineWidth = shoulderWidth;
+    self.specularMaskLayer.lineWidth = specularWidth;
+
+    self.layer.borderWidth = self.suppressBackdrop ?
+        (0.10 + (0.05 * geometryScale)) :
+        (0.12 + (0.10 * geometryScale));
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:(0.045 + (0.085 * opticalResponse)) * opticalScale].CGColor;
+                                             alpha:(0.018 + (0.040 * opticalResponse)) * opticalScale].CGColor;
 }
 
 - (void)layoutSubviews
@@ -292,11 +335,17 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 
     self.layer.cornerRadius = self.preferredCornerRadius;
     self.neutralTintView.frame = self.bounds;
-    self.contentView.frame = self.bounds;
     self.fallbackBlurView.frame = self.bounds;
 
-    CGRect rimRect = CGRectInset(self.bounds, 0.55, 0.55);
-    CGFloat rimRadius = MAX(0.0, self.preferredCornerRadius - 0.55);
+    CGFloat shortDimension = MIN(CGRectGetWidth(self.bounds), CGRectGetHeight(self.bounds));
+    if (shortDimension > 1.0 && fabs(shortDimension - self.lastRenderedShortDimension) > 0.5) {
+        self.lastRenderedShortDimension = shortDimension;
+        [self reloadMaterial];
+    }
+
+    CGFloat rimInset = self.suppressBackdrop ? 0.28 : 0.34;
+    CGRect rimRect = CGRectInset(self.bounds, rimInset, rimInset);
+    CGFloat rimRadius = MAX(0.0, self.preferredCornerRadius - rimInset);
     UIBezierPath *rimPath = [UIBezierPath bezierPathWithRoundedRect:rimRect
                                                       cornerRadius:rimRadius];
 
@@ -701,7 +750,14 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // cards. Slider changes therefore preview the same material rather than an
     // unrelated UIVisualEffectView approximation.
     self.previewGlassView = [self themeGlassViewWithCornerRadius:26.0 tintAlpha:0.05];
+    self.previewGlassView.materialScale = 0.92;
+    [self.previewGlassView reloadMaterial];
     [contentStack addArrangedSubview:self.previewGlassView];
+    // This panel previously collapsed to zero height because the Glass content
+    // surface was frame-driven. Keep a safety floor even though contentView is
+    // now Auto Layout driven, so all four sliders remain visible on every iOS 16
+    // device and Dynamic Type configuration.
+    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 420.0 : 404.0)].active = YES;
 
     UIStackView *controlsStack = [[UIStackView alloc] init];
     controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -870,6 +926,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property UIVisualEffectView *customGlassBackgroundBlurView;
 @property UIViewPropertyAnimator *customGlassBackgroundBlurAnimator;
 @property UIImageView *customGlassAvatarPhotoView;
+@property UILabel *customGlassUsernameLabel;
+@property UIAlertController *customGlassUsernameEditor;
 @property UILabel *customGlassMottoLabel;
 @property UIAlertController *customGlassMottoEditor;
 @property(nonatomic) BOOL hideStatusBar;
@@ -961,6 +1019,62 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             weakSelf.customGlassAvatarPhotoView.hidden = NO;
         });
     }];
+}
+
+- (void)presentCustomGlassUsernameEditor
+{
+    NSString *currentUsername = self.customGlassUsernameLabel.text ?: @"";
+
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"用户名"
+                                            message:[NSString stringWithFormat:@"%lu / %lu",
+                                                     (unsigned long)currentUsername.length,
+                                                     (unsigned long)DOCustomGlassUsernameCharacterLimit]
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.text = currentUsername;
+        textField.placeholder = @"输入用户名";
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        [textField addTarget:self
+                      action:@selector(customGlassUsernameTextChanged:)
+            forControlEvents:UIControlEventEditingChanged];
+    }];
+
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__kindof UIAlertAction * _Nonnull action) {
+        NSString *username = alert.textFields.firstObject.text ?: @"";
+        if (username.length > DOCustomGlassUsernameCharacterLimit)
+            username = [username substringToIndex:DOCustomGlassUsernameCharacterLimit];
+
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setObject:username forKey:DOCustomGlassUsernameKey];
+        [defaults setObject:username forKey:@"RootHideCustomHomeUsername"];
+        weakSelf.customGlassUsernameLabel.text = username.length > 0 ? username : @"RootHide User";
+        weakSelf.customGlassUsernameEditor = nil;
+    }]];
+
+    self.customGlassUsernameEditor = alert;
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)customGlassUsernameTextChanged:(UITextField *)textField
+{
+    NSString *text = textField.text ?: @"";
+    if (text.length > DOCustomGlassUsernameCharacterLimit) {
+        text = [text substringToIndex:DOCustomGlassUsernameCharacterLimit];
+        textField.text = text;
+    }
+
+    self.customGlassUsernameEditor.message =
+        [NSString stringWithFormat:@"%lu / %lu",
+         (unsigned long)text.length,
+         (unsigned long)DOCustomGlassUsernameCharacterLimit];
 }
 
 - (void)presentCustomGlassMottoEditor
@@ -1237,6 +1351,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (DOCustomLiquidGlassView *)customGlassCardWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
 {
     DOCustomLiquidGlassView *card = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
+    card.materialScale = 0.86;
+    [card reloadMaterial];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     [card.contentView addSubview:button];
 
@@ -1252,7 +1368,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
     DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.040];
-    innerGlass.materialScale = 0.90;
+    // Small pills use a deliberately lighter optical recipe than folder-sized
+    // panels; the body still samples the wallpaper, but the edge stays hairline.
+    innerGlass.materialScale = 0.72;
     [innerGlass reloadMaterial];
 
     // Keep all restart actions on one shared icon/text grid. On iPhone the
@@ -1600,7 +1718,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         initWithTarget:self action:@selector(presentCustomGlassAvatarPicker)]];
 
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    NSString *username = [defaults stringForKey:@"RootHideCustomHomeUsername"] ?: @"RootHide User";
+    NSString *username = [defaults stringForKey:DOCustomGlassUsernameKey];
+    if (username.length == 0)
+        username = [defaults stringForKey:@"RootHideCustomHomeUsername"];
+    if (username.length == 0)
+        username = @"RootHide User";
     NSString *motto = [defaults stringForKey:DOCustomGlassMottoKey];
     if (motto.length == 0)
         motto = [defaults stringForKey:@"RootHideCustomHomeMotto"] ?: @"Your motto";
@@ -1611,7 +1733,13 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     usernameLabel.textColor = UIColor.whiteColor;
     usernameLabel.textAlignment = NSTextAlignmentCenter;
     usernameLabel.font = [UIFont systemFontOfSize:usernameFontSize weight:UIFontWeightSemibold];
+    usernameLabel.userInteractionEnabled = YES;
+    usernameLabel.isAccessibilityElement = YES;
+    usernameLabel.accessibilityLabel = @"编辑用户名";
+    [usernameLabel addGestureRecognizer:[[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(presentCustomGlassUsernameEditor)]];
     [profileView addSubview:usernameLabel];
+    self.customGlassUsernameLabel = usernameLabel;
 
     UILabel *systemLabel = [[UILabel alloc] init];
     systemLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1712,8 +1840,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.008];
-    restartContainer.materialScale = 0.34;
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.004];
+    // Grouping shell only: no second backdrop blur and almost no optical rail.
+    // The three inner pills are the actual Glass surfaces.
+    restartContainer.materialScale = 0.18;
     restartContainer.suppressBackdrop = YES;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
@@ -1822,7 +1952,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // more important without looking like a separate solid-blue material.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
     jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.075];
-    jailbreakEmphasisGlass.materialScale = 1.05;
+    jailbreakEmphasisGlass.materialScale = 0.82;
     [jailbreakEmphasisGlass reloadMaterial];
     jailbreakEmphasisGlass.userInteractionEnabled = NO;
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
