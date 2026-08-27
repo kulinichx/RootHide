@@ -33,11 +33,15 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 - (void)reloadMaterial;
 @end
 
+@interface DOCustomWallpaperBlurView : UIView
+- (void)setBlurIntensity:(CGFloat)blurIntensity;
+@end
+
 @interface DOCreditsViewController ()
 
+@property(nonatomic, strong) UIView *customGlassPageBackgroundHostView;
 @property(nonatomic, strong) UIImageView *customGlassPageBackgroundImageView;
-@property(nonatomic, strong) UIVisualEffectView *customGlassPageBackgroundBlurView;
-@property(nonatomic, strong) UIViewPropertyAnimator *customGlassPageBackgroundBlurAnimator;
+@property(nonatomic, strong) DOCustomWallpaperBlurView *customGlassPageBackgroundBlurView;
 
 @end
 
@@ -93,8 +97,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
     CGFloat blur = [defaults objectForKey:DOCustomGlassCreditsBackgroundBlurKey] ?
         [defaults floatForKey:DOCustomGlassCreditsBackgroundBlurKey] : 0.10;
     blur = MIN(1.0, MAX(0.0, blur));
-    if (self.customGlassPageBackgroundBlurAnimator)
-        self.customGlassPageBackgroundBlurAnimator.fractionComplete = blur;
+    [self.customGlassPageBackgroundBlurView setBlurIntensity:blur];
 
     UITableView *tableView = [self valueForKey:@"table"];
     for (UITableViewCell *cell in tableView.visibleCells)
@@ -117,44 +120,52 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
 
 - (void)customGlassInstallPageAppearance
 {
+    UIView *backgroundHostParent = self.navigationController.view ?: self.view;
+
+    self.customGlassPageBackgroundHostView = [[UIView alloc] init];
+    self.customGlassPageBackgroundHostView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.customGlassPageBackgroundHostView.backgroundColor = UIColor.clearColor;
+    self.customGlassPageBackgroundHostView.userInteractionEnabled = NO;
+    [backgroundHostParent insertSubview:self.customGlassPageBackgroundHostView atIndex:0];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.customGlassPageBackgroundHostView.leadingAnchor constraintEqualToAnchor:backgroundHostParent.leadingAnchor],
+        [self.customGlassPageBackgroundHostView.trailingAnchor constraintEqualToAnchor:backgroundHostParent.trailingAnchor],
+        [self.customGlassPageBackgroundHostView.topAnchor constraintEqualToAnchor:backgroundHostParent.topAnchor],
+        [self.customGlassPageBackgroundHostView.bottomAnchor constraintEqualToAnchor:backgroundHostParent.bottomAnchor]
+    ]];
+
     self.customGlassPageBackgroundImageView = [[UIImageView alloc] init];
     self.customGlassPageBackgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
     self.customGlassPageBackgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
     self.customGlassPageBackgroundImageView.clipsToBounds = YES;
     self.customGlassPageBackgroundImageView.userInteractionEnabled = NO;
     self.customGlassPageBackgroundImageView.hidden = YES;
-    [self.view insertSubview:self.customGlassPageBackgroundImageView atIndex:0];
+    [self.customGlassPageBackgroundHostView addSubview:self.customGlassPageBackgroundImageView];
 
-    self.customGlassPageBackgroundBlurView = [[UIVisualEffectView alloc] initWithEffect:nil];
+    self.customGlassPageBackgroundBlurView = [[DOCustomWallpaperBlurView alloc] initWithFrame:CGRectZero];
     self.customGlassPageBackgroundBlurView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customGlassPageBackgroundBlurView.userInteractionEnabled = NO;
-    [self.view insertSubview:self.customGlassPageBackgroundBlurView aboveSubview:self.customGlassPageBackgroundImageView];
+    [self.customGlassPageBackgroundHostView addSubview:self.customGlassPageBackgroundBlurView];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.customGlassPageBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.customGlassPageBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.customGlassPageBackgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.customGlassPageBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        [self.customGlassPageBackgroundBlurView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.customGlassPageBackgroundBlurView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.customGlassPageBackgroundBlurView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.customGlassPageBackgroundBlurView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+        [self.customGlassPageBackgroundImageView.leadingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.leadingAnchor],
+        [self.customGlassPageBackgroundImageView.trailingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.trailingAnchor],
+        [self.customGlassPageBackgroundImageView.topAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.topAnchor],
+        [self.customGlassPageBackgroundImageView.bottomAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.bottomAnchor],
+        [self.customGlassPageBackgroundBlurView.leadingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.leadingAnchor],
+        [self.customGlassPageBackgroundBlurView.trailingAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.trailingAnchor],
+        [self.customGlassPageBackgroundBlurView.topAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.topAnchor],
+        [self.customGlassPageBackgroundBlurView.bottomAnchor constraintEqualToAnchor:self.customGlassPageBackgroundHostView.bottomAnchor]
     ]];
+
+    self.view.backgroundColor = UIColor.clearColor;
 
     UITableView *tableView = [self valueForKey:@"table"];
     tableView.backgroundColor = UIColor.clearColor;
     tableView.opaque = NO;
     tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     tableView.backgroundView = nil;
-
-    __weak typeof(self) weakSelf = self;
-    UIBlurEffect *backgroundBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleRegular];
-    self.customGlassPageBackgroundBlurAnimator =
-        [[UIViewPropertyAnimator alloc] initWithDuration:1.0 curve:UIViewAnimationCurveLinear animations:^{
-            weakSelf.customGlassPageBackgroundBlurView.effect = backgroundBlur;
-        }];
-    [self.customGlassPageBackgroundBlurAnimator startAnimation];
-    [self.customGlassPageBackgroundBlurAnimator pauseAnimation];
+    tableView.layer.cornerRadius = 0.0;
+    tableView.layer.masksToBounds = NO;
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(customGlassThemeDidChange:)
@@ -164,6 +175,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
     [self customGlassReloadPageBackground];
     [self customGlassApplyPageAppearance];
 }
+
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -188,7 +200,7 @@ static NSString *DOCustomGlassCreditsBackgroundFilePath(void)
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:DOCustomGlassCreditsDidChangeNotification
                                                   object:nil];
-    [self.customGlassPageBackgroundBlurAnimator stopAnimation:YES];
+    [self.customGlassPageBackgroundHostView removeFromSuperview];
 }
 
 - (id)specifiers
