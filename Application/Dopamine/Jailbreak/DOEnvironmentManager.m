@@ -954,12 +954,28 @@ static NSDictionary<NSString *, id> *DORootHideHealthEntry(NSString *kind,
         if (![fileManager fileExistsAtPath:JBROOT_PATH(@"/var/lib/dpkg/status")])
             [missingBootstrapComponents addObject:@"dpkg status"];
 
-        NSString *systemhookPath = JBROOT_PATH(@"/basebin/systemhook.dylib");
-        NSString *brandedSystemhookPath = [NSString stringWithFormat:@"%@/systemhook-%016llX.dylib",
-                                           JBROOT_PATH(@"/basebin"),
-                                           (unsigned long long)jbinfo(jbrand)];
-        if (![fileManager fileExistsAtPath:systemhookPath] &&
-            ![fileManager fileExistsAtPath:brandedSystemhookPath])
+        NSString *basebinPath = JBROOT_PATH(@"/basebin");
+        BOOL systemhookPresent = [fileManager fileExistsAtPath:[basebinPath stringByAppendingPathComponent:@"systemhook.dylib"]];
+        if (!systemhookPresent) {
+            NSString *systemhookTemplate = @"systemhook-0000000000000000.dylib";
+            NSCharacterSet *nonHexCharacters = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+            for (NSString *entryName in [fileManager contentsOfDirectoryAtPath:basebinPath error:nil]) {
+                if (entryName.length != systemhookTemplate.length ||
+                    ![entryName hasPrefix:@"systemhook-"] ||
+                    ![entryName hasSuffix:@".dylib"]) continue;
+
+                NSString *brandString = [entryName substringWithRange:NSMakeRange(@"systemhook-".length, 16)];
+                if ([brandString rangeOfCharacterFromSet:nonHexCharacters].location != NSNotFound) continue;
+
+                BOOL isDirectory = NO;
+                NSString *candidatePath = [basebinPath stringByAppendingPathComponent:entryName];
+                if ([fileManager fileExistsAtPath:candidatePath isDirectory:&isDirectory] && !isDirectory) {
+                    systemhookPresent = YES;
+                    break;
+                }
+            }
+        }
+        if (!systemhookPresent)
             [missingInjectionComponents addObject:@"systemhook.dylib"];
         if (![fileManager fileExistsAtPath:JBROOT_PATH(@"/basebin/roothidehooks.dylib")])
             [missingInjectionComponents addObject:@"roothidehooks.dylib"];
