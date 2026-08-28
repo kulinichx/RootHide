@@ -1214,7 +1214,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
     if (self.customGlassSystemLabel)
         self.customGlassSystemLabel.text = verified
-            ? @"Supporter"
+            ? [NSString stringWithFormat:@"iOS %@ · Supporter", UIDevice.currentDevice.systemVersion]
             : [NSString stringWithFormat:@"iOS %@", UIDevice.currentDevice.systemVersion];
 }
 
@@ -1361,7 +1361,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         [defaults setObject:username forKey:DOCustomGlassUsernameKey];
-        [defaults setObject:username forKey:@"RootHideCustomHomeUsername"];
         weakSelf.customGlassUsernameLabel.text = username.length > 0 ? username : @"RootHide User";
         weakSelf.customGlassUsernameEditor = nil;
     }]];
@@ -1416,7 +1415,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             motto = [motto substringToIndex:DOCustomGlassMottoCharacterLimit];
 
         [[NSUserDefaults standardUserDefaults] setObject:motto forKey:DOCustomGlassMottoKey];
-        [[NSUserDefaults standardUserDefaults] setObject:motto forKey:@"RootHideCustomHomeMotto"];
         weakSelf.customGlassMottoLabel.text = motto;
         weakSelf.customGlassMottoEditor = nil;
     }]];
@@ -1998,12 +1996,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSString *username = [defaults stringForKey:DOCustomGlassUsernameKey];
     if (username.length == 0)
-        username = [defaults stringForKey:@"RootHideCustomHomeUsername"];
-    if (username.length == 0)
         username = @"RootHide User";
     NSString *motto = [defaults stringForKey:DOCustomGlassMottoKey];
     if (motto.length == 0)
-        motto = [defaults stringForKey:@"RootHideCustomHomeMotto"] ?: @"Your motto";
+        motto = @"motto";
 
     UILabel *usernameLabel = [[UILabel alloc] init];
     usernameLabel.translatesAutoresizingMaskIntoConstraints = NO;
