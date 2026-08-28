@@ -37,6 +37,160 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)reloadMaterial;
 @end
 
+@interface DORootHideHealthViewController : UITableViewController
+@property(nonatomic, copy) NSArray<NSDictionary<NSString *, id> *> *healthReport;
+@property(nonatomic, assign) BOOL refreshInProgress;
+@property(nonatomic, assign) BOOL repairInProgress;
+@end
+
+@implementation DORootHideHealthViewController
+
+- (instancetype)init
+{
+    return [super initWithStyle:UITableViewStyleGrouped];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.title = @"RootHide Health";
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh
+                                                                                         target:self
+                                                                                         action:@selector(refreshHealth)];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 56.0;
+    [self refreshHealth];
+}
+
+- (void)refreshHealth
+{
+    if (self.refreshInProgress || self.repairInProgress) return;
+    self.refreshInProgress = YES;
+    self.navigationItem.rightBarButtonItem.enabled = NO;
+    [self.tableView reloadData];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSArray<NSDictionary<NSString *, id> *> *report = [[DOEnvironmentManager sharedManager] rootHideHealthReport];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.healthReport = report ?: @[];
+            self.refreshInProgress = NO;
+            self.navigationItem.rightBarButtonItem.enabled = YES;
+            [self.tableView reloadData];
+        });
+    });
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+    return 1;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    if (!self.healthReport.count && self.refreshInProgress) return 1;
+    return self.healthReport.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
+{
+    return @"Bootstrap and Injection are detection-only. Repair is offered only where RootHide already has a bounded repair primitive.";
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    static NSString * const CellIdentifier = @"RootHideHealthCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:CellIdentifier];
+
+    if (!self.healthReport.count && self.refreshInProgress) {
+        cell.textLabel.text = @"Checking RootHide Health…";
+        cell.detailTextLabel.text = nil;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
+
+    NSDictionary<NSString *, id> *entry = self.healthReport[indexPath.row];
+    NSString *stateName = entry[@"StateName"] ?: @"Unknown";
+    BOOL healthy = [entry[@"Healthy"] boolValue];
+    BOOL repairable = [entry[@"Repairable"] boolValue];
+
+    cell.textLabel.text = entry[@"DisplayName"] ?: @"RootHide Health";
+    cell.detailTextLabel.text = stateName;
+    cell.detailTextLabel.numberOfLines = 1;
+    if (@available(iOS 13.0, *)) {
+        if ([stateName isEqualToString:@"Not Selected"])
+            cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+        else
+            cell.detailTextLabel.textColor = healthy ? UIColor.systemGreenColor : UIColor.systemOrangeColor;
+    }
+    cell.accessoryType = (repairable || [entry[@"Detail"] length]) ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+    cell.selectionStyle = cell.accessoryType == UITableViewCellAccessoryNone ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.repairInProgress || indexPath.row >= self.healthReport.count) return;
+
+    NSDictionary<NSString *, id> *entry = self.healthReport[indexPath.row];
+    BOOL repairable = [entry[@"Repairable"] boolValue];
+    NSString *stateName = entry[@"StateName"] ?: @"Unknown";
+    NSString *detail = entry[@"Detail"];
+    NSString *message = detail.length ? [NSString stringWithFormat:@"%@\n\n%@", stateName, detail] : stateName;
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:entry[@"DisplayName"] ?: @"RootHide Health"
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleCancel handler:nil]];
+    if (repairable) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Repair" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            [self repairEntry:entry];
+        }]];
+    }
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)repairEntry:(NSDictionary<NSString *, id> *)entry
+{
+    if (self.repairInProgress) return;
+    NSString *kind = entry[@"Kind"];
+    if (![kind isEqualToString:@"JailbreakApps"] && ![kind isEqualToString:@"PackageManager"]) return;
+
+    self.repairInProgress = YES;
+    self.navigationItem.rightBarButtonItem.enabled = NO;
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *repairError = nil;
+        if ([kind isEqualToString:@"JailbreakApps"]) {
+            repairError = [[DOEnvironmentManager sharedManager] repairJailbreakApps];
+        }
+        else {
+            repairError = [[DOEnvironmentManager sharedManager] repairPackageManagers];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.repairInProgress = NO;
+            self.navigationItem.rightBarButtonItem.enabled = YES;
+
+            NSString *title = repairError ? @"RootHide Health Repair Failed" : @"Repair Complete";
+            NSString *message = repairError.localizedDescription ?: @"The selected RootHide component is healthy.";
+            UIAlertController *resultAlert = [UIAlertController alertControllerWithTitle:title
+                                                                                   message:message
+                                                                            preferredStyle:UIAlertControllerStyleAlert];
+            [resultAlert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK")
+                                                             style:UIAlertActionStyleDefault
+                                                           handler:^(__unused UIAlertAction *action) {
+                [self refreshHealth];
+            }]];
+            [self presentViewController:resultAlert animated:YES completion:nil];
+        });
+    });
+}
+
+@end
+
 @interface DOSettingsController ()
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
@@ -687,6 +841,14 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                 [specifiers addObject:actionsGroupSpecifier];
                 
                 if (envManager.isJailbroken) {
+                    PSSpecifier *rootHideHealthSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [rootHideHealthSpecifier setProperty:@"RootHide Health" forKey:@"title"];
+                    [rootHideHealthSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [rootHideHealthSpecifier setProperty:buttonHeight forKey:@"height"];
+                    [rootHideHealthSpecifier setProperty:@"heart.text.square" forKey:@"image"];
+                    [rootHideHealthSpecifier setProperty:@"rootHideHealthPressed" forKey:@"action"];
+                    [specifiers addObject:rootHideHealthSpecifier];
+
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [refreshAppsSpecifier setProperty:@"Button_Refresh_Jailbreak_Apps" forKey:@"title"];
                     [refreshAppsSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
@@ -1043,6 +1205,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 }
 
 #pragma mark - Button Actions
+
+- (void)rootHideHealthPressed
+{
+    [self.navigationController pushViewController:[[DORootHideHealthViewController alloc] init] animated:YES];
+}
 
 - (void)refreshJailbreakAppsPressed
 {

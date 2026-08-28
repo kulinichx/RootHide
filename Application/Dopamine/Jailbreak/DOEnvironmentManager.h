@@ -91,7 +91,9 @@ typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
 - (NSError *)finalizeBootstrap;
 - (NSError *)deleteBootstrap;
 - (NSError *)reinstallPackageManagers;
+- (NSArray<NSDictionary<NSString *, id> *> *)jailbreakAppHealthReport;
 - (NSArray<NSDictionary<NSString *, id> *> *)packageManagerHealthReport;
+- (NSArray<NSDictionary<NSString *, id> *> *)rootHideHealthReport;
 - (NSError * _Nullable)repairPackageManagers;
 - (NSError *)updateBootLogo;
 - (NSArray<NSString *> *)fakeMountPaths;
