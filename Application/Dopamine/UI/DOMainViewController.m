@@ -1212,13 +1212,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     if (self.customGlassThemeCard)
         self.customGlassThemeCard.alpha = verified ? 1.0 : 0.44;
 
-    if (self.customGlassSystemLabel) {
-        NSString *systemText = [NSString stringWithFormat:@"iOS %@", UIDevice.currentDevice.systemVersion];
-        NSString *supporterID = DORHSupporterCurrentID();
-        if (verified && supporterID.length > 0)
-            systemText = [systemText stringByAppendingFormat:@" · Supporter ✓ #%@", supporterID];
-        self.customGlassSystemLabel.text = systemText;
-    }
+    if (self.customGlassSystemLabel)
+        self.customGlassSystemLabel.text = verified
+            ? @"Supporter"
+            : [NSString stringWithFormat:@"iOS %@", UIDevice.currentDevice.systemVersion];
 }
 
 - (void)supporterLicenseDidChange:(NSNotification *)notification
@@ -1444,7 +1441,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [self setupCustomGlassHome];
+    if (DORHSupporterIsVerified())
+        [self setupCustomGlassHome];
+    else
+        [self setupStack];
 }
 
 -(void)setupStack
@@ -2300,8 +2300,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    [self applyCustomGlassHomeAppearance];
-    [self refreshSupporterState];
+    if (DORHSupporterIsVerified()) {
+        [self applyCustomGlassHomeAppearance];
+        [self refreshSupporterState];
+    }
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
 }
 

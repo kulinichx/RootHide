@@ -11,6 +11,7 @@
 #import "DOGlobalAppearance.h"
 #import "DOThemeManager.h"
 #import "DOCustomGlassMediaStore.h"
+#import "DOSupporterLicense.h"
 #import <QuartzCore/QuartzCore.h>
 #import <CoreImage/CoreImage.h>
 #import <math.h>
@@ -205,10 +206,12 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     // setupBackground already resolved the user-media path (or immutable
     // theme fallback) before the first image view was created. Apply only the
     // persisted Custom Glass wallpaper blur here.
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    CGFloat initialBlur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
-        [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
-    [self customGlassApplySharedBackgroundBlurIntensity:initialBlur];
+    if (DORHSupporterIsVerified()) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        CGFloat initialBlur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
+            [defaults floatForKey:DOCustomGlassNavigationBackgroundBlurKey] : 0.10;
+        [self customGlassApplySharedBackgroundBlurIntensity:initialBlur];
+    }
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
 
@@ -220,12 +223,14 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 - (void)setupBackground
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
+    BOOL supporterVerified = DORHSupporterIsVerified();
     BOOL usingUserWallpaper = NO;
 
-    // Resolve dynamic user media before asking DOTheme for its immutable
-    // bundle-backed fallback. This keeps Custom Glass wallpaper ownership out of
-    // the theme cache and makes the first real app frame use the persisted file.
-    UIImage *sourceImage = DOCustomGlassNavigationResolveBackground(theme, &usingUserWallpaper);
+    // Supporters may use the persisted Custom Glass wallpaper. Without a valid
+    // license, use Dopamine's normal theme image and never load supporter media.
+    UIImage *sourceImage = supporterVerified
+        ? DOCustomGlassNavigationResolveBackground(theme, &usingUserWallpaper)
+        : [theme image];
 
     self.customGlassUsingCustomBackground = usingUserWallpaper;
     self.customGlassBackgroundSourceImage = sourceImage;
@@ -276,11 +281,13 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 
     // Keep the one shared image overscanned so modal scale/push transitions
     // cannot expose a second wallpaper around the destination frame.
+    CGFloat horizontalOverscan = supporterVerified ? 48.0 : 0.0;
+    CGFloat verticalOverscan = supporterVerified ? 140.0 : 100.0;
     [NSLayoutConstraint activateConstraints:@[
-        [self.backgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:-48.0],
-        [self.backgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:48.0],
-        [self.backgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:-140.0],
-        [self.backgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:140.0],
+        [self.backgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:-horizontalOverscan],
+        [self.backgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:horizontalOverscan],
+        [self.backgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:-verticalOverscan],
+        [self.backgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:verticalOverscan],
     ]];
 
     self.backAction = [[DOModalBackAction alloc] initWithAction:^{
@@ -582,14 +589,18 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 
 - (void)setBackgroundDimmed:(BOOL)dimmed
 {
+    BOOL supporterVerified = DORHSupporterIsVerified();
+
     [UIView animateWithDuration:0.3 animations:^{
-        // Custom Glass pages rely on the wallpaper as their page background.
-        // Preserve its luminance; only the native Dopamine fallback is dimmed.
+        // Supporter Glass pages keep their custom wallpaper visible. Without a
+        // license, preserve Dopamine's original background dimming behavior.
         self.backgroundImageView.alpha =
-            (self.customGlassUsingCustomBackground ? 1.0 : (dimmed ? 0.4 : 1.0));
+            (supporterVerified && self.customGlassUsingCustomBackground)
+                ? 1.0
+                : (dimmed ? 0.4 : 1.0);
     }];
 
-    self.backgroundImageView.userInteractionEnabled = NO;
+    self.backgroundImageView.userInteractionEnabled = supporterVerified ? NO : dimmed;
     self.backAction.hidden = !dimmed;
 }
 
@@ -608,7 +619,9 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated
 {
     BOOL isMainView = [viewController isKindOfClass:[DOMainViewController class]];
-    BOOL isCustomGlassView = [self isCustomGlassFullScreenViewController:viewController];
+    BOOL isCustomGlassView =
+        DORHSupporterIsVerified() &&
+        [self isCustomGlassFullScreenViewController:viewController];
     [self setBackgroundDimmed:!(isMainView || isCustomGlassView)];
     [self.backAction setIgnoreFrame:[self _frameForViewController:viewController]];
 }
