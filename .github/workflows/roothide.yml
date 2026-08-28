@@ -11,8 +11,6 @@ on:
         options:
           - focused
           - full
-  pull_request:
-  push:
 
 permissions:
   contents: read
