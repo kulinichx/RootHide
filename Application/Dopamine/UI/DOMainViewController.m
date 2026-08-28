@@ -1415,7 +1415,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
             motto = [motto substringToIndex:DOCustomGlassMottoCharacterLimit];
 
         [[NSUserDefaults standardUserDefaults] setObject:motto forKey:DOCustomGlassMottoKey];
-        weakSelf.customGlassMottoLabel.text = motto;
+        weakSelf.customGlassMottoLabel.text = motto.length > 0 ? motto : @"motto";
         weakSelf.customGlassMottoEditor = nil;
     }]];
 
