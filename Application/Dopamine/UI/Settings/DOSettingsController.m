@@ -20,6 +20,7 @@
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
 #import "DOButtonCell.h"
+#import "../DOSupporterLicense.h"
 
 #pragma mark - Custom Glass page appearance
 
@@ -1016,6 +1017,14 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             [jetsamSpecifier setProperty:@"jetsamOptionNumbers" forKey:@"valuesDataSource"];
             [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
             [specifiers addObject:jetsamSpecifier];
+
+            PSSpecifier *supporterLicenseSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+            [supporterLicenseSpecifier setProperty:@"Supporter License" forKey:@"title"];
+            [supporterLicenseSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+            [supporterLicenseSpecifier setProperty:buttonHeight forKey:@"height"];
+            [supporterLicenseSpecifier setProperty:@"checkmark.seal" forKey:@"image"];
+            [supporterLicenseSpecifier setProperty:@"supporterLicensePressed" forKey:@"action"];
+            [specifiers addObject:supporterLicenseSpecifier];
             
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
@@ -1394,6 +1403,71 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 }
 
 #pragma mark - Button Actions
+
+- (void)showSupporterLicenseResultWithTitle:(NSString *)title message:(NSString *)message
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)supporterLicensePressed
+{
+    NSDictionary<NSString *, id> *info = DORHSupporterCurrentLicenseInfo();
+    NSString *supporterID = [info[@"sid"] isKindOfClass:NSString.class] ? info[@"sid"] : nil;
+    NSString *status = supporterID.length > 0
+        ? [NSString stringWithFormat:@"Verified · #%@", supporterID]
+        : @"Not Activated";
+    NSString *deviceCode = DORHSupporterDeviceCode();
+    NSString *message = [NSString stringWithFormat:@"%@\n\nDevice Code\n%@",
+                         status,
+                         deviceCode.length > 0 ? deviceCode : @"Unavailable"];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Supporter License"
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    UIAlertAction *copyDeviceCodeAction =
+        [UIAlertAction actionWithTitle:@"Copy Device Code"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+        UIPasteboard.generalPasteboard.string = deviceCode;
+    }];
+    copyDeviceCodeAction.enabled = deviceCode.length > 0;
+    [alert addAction:copyDeviceCodeAction];
+
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Paste License"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__kindof UIAlertAction * _Nonnull action) {
+        NSString *licenseCode = UIPasteboard.generalPasteboard.string ?: @"";
+        NSError *error = nil;
+        if (DORHSupporterStoreLicenseCode(licenseCode, &error)) {
+            NSString *verifiedID = DORHSupporterCurrentID() ?: @"";
+            NSString *verifiedMessage = verifiedID.length > 0
+                ? [NSString stringWithFormat:@"Supporter #%@", verifiedID]
+                : @"Supporter verified";
+            [weakSelf showSupporterLicenseResultWithTitle:@"Verified" message:verifiedMessage];
+        }
+        else {
+            [weakSelf showSupporterLicenseResultWithTitle:@"Invalid License"
+                                                  message:error.localizedDescription ?: @"Unable to verify supporter license"];
+        }
+    }]];
+
+    if (supporterID.length > 0) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Remove License"
+                                                  style:UIAlertActionStyleDestructive
+                                                handler:^(__kindof UIAlertAction * _Nonnull action) {
+            DORHSupporterRemoveLicense();
+        }]];
+    }
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 
 - (void)rootHideHealthPressed
 {

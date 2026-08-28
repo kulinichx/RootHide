@@ -15,6 +15,7 @@
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
 #import "DOCustomGlassMediaStore.h"
+#import "DOSupporterLicense.h"
 #import <pthread.h>
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
@@ -1168,6 +1169,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property UIAlertController *customGlassUsernameEditor;
 @property UILabel *customGlassMottoLabel;
 @property UIAlertController *customGlassMottoEditor;
+@property DOCustomLiquidGlassView *customGlassThemeCard;
+@property UILabel *customGlassSystemLabel;
+@property UIView *supporterOnlyHintView;
+@property UITapGestureRecognizer *supporterOnlyDismissTapGesture;
 @property(nonatomic) BOOL hideStatusBar;
 @property(nonatomic) BOOL hideHomeIndicator;
 
@@ -1199,6 +1204,87 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     }
 
     [self applyCustomGlassHomeAppearance];
+}
+
+- (void)refreshSupporterState
+{
+    BOOL verified = DORHSupporterIsVerified();
+    if (self.customGlassThemeCard)
+        self.customGlassThemeCard.alpha = verified ? 1.0 : 0.44;
+
+    if (self.customGlassSystemLabel) {
+        NSString *systemText = [NSString stringWithFormat:@"iOS %@", UIDevice.currentDevice.systemVersion];
+        NSString *supporterID = DORHSupporterCurrentID();
+        if (verified && supporterID.length > 0)
+            systemText = [systemText stringByAppendingFormat:@" · Supporter ✓ #%@", supporterID];
+        self.customGlassSystemLabel.text = systemText;
+    }
+}
+
+- (void)supporterLicenseDidChange:(NSNotification *)notification
+{
+    (void)notification;
+    if (![NSThread isMainThread]) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf refreshSupporterState];
+        });
+        return;
+    }
+    [self refreshSupporterState];
+}
+
+- (void)dismissSupporterOnlyHint
+{
+    [self.supporterOnlyHintView removeFromSuperview];
+    self.supporterOnlyHintView = nil;
+
+    if (self.supporterOnlyDismissTapGesture) {
+        [self.view removeGestureRecognizer:self.supporterOnlyDismissTapGesture];
+        self.supporterOnlyDismissTapGesture = nil;
+    }
+}
+
+- (void)supporterOnlyDismissTapped:(UITapGestureRecognizer *)gesture
+{
+    if (gesture.state == UIGestureRecognizerStateEnded)
+        [self dismissSupporterOnlyHint];
+}
+
+- (void)showSupporterOnlyHint
+{
+    [self dismissSupporterOnlyHint];
+
+    DOCustomLiquidGlassView *hint = [self customGlassViewWithCornerRadius:15.0 tintAlpha:0.070];
+    hint.materialScale = 0.80;
+    hint.userInteractionEnabled = NO;
+    [hint reloadMaterial];
+    [self.view addSubview:hint];
+
+    UILabel *label = [[UILabel alloc] init];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = @"Supporter Only";
+    label.textColor = UIColor.whiteColor;
+    label.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    label.textAlignment = NSTextAlignmentCenter;
+    [hint.contentView addSubview:label];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [hint.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [hint.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [hint.widthAnchor constraintGreaterThanOrEqualToConstant:150.0],
+        [hint.heightAnchor constraintEqualToConstant:46.0],
+        [label.leadingAnchor constraintEqualToAnchor:hint.contentView.leadingAnchor constant:18.0],
+        [label.trailingAnchor constraintEqualToAnchor:hint.contentView.trailingAnchor constant:-18.0],
+        [label.centerYAnchor constraintEqualToAnchor:hint.contentView.centerYAnchor],
+    ]];
+
+    self.supporterOnlyHintView = hint;
+    UITapGestureRecognizer *dismissTap =
+        [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(supporterOnlyDismissTapped:)];
+    dismissTap.cancelsTouchesInView = NO;
+    [self.view addGestureRecognizer:dismissTap];
+    self.supporterOnlyDismissTapGesture = dismissTap;
 }
 
 - (void)presentCustomGlassAvatarPicker
@@ -1751,6 +1837,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                                              selector:@selector(customGlassThemeDidChange:)
                                                  name:DOCustomGlassThemeDidChangeNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(supporterLicenseDidChange:)
+                                                 name:DORHSupporterLicenseDidChangeNotification
+                                               object:nil];
 
     // Shared wallpaper/blur lives below the navigation transition container.
     // Home only owns foreground content and Glass surfaces.
@@ -1936,6 +2026,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     systemLabel.textAlignment = NSTextAlignmentCenter;
     systemLabel.font = [UIFont systemFontOfSize:systemFontSize weight:UIFontWeightMedium];
     [profileView addSubview:systemLabel];
+    self.customGlassSystemLabel = systemLabel;
 
     UILabel *mottoLabel = [[UILabel alloc] init];
     mottoLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -2018,16 +2109,23 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [leftColumn addArrangedSubview:creditsCard];
 
     UIAction *themeAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        if (!DORHSupporterIsVerified()) {
+            [self showSupporterOnlyHint];
+            return;
+        }
+
         DOCustomGlassThemeSettingsViewController *themeSettingsController =
             [[DOCustomGlassThemeSettingsViewController alloc] init];
         [themeSettingsController prepareForPresentation];
         [self.navigationController pushViewController:themeSettingsController animated:YES];
     }];
     DOCustomLiquidGlassView *themeCard = [self customGlassCardWithTitle:@"主题设置" imageName:@"slider.horizontal.3" action:themeAction];
+    self.customGlassThemeCard = themeCard;
     themeCard.preferredCornerRadius = themeCardHeight / 2.0;
     themeCard.layer.cornerRadius = themeCard.preferredCornerRadius;
     [rightColumn addArrangedSubview:themeCard];
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
+    [self refreshSupporterState];
 
     DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.028];
     // Visible grouping shell: keep a clear total frame around the three restart
@@ -2203,6 +2301,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     [super viewWillAppear:animated];
     [self applyCustomGlassHomeAppearance];
+    [self refreshSupporterState];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
 }
 
@@ -2210,6 +2309,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:DOCustomGlassThemeDidChangeNotification
+                                                  object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:DORHSupporterLicenseDidChangeNotification
                                                   object:nil];
 }
 
