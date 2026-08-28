@@ -1409,8 +1409,32 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                             style:UIAlertActionStyleDefault
+                                           handler:nil]];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [self presentViewController:alert animated:YES completion:nil];
+    });
+}
+
+- (void)showSupporterLicenseChangeWithTitle:(NSString *)title message:(NSString *)message
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Apply Now"
+                                             style:UIAlertActionStyleDefault
+                                           handler:^(__kindof UIAlertAction * _Nonnull action) {
+        [DOSceneDelegate relaunch];
+    }]];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [self presentViewController:alert animated:YES completion:nil];
+    });
 }
 
 - (void)supporterLicensePressed
@@ -1418,7 +1442,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     NSDictionary<NSString *, id> *info = DORHSupporterCurrentLicenseInfo();
     NSString *supporterID = [info[@"sid"] isKindOfClass:NSString.class] ? info[@"sid"] : nil;
     NSString *status = supporterID.length > 0
-        ? [NSString stringWithFormat:@"Verified · #%@", supporterID]
+        ? @"Verified"
         : @"Not Activated";
     NSString *deviceCode = DORHSupporterDeviceCode();
     NSString *message = [NSString stringWithFormat:@"%@\n\nDevice Code\n%@",
@@ -1445,11 +1469,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         NSString *licenseCode = UIPasteboard.generalPasteboard.string ?: @"";
         NSError *error = nil;
         if (DORHSupporterStoreLicenseCode(licenseCode, &error)) {
-            NSString *verifiedID = DORHSupporterCurrentID() ?: @"";
-            NSString *verifiedMessage = verifiedID.length > 0
-                ? [NSString stringWithFormat:@"Supporter #%@", verifiedID]
-                : @"Supporter verified";
-            [weakSelf showSupporterLicenseResultWithTitle:@"Verified" message:verifiedMessage];
+            [weakSelf showSupporterLicenseChangeWithTitle:@"Supporter Activated"
+                                                  message:@"Your supporter license has been saved. Apply the Supporter interface now."];
         }
         else {
             [weakSelf showSupporterLicenseResultWithTitle:@"Invalid License"
@@ -1462,6 +1483,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                                   style:UIAlertActionStyleDestructive
                                                 handler:^(__kindof UIAlertAction * _Nonnull action) {
             DORHSupporterRemoveLicense();
+            [weakSelf showSupporterLicenseChangeWithTitle:@"Supporter Removed"
+                                                  message:@"Your supporter license has been removed. Restore the standard interface now."];
         }]];
     }
 
