@@ -37,7 +37,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)reloadMaterial;
 @end
 
-@interface DORootHideHealthViewController : UITableViewController
+@interface DORootHideHealthViewController : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@property(nonatomic, strong) UITableView *tableView;
+@property(nonatomic, strong) DOCustomLiquidGlassView *sectionGlassView;
+@property(nonatomic, strong) UIButton *backButton;
+@property(nonatomic, strong) UIButton *refreshButton;
 @property(nonatomic, copy) NSArray<NSDictionary<NSString *, id> *> *healthReport;
 @property(nonatomic, assign) BOOL refreshInProgress;
 @property(nonatomic, assign) BOOL repairInProgress;
@@ -47,35 +51,194 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (instancetype)init
 {
-    return [super initWithStyle:UITableViewStyleGrouped];
+    return [super initWithNibName:nil bundle:nil];
+}
+
+- (UIColor *)healthForegroundWithAlpha:(CGFloat)alpha
+{
+    return [UIColor.labelColor colorWithAlphaComponent:alpha];
+}
+
+- (UIButton *)healthChromeButtonWithSystemImage:(NSString *)systemImage action:(SEL)action
+{
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.backgroundColor = UIColor.clearColor;
+    button.tintColor = [self healthForegroundWithAlpha:0.96];
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:22.0 weight:UIImageSymbolWeightMedium];
+    [button setImage:[UIImage systemImageNamed:systemImage withConfiguration:configuration]
+             forState:UIControlStateNormal];
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
 }
 
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+
     self.title = @"RootHide Health";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh
-                                                                                         target:self
-                                                                                         action:@selector(refreshHealth)];
-    self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 56.0;
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.view.backgroundColor = UIColor.clearColor;
+
+    UITableView *tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
+    tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    tableView.dataSource = self;
+    tableView.delegate = self;
+    tableView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    tableView.backgroundColor = UIColor.clearColor;
+    tableView.opaque = NO;
+    tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    tableView.separatorColor = UIColor.clearColor;
+    tableView.backgroundView = nil;
+    tableView.rowHeight = UITableViewAutomaticDimension;
+    tableView.estimatedRowHeight = 56.0;
+    tableView.contentInset = UIEdgeInsetsMake(58.0, 0.0, 0.0, 0.0);
+    tableView.scrollIndicatorInsets = tableView.contentInset;
+    self.tableView = tableView;
+    [self.view addSubview:tableView];
+
+    self.backButton = [self healthChromeButtonWithSystemImage:@"chevron.left" action:@selector(backPressed)];
+    [self.view addSubview:self.backButton];
+
+    self.refreshButton = [self healthChromeButtonWithSystemImage:@"arrow.clockwise" action:@selector(refreshHealth)];
+    [self.view addSubview:self.refreshButton];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        [self.backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:10.0],
+        [self.backButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6.0],
+        [self.backButton.widthAnchor constraintEqualToConstant:44.0],
+        [self.backButton.heightAnchor constraintEqualToConstant:44.0],
+
+        [self.refreshButton.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-10.0],
+        [self.refreshButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6.0],
+        [self.refreshButton.widthAnchor constraintEqualToConstant:44.0],
+        [self.refreshButton.heightAnchor constraintEqualToConstant:44.0],
+    ]];
+
+    DOCustomLiquidGlassView *glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:18.0 baseTintAlpha:0.038];
+    glass.userInteractionEnabled = NO;
+    glass.materialScale = 0.88;
+    glass.preferredCornerRadius = 18.0;
+    glass.layer.cornerRadius = 18.0;
+    glass.layer.maskedCorners =
+        kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+        kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    self.sectionGlassView = glass;
+    [tableView insertSubview:glass atIndex:0];
+
+    UIScreenEdgePanGestureRecognizer *edgeGesture =
+        [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(edgeBackGesture:)];
+    edgeGesture.edges = UIRectEdgeLeft;
+    [self.view addGestureRecognizer:edgeGesture];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(healthThemeDidChange:)
+                                                 name:DOCustomGlassSettingsDidChangeNotification
+                                               object:nil];
+
     [self refreshHealth];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self refreshGlassAppearance];
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    [self refreshGlassAppearance];
+}
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:DOCustomGlassSettingsDidChangeNotification
+                                                  object:nil];
+}
+
+- (void)healthThemeDidChange:(NSNotification *)notification
+{
+    if (![NSThread isMainThread]) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf healthThemeDidChange:notification];
+        });
+        return;
+    }
+    [self refreshGlassAppearance];
+}
+
+- (void)backPressed
+{
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)edgeBackGesture:(UIScreenEdgePanGestureRecognizer *)gesture
+{
+    if (gesture.state != UIGestureRecognizerStateEnded)
+        return;
+
+    CGPoint translation = [gesture translationInView:self.view];
+    CGPoint velocity = [gesture velocityInView:self.view];
+    if (translation.x > 60.0 && velocity.x > 80.0)
+        [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)refreshGlassAppearance
+{
+    self.backButton.tintColor = [self healthForegroundWithAlpha:0.96];
+    self.refreshButton.tintColor = [self healthForegroundWithAlpha:0.96];
+
+    NSInteger rowCount = [self.tableView numberOfRowsInSection:0];
+    if (rowCount <= 0) {
+        self.sectionGlassView.hidden = YES;
+        return;
+    }
+
+    NSIndexPath *firstIndexPath = [NSIndexPath indexPathForRow:0 inSection:0];
+    NSIndexPath *lastIndexPath = [NSIndexPath indexPathForRow:rowCount - 1 inSection:0];
+    CGRect firstRect = [self.tableView rectForRowAtIndexPath:firstIndexPath];
+    CGRect lastRect = [self.tableView rectForRowAtIndexPath:lastIndexPath];
+    CGRect sectionRect = CGRectUnion(firstRect, lastRect);
+    if (CGRectIsEmpty(sectionRect) || CGRectGetHeight(sectionRect) < 2.0) {
+        self.sectionGlassView.hidden = YES;
+        return;
+    }
+
+    self.sectionGlassView.hidden = NO;
+    self.sectionGlassView.frame = CGRectInset(sectionRect, 1.0, 0.5);
+    [self.sectionGlassView reloadMaterial];
+    [self.tableView sendSubviewToBack:self.sectionGlassView];
 }
 
 - (void)refreshHealth
 {
     if (self.refreshInProgress || self.repairInProgress) return;
     self.refreshInProgress = YES;
-    self.navigationItem.rightBarButtonItem.enabled = NO;
+    self.refreshButton.enabled = NO;
+    self.refreshButton.alpha = 0.45;
     [self.tableView reloadData];
+    [self refreshGlassAppearance];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSArray<NSDictionary<NSString *, id> *> *report = [[DOEnvironmentManager sharedManager] rootHideHealthReport];
         dispatch_async(dispatch_get_main_queue(), ^{
             self.healthReport = report ?: @[];
             self.refreshInProgress = NO;
-            self.navigationItem.rightBarButtonItem.enabled = YES;
+            self.refreshButton.enabled = YES;
+            self.refreshButton.alpha = 1.0;
             [self.tableView reloadData];
+            [self.tableView layoutIfNeeded];
+            [self refreshGlassAppearance];
         });
     });
 }
@@ -96,14 +259,37 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     return @"Bootstrap and Injection are detection-only. Repair is offered only where RootHide already has a bounded repair primitive.";
 }
 
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section
+{
+    view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    if ([view isKindOfClass:[UITableViewHeaderFooterView class]]) {
+        UILabel *label = ((UITableViewHeaderFooterView *)view).textLabel;
+        label.textColor = [self healthForegroundWithAlpha:0.68];
+    }
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     static NSString * const CellIdentifier = @"RootHideHealthCell";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:CellIdentifier];
 
+    cell.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    cell.contentView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    cell.backgroundColor = UIColor.clearColor;
+    cell.contentView.backgroundColor = UIColor.clearColor;
+    cell.backgroundView = nil;
+
+    UIView *selected = cell.selectedBackgroundView;
+    if (!selected) {
+        selected = [[UIView alloc] initWithFrame:CGRectZero];
+        cell.selectedBackgroundView = selected;
+    }
+    selected.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.050];
+
     if (!self.healthReport.count && self.refreshInProgress) {
         cell.textLabel.text = @"Checking RootHide Health…";
+        cell.textLabel.textColor = [self healthForegroundWithAlpha:0.96];
         cell.detailTextLabel.text = nil;
         cell.accessoryType = UITableViewCellAccessoryNone;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -116,6 +302,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     BOOL repairable = [entry[@"Repairable"] boolValue];
 
     cell.textLabel.text = entry[@"DisplayName"] ?: @"RootHide Health";
+    cell.textLabel.textColor = [self healthForegroundWithAlpha:0.96];
     cell.detailTextLabel.text = stateName;
     cell.detailTextLabel.numberOfLines = 1;
     if (@available(iOS 13.0, *)) {
@@ -159,7 +346,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     if (![kind isEqualToString:@"JailbreakApps"] && ![kind isEqualToString:@"PackageManager"]) return;
 
     self.repairInProgress = YES;
-    self.navigationItem.rightBarButtonItem.enabled = NO;
+    self.refreshButton.enabled = NO;
+    self.refreshButton.alpha = 0.45;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *repairError = nil;
@@ -172,7 +360,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
         dispatch_async(dispatch_get_main_queue(), ^{
             self.repairInProgress = NO;
-            self.navigationItem.rightBarButtonItem.enabled = YES;
+            self.refreshButton.enabled = YES;
+            self.refreshButton.alpha = 1.0;
 
             NSString *title = repairError ? @"RootHide Health Repair Failed" : @"Repair Complete";
             NSString *message = repairError.localizedDescription ?: @"The selected RootHide component is healthy.";
