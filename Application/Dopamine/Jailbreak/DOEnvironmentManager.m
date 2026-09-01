@@ -1046,7 +1046,7 @@ static NSDictionary<NSString *, id> *DORootHideHealthEntry(NSString *kind,
             [self runUnsandboxed:^{
                 reinstallable = DOPackageManagerBundleInvalidIsReinstallable(displayName, bundleIdentifier);
             }];
-            repairable = reinstallable;
+            repairable = selected && reinstallable;
         }
         entry[@"Kind"] = @"PackageManager";
         entry[@"Healthy"] = @(healthy);
@@ -1146,8 +1146,10 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSString *displayName, 
             }
         }
 
-        if (state == DOPackageManagerHealthStateAppMissing && ![entry[@"Selected"] boolValue]) {
-            return DOPackageManagerRepairError(EPERM, [NSString stringWithFormat:@"%@ is not selected; refusing to install it automatically.", displayName]);
+        if ((state == DOPackageManagerHealthStateAppMissing ||
+             state == DOPackageManagerHealthStateBundleInvalid) &&
+            ![entry[@"Selected"] boolValue]) {
+            return DOPackageManagerRepairError(EPERM, [NSString stringWithFormat:@"%@ is not selected; refusing to reinstall it automatically.", displayName]);
         }
 
         if (state == DOPackageManagerHealthStateAppMissing || state == DOPackageManagerHealthStateBundleInvalid) {
@@ -1271,15 +1273,21 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSString *displayName, 
         if (registrationError) return registrationError;
     }
 
+    BOOL targetVerified = !targetBundleIdentifier.length;
     for (NSDictionary<NSString *, id> *entry in [self packageManagerHealthReport]) {
         NSString *bundleIdentifier = entry[@"BundleIdentifier"];
         if (targetBundleIdentifier.length && ![bundleIdentifier isEqualToString:targetBundleIdentifier]) continue;
+        if (targetBundleIdentifier.length) targetVerified = YES;
         if (selectedOnly && ![entry[@"Selected"] boolValue]) continue;
         if ([entry[@"State"] unsignedIntegerValue] != DOPackageManagerHealthStateHealthy) {
             NSString *displayName = entry[@"DisplayName"] ?: entry[@"BundleIdentifier"] ?: @"Package Manager";
             NSString *detail = entry[@"Detail"] ?: entry[@"StateName"] ?: @"Unknown state";
             return DOPackageManagerRepairError(EIO, [NSString stringWithFormat:@"%@ is still unhealthy after repair: %@", displayName, detail]);
         }
+    }
+
+    if (!targetVerified) {
+        return DOPackageManagerRepairError(ENOENT, [NSString stringWithFormat:@"Unable to verify package manager %@ after repair.", targetBundleIdentifier]);
     }
 
     return nil;
