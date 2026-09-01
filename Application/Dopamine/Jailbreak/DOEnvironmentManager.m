@@ -811,8 +811,17 @@ static NSString *DOPackageManagerHealthStateName(DOPackageManagerHealthState sta
             NSString *applicationPath = nil;
             NSString *registeredPath = nil;
             NSString *detail = nil;
+            NSString *knownApplicationPath = bundleIdentifier.length ? applicationPathsByIdentifier[bundleIdentifier] : nil;
+            NSString *namedApplicationPath = displayName.length ? [applicationsPath stringByAppendingPathComponent:[displayName stringByAppendingPathExtension:@"app"]] : nil;
+            BOOL namedApplicationExists = namedApplicationPath.length && [[NSFileManager defaultManager] fileExistsAtPath:namedApplicationPath];
+            BOOL packageManagerAppPresent = knownApplicationPath.length ||
+                                            namedApplicationExists ||
+                                            (bundleIdentifier.length && [duplicateIdentifiers containsObject:bundleIdentifier]);
 
-            if (selected) {
+            // Selection is a user preference, not a health gate. An unselected and
+            // genuinely absent package manager remains Not Selected; any installed
+            // package manager is inspected fully.
+            if (selected || !applicationNames || packageManagerAppPresent) {
                 NSString *userAppPath = DOUserApplicationPathForBundleIdentifier(bundleIdentifier);
                 if (userAppPath) {
                     state = DOPackageManagerHealthStateRegistrationConflict;
@@ -828,10 +837,8 @@ static NSString *DOPackageManagerHealthStateName(DOPackageManagerHealthState sta
                     detail = [NSString stringWithFormat:@"Multiple jailbreak applications use the bundle identifier %@.", bundleIdentifier];
                 }
                 else {
-                    applicationPath = applicationPathsByIdentifier[bundleIdentifier];
+                    applicationPath = knownApplicationPath;
                     if (!applicationPath) {
-                        NSString *namedApplicationPath = displayName.length ? [applicationsPath stringByAppendingPathComponent:[displayName stringByAppendingPathExtension:@"app"]] : nil;
-                        BOOL namedApplicationExists = namedApplicationPath.length && [[NSFileManager defaultManager] fileExistsAtPath:namedApplicationPath];
                         registeredPath = DORegisteredApplicationPath(bundleIdentifier);
 
                         // When the current jbroot app is missing, a live registration at some
@@ -892,6 +899,8 @@ static NSString *DOPackageManagerHealthStateName(DOPackageManagerHealthState sta
 
     return healthReport.copy;
 }
+
+static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSString *displayName, NSString *bundleIdentifier);
 
 static NSDictionary<NSString *, id> *DORootHideHealthEntry(NSString *kind,
                                                               NSString *displayName,
@@ -1021,10 +1030,24 @@ static NSDictionary<NSString *, id> *DORootHideHealthEntry(NSString *kind,
         DOPackageManagerHealthState state = [entry[@"State"] unsignedIntegerValue];
         BOOL selected = [entry[@"Selected"] boolValue];
         BOOL healthy = state == DOPackageManagerHealthStateHealthy || state == DOPackageManagerHealthStateNotSelected;
-        BOOL repairable = selected && (state == DOPackageManagerHealthStateAppMissing ||
-                                       state == DOPackageManagerHealthStateBundleInvalid ||
-                                       state == DOPackageManagerHealthStateRegistrationMissing ||
-                                       state == DOPackageManagerHealthStateRegistrationStale);
+        BOOL repairable = NO;
+        if (state == DOPackageManagerHealthStateRegistrationMissing ||
+            state == DOPackageManagerHealthStateRegistrationStale) {
+            repairable = [entry[@"ApplicationPath"] length] > 0;
+        }
+        else if (state == DOPackageManagerHealthStateAppMissing) {
+            // Never install a package manager the user did not select.
+            repairable = selected;
+        }
+        else if (state == DOPackageManagerHealthStateBundleInvalid) {
+            NSString *displayName = entry[@"DisplayName"];
+            NSString *bundleIdentifier = entry[@"BundleIdentifier"];
+            __block BOOL reinstallable = NO;
+            [self runUnsandboxed:^{
+                reinstallable = DOPackageManagerBundleInvalidIsReinstallable(displayName, bundleIdentifier);
+            }];
+            repairable = reinstallable;
+        }
         entry[@"Kind"] = @"PackageManager";
         entry[@"Healthy"] = @(healthy);
         entry[@"Repairable"] = @(repairable);
@@ -1047,10 +1070,8 @@ static NSError *DOPackageManagerRepairError(NSInteger code, NSString *descriptio
                            userInfo:@{NSLocalizedDescriptionKey : description ?: @"Package manager repair failed."}];
 }
 
-static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageManager)
+static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSString *displayName, NSString *bundleIdentifier)
 {
-    NSString *displayName = packageManager[@"Display Name"];
-    NSString *bundleIdentifier = packageManager[@"Key"];
     if (!displayName.length || !bundleIdentifier.length) return NO;
 
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1073,7 +1094,8 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageMa
     return ![infoDictionary[@"CFBundleIdentifier"] isEqualToString:bundleIdentifier];
 }
 
-- (NSError *)repairPackageManagers
+- (NSError *)repairPackageManagersMatchingBundleIdentifier:(NSString * _Nullable)targetBundleIdentifier
+                                               selectedOnly:(BOOL)selectedOnly
 {
     NSArray<NSDictionary<NSString *, id> *> *initialReport = [self packageManagerHealthReport];
     NSArray<NSDictionary *> *availablePackageManagers = [[DOUIManager sharedInstance] availablePackageManagers];
@@ -1083,15 +1105,26 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageMa
         if (bundleIdentifier.length) packageManagersByIdentifier[bundleIdentifier] = packageManager;
     }
 
+    if (targetBundleIdentifier.length && !packageManagersByIdentifier[targetBundleIdentifier]) {
+        return DOPackageManagerRepairError(ENOENT, [NSString stringWithFormat:@"Unknown package manager %@.", targetBundleIdentifier]);
+    }
+
     NSMutableArray<NSString *> *packageManagersToInstall = [NSMutableArray array];
     BOOL needsUICache = NO;
     for (NSDictionary<NSString *, id> *entry in initialReport) {
-        if (![entry[@"Selected"] boolValue]) continue;
-
         NSString *bundleIdentifier = entry[@"BundleIdentifier"];
+        if (targetBundleIdentifier.length && ![bundleIdentifier isEqualToString:targetBundleIdentifier]) continue;
+        if (selectedOnly && ![entry[@"Selected"] boolValue]) continue;
+
         NSString *displayName = entry[@"DisplayName"] ?: bundleIdentifier ?: @"Package Manager";
         DOPackageManagerHealthState state = [entry[@"State"] unsignedIntegerValue];
-        if (state == DOPackageManagerHealthStateHealthy || state == DOPackageManagerHealthStateNotSelected) continue;
+        if (state == DOPackageManagerHealthStateHealthy) continue;
+        if (state == DOPackageManagerHealthStateNotSelected) {
+            if (targetBundleIdentifier.length) {
+                return DOPackageManagerRepairError(EPERM, [NSString stringWithFormat:@"%@ is not selected and is not installed; refusing to install it automatically.", displayName]);
+            }
+            continue;
+        }
 
         NSDictionary *packageManager = packageManagersByIdentifier[bundleIdentifier];
         if (!packageManager) {
@@ -1106,11 +1139,15 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageMa
         if (state == DOPackageManagerHealthStateBundleInvalid) {
             __block BOOL reinstallable = NO;
             [self runUnsandboxed:^{
-                reinstallable = DOPackageManagerBundleInvalidIsReinstallable(packageManager);
+                reinstallable = DOPackageManagerBundleInvalidIsReinstallable(displayName, bundleIdentifier);
             }];
             if (!reinstallable) {
                 return DOPackageManagerRepairError(EEXIST, entry[@"Detail"] ?: [NSString stringWithFormat:@"%@ has an ambiguous jailbreak application layout that cannot be repaired safely.", displayName]);
             }
+        }
+
+        if (state == DOPackageManagerHealthStateAppMissing && ![entry[@"Selected"] boolValue]) {
+            return DOPackageManagerRepairError(EPERM, [NSString stringWithFormat:@"%@ is not selected; refusing to install it automatically.", displayName]);
         }
 
         if (state == DOPackageManagerHealthStateAppMissing || state == DOPackageManagerHealthStateBundleInvalid) {
@@ -1169,7 +1206,9 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageMa
     NSArray<NSDictionary<NSString *, id> *> *postInstallReport = [self packageManagerHealthReport];
     NSMutableArray<NSDictionary<NSString *, id> *> *registrationsToRepair = [NSMutableArray array];
     for (NSDictionary<NSString *, id> *entry in postInstallReport) {
-        if (![entry[@"Selected"] boolValue]) continue;
+        NSString *bundleIdentifier = entry[@"BundleIdentifier"];
+        if (targetBundleIdentifier.length && ![bundleIdentifier isEqualToString:targetBundleIdentifier]) continue;
+        if (selectedOnly && ![entry[@"Selected"] boolValue]) continue;
 
         DOPackageManagerHealthState state = [entry[@"State"] unsignedIntegerValue];
         if (state == DOPackageManagerHealthStateHealthy || state == DOPackageManagerHealthStateNotSelected) continue;
@@ -1233,7 +1272,9 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageMa
     }
 
     for (NSDictionary<NSString *, id> *entry in [self packageManagerHealthReport]) {
-        if (![entry[@"Selected"] boolValue]) continue;
+        NSString *bundleIdentifier = entry[@"BundleIdentifier"];
+        if (targetBundleIdentifier.length && ![bundleIdentifier isEqualToString:targetBundleIdentifier]) continue;
+        if (selectedOnly && ![entry[@"Selected"] boolValue]) continue;
         if ([entry[@"State"] unsignedIntegerValue] != DOPackageManagerHealthStateHealthy) {
             NSString *displayName = entry[@"DisplayName"] ?: entry[@"BundleIdentifier"] ?: @"Package Manager";
             NSString *detail = entry[@"Detail"] ?: entry[@"StateName"] ?: @"Unknown state";
@@ -1242,6 +1283,23 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSDictionary *packageMa
     }
 
     return nil;
+}
+
+- (NSError *)repairPackageManagers
+{
+    // Preserve the existing Picker / Settings batch semantics.
+    return [self repairPackageManagersMatchingBundleIdentifier:nil selectedOnly:YES];
+}
+
+- (NSError *)repairPackageManagerWithBundleIdentifier:(NSString *)bundleIdentifier
+{
+    if (!bundleIdentifier.length) {
+        return DOPackageManagerRepairError(EINVAL, @"Missing package manager bundle identifier.");
+    }
+
+    // Precise Health repair may fix an installed, unselected package manager,
+    // but App Missing is still blocked above unless the user selected it.
+    return [self repairPackageManagersMatchingBundleIdentifier:bundleIdentifier selectedOnly:NO];
 }
 
 - (void)unregisterJailbreakApps

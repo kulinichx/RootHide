@@ -356,7 +356,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             repairError = [[DOEnvironmentManager sharedManager] repairJailbreakApps];
         }
         else {
-            repairError = [[DOEnvironmentManager sharedManager] repairPackageManagers];
+            NSString *bundleIdentifier = entry[@"BundleIdentifier"];
+            repairError = [[DOEnvironmentManager sharedManager]
+                repairPackageManagerWithBundleIdentifier:bundleIdentifier];
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
