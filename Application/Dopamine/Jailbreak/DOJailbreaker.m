@@ -63,22 +63,63 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     JBErrorCodeFailedDuplicateApps           = -14,
 };
 
+static void rootHideWhitelistDiagLog(NSString *message)
+{
+    NSLog(@"%@", message);
+    [[DOUIManager sharedInstance] sendLog:message debug:NO];
+}
+
 static void initializeRootHideWhitelistDefaults(void)
 {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *rootHidePath = JBROOT_PATH(@"/var/mobile/Library/RootHide");
 
-    if (![fileManager fileExistsAtPath:rootHidePath]) {
+    rootHideWhitelistDiagLog(
+        [NSString stringWithFormat:@"P03D entry root %@", rootHidePath]);
+
+    BOOL rootHideExistsBefore = [fileManager fileExistsAtPath:rootHidePath];
+    if (!rootHideExistsBefore) {
         NSDictionary *directoryAttributes = @{
             NSFilePosixPermissions : @0755,
             NSFileOwnerAccountID : @501,
             NSFileGroupOwnerAccountID : @501,
         };
 
-        [fileManager createDirectoryAtPath:rootHidePath
-              withIntermediateDirectories:YES
-                               attributes:directoryAttributes
-                                    error:nil];
+        NSError *directoryError = nil;
+        BOOL directoryCreated =
+            [fileManager createDirectoryAtPath:rootHidePath
+                   withIntermediateDirectories:YES
+                                    attributes:directoryAttributes
+                                         error:&directoryError];
+
+        rootHideWhitelistDiagLog(
+            [NSString stringWithFormat:@"P03D mkdir %d error %@",
+                                       directoryCreated,
+                                       directoryError]);
+    }
+
+    BOOL rootHideExistsAfter = [fileManager fileExistsAtPath:rootHidePath];
+    rootHideWhitelistDiagLog(
+        [NSString stringWithFormat:@"P03D dir before %d after %d",
+                                   rootHideExistsBefore,
+                                   rootHideExistsAfter]);
+
+    NSString *probePath =
+        [rootHidePath stringByAppendingPathComponent:@".rc8_p03_diag_probe"];
+    NSError *probeError = nil;
+    BOOL probeWriteOK =
+        [@"P03D" writeToFile:probePath
+                  atomically:YES
+                    encoding:NSUTF8StringEncoding
+                       error:&probeError];
+    BOOL probeExists = [fileManager fileExistsAtPath:probePath];
+    rootHideWhitelistDiagLog(
+        [NSString stringWithFormat:@"P03D probe write %d exists %d error %@",
+                                   probeWriteOK,
+                                   probeExists,
+                                   probeError]);
+    if (probeExists) {
+        [fileManager removeItemAtPath:probePath error:nil];
     }
 
     NSDictionary *fileAttributes = @{
@@ -90,7 +131,13 @@ static void initializeRootHideWhitelistDefaults(void)
     NSString *systemInjectPath =
         [rootHidePath stringByAppendingPathComponent:@"cn.zqbb.inject.system.plist"];
 
-    if (![fileManager fileExistsAtPath:systemInjectPath]) {
+    BOOL systemExistsBefore = [fileManager fileExistsAtPath:systemInjectPath];
+    rootHideWhitelistDiagLog(
+        [NSString stringWithFormat:@"P03D system before %d path %@",
+                                   systemExistsBefore,
+                                   systemInjectPath]);
+
+    if (!systemExistsBefore) {
         NSMutableDictionary *defaultWhitelist = [NSMutableDictionary dictionary];
         NSArray *defaultItems = @[
             @"/.jbroot",
@@ -116,7 +163,15 @@ static void initializeRootHideWhitelistDefaults(void)
             }
         }
 
-        if ([defaultWhitelist writeToFile:systemInjectPath atomically:YES]) {
+        BOOL systemWriteOK =
+            [defaultWhitelist writeToFile:systemInjectPath atomically:YES];
+        BOOL systemExistsAfter = [fileManager fileExistsAtPath:systemInjectPath];
+        rootHideWhitelistDiagLog(
+            [NSString stringWithFormat:@"P03D system write %d after %d",
+                                       systemWriteOK,
+                                       systemExistsAfter]);
+
+        if (systemWriteOK) {
             [fileManager setAttributes:fileAttributes
                           ofItemAtPath:systemInjectPath
                                  error:nil];
@@ -126,7 +181,14 @@ static void initializeRootHideWhitelistDefaults(void)
     NSString *wantsBlacklistPath =
         [rootHidePath stringByAppendingPathComponent:@"cn.zqbb.inject.wantsblacklist.plist"];
 
-    if (![fileManager fileExistsAtPath:wantsBlacklistPath]) {
+    BOOL wantsBlacklistExistsBefore =
+        [fileManager fileExistsAtPath:wantsBlacklistPath];
+    rootHideWhitelistDiagLog(
+        [NSString stringWithFormat:@"P03D wants before %d path %@",
+                                   wantsBlacklistExistsBefore,
+                                   wantsBlacklistPath]);
+
+    if (!wantsBlacklistExistsBefore) {
         NSMutableDictionary *defaultWantsBlacklist = [NSMutableDictionary dictionary];
         NSArray *defaultItems = @[
             @"QQ",
@@ -141,12 +203,23 @@ static void initializeRootHideWhitelistDefaults(void)
             }
         }
 
-        if ([defaultWantsBlacklist writeToFile:wantsBlacklistPath atomically:YES]) {
+        BOOL wantsBlacklistWriteOK =
+            [defaultWantsBlacklist writeToFile:wantsBlacklistPath atomically:YES];
+        BOOL wantsBlacklistExistsAfter =
+            [fileManager fileExistsAtPath:wantsBlacklistPath];
+        rootHideWhitelistDiagLog(
+            [NSString stringWithFormat:@"P03D wants write %d after %d",
+                                       wantsBlacklistWriteOK,
+                                       wantsBlacklistExistsAfter]);
+
+        if (wantsBlacklistWriteOK) {
             [fileManager setAttributes:fileAttributes
                           ofItemAtPath:wantsBlacklistPath
                                  error:nil];
         }
     }
+
+    rootHideWhitelistDiagLog(@"P03D exit");
 
     // Do not create cn.zqbb.inject.plist here.
     // Its existence switches the backend into Whitelist Mode.
