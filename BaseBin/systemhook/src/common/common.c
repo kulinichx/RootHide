@@ -19,6 +19,7 @@
 #include <libkern/OSCacheControl.h>
 #include <os/log.h>
 #include <os/lock.h>
+#include "../_zqbb.h"
 
 // RootHide dynamic policy lives in domain 6; jbclient_roothide.c is linked into systemhook.
 extern bool jbclient_blacklist_check_path(const char *path);
@@ -202,6 +203,19 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 		if (userBlacklisted) {
 			return kSpawnConfigTrust;
 		}
+	}
+
+	// RC8 whitelist mode: preserve RC7 Health v2 policy above, then apply donor whitelist policy.
+	const char *injectPath = JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.plist");
+	if (access(injectPath, F_OK) == 0) {
+		const char *exec = strrchr(path, '/');
+		if (exec && zqbb_wantInject(exec + 1, injectPath)) {
+			return (kSpawnConfigInject | kSpawnConfigTrust);
+		}
+		if (zqbb_isWhiteList(path)) {
+			return (kSpawnConfigInject | kSpawnConfigTrust);
+		}
+		return 0;
 	}
 
 	return (kSpawnConfigInject | kSpawnConfigTrust);

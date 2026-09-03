@@ -14,6 +14,7 @@
 #include "private.h"
 #include <libjailbreak/jbclient_xpc.h>
 #include <libjailbreak/jbserver_domains.h>
+#include "_zqbb.h"
 
 bool string_has_prefix(const char *str, const char* prefix)
 {
@@ -86,6 +87,19 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 	for (size_t i = 0; i < blacklistCount; i++)
 	{
 		if (!strcmp(processBlacklist[i], path)) return 0;
+	}
+
+	// RC8 whitelist mode: preserve RC7 policy above, then apply donor whitelist policy.
+	const char *injectPath = JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.plist");
+	if (access(injectPath, F_OK) == 0) {
+		const char *exec = strrchr(path, '/');
+		if (exec && zqbb_wantInject(exec + 1, injectPath)) {
+			return (kSpawnConfigInject | kSpawnConfigTrust);
+		}
+		if (zqbb_isWhiteList(path)) {
+			return (kSpawnConfigInject | kSpawnConfigTrust);
+		}
+		return 0;
 	}
 
 	return (kSpawnConfigInject | kSpawnConfigTrust);
