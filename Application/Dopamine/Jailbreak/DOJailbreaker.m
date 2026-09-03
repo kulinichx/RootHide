@@ -63,6 +63,95 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     JBErrorCodeFailedDuplicateApps           = -14,
 };
 
+static void initializeRootHideWhitelistDefaults(void)
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *rootHidePath = JBROOT_PATH(@"/var/mobile/Library/RootHide");
+
+    if (![fileManager fileExistsAtPath:rootHidePath]) {
+        NSDictionary *directoryAttributes = @{
+            NSFilePosixPermissions : @0755,
+            NSFileOwnerAccountID : @501,
+            NSFileGroupOwnerAccountID : @501,
+        };
+
+        [fileManager createDirectoryAtPath:rootHidePath
+              withIntermediateDirectories:YES
+                               attributes:directoryAttributes
+                                    error:nil];
+    }
+
+    NSDictionary *fileAttributes = @{
+        NSFilePosixPermissions : @0644,
+        NSFileOwnerAccountID : @501,
+        NSFileGroupOwnerAccountID : @501,
+    };
+
+    NSString *systemInjectPath =
+        [rootHidePath stringByAppendingPathComponent:@"cn.zqbb.inject.system.plist"];
+
+    if (![fileManager fileExistsAtPath:systemInjectPath]) {
+        NSMutableDictionary *defaultWhitelist = [NSMutableDictionary dictionary];
+        NSArray *defaultItems = @[
+            @"/.jbroot",
+            @"/xpcproxy",
+            @"/Dopamine",
+            @"/SpringBoard",
+            @"/Preferences",
+            @"/amfid",
+            @"/cfprefsd",
+            @"/lsd",
+            @"/transitd",
+            @"/watchdogd",
+            @"/SafariViewService",
+            @"/iconservicesagent",
+            @"/mobileassetd",
+            @"/MobileGestaltHelper",
+            @"/useractivityd",
+        ];
+
+        for (NSString *item in defaultItems) {
+            if ([item isKindOfClass:[NSString class]] && item.length > 0) {
+                defaultWhitelist[item] = @YES;
+            }
+        }
+
+        if ([defaultWhitelist writeToFile:systemInjectPath atomically:YES]) {
+            [fileManager setAttributes:fileAttributes
+                          ofItemAtPath:systemInjectPath
+                                 error:nil];
+        }
+    }
+
+    NSString *wantsBlacklistPath =
+        [rootHidePath stringByAppendingPathComponent:@"cn.zqbb.inject.wantsblacklist.plist"];
+
+    if (![fileManager fileExistsAtPath:wantsBlacklistPath]) {
+        NSMutableDictionary *defaultWantsBlacklist = [NSMutableDictionary dictionary];
+        NSArray *defaultItems = @[
+            @"QQ",
+            @"WeChat",
+            @"Runner",
+            @"AppStore",
+        ];
+
+        for (NSString *item in defaultItems) {
+            if ([item isKindOfClass:[NSString class]] && item.length > 0) {
+                defaultWantsBlacklist[item] = @YES;
+            }
+        }
+
+        if ([defaultWantsBlacklist writeToFile:wantsBlacklistPath atomically:YES]) {
+            [fileManager setAttributes:fileAttributes
+                          ofItemAtPath:wantsBlacklistPath
+                                 error:nil];
+        }
+    }
+
+    // Do not create cn.zqbb.inject.plist here.
+    // Its existence switches the backend into Whitelist Mode.
+}
+
 @implementation DOJailbreaker
 
 - (NSError *)gatherSystemInformation
@@ -739,6 +828,8 @@ setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
     
     // Unsandbox iconservicesagent so that app icons can work
     exec_cmd_trusted(JBROOT_PATH("/usr/bin/killall"), "-9", "iconservicesagent", NULL);
+
+    initializeRootHideWhitelistDefaults();
     
     *errOut = [self finalizeBootstrapIfNeeded];
     if (*errOut) {
