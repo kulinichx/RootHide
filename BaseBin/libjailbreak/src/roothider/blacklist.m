@@ -7,6 +7,9 @@
 #define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
 #define NULL_UUID "00000000-0000-0000-0000-000000000000"
 
+static const char *injectPlistPath = NULL;
+static const char *injectSystemPlistPath = NULL;
+
 NSString *getAppBundlePathFromSpawnPath(const char *path) {
     if (!path) return nil;
 
@@ -79,10 +82,59 @@ bool isBlacklistedApp(const char* identifier)
     return blacklisted.boolValue;
 }
 
-bool isBlacklistedPath(const char* path)
+static bool isBlacklistedPath_orig(const char* path)
 {
     if(!path) return false;
     NSString* identifier = getAppIdentifierFromPath(path);
     if(!identifier) return false;
     return isBlacklistedApp(identifier.UTF8String);
+}
+
+bool zqbb_wantsInject(const char *execName, const char *injectPath);
+
+static BOOL zqbb_wantsBlacklist(NSString *execName)
+{
+    if(!execName) return NO;
+
+    NSString* configFilePath = JBROOT_PATH(@"/var/mobile/Library/RootHide/cn.zqbb.inject.wantsblacklist.plist");
+    NSDictionary* wantsBlacklistConfig = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
+    if(!wantsBlacklistConfig) return NO;
+
+    return [wantsBlacklistConfig[execName] boolValue];
+}
+
+static bool zqbb_isBlacklistedExec(const char *path, const char *injectPath)
+{
+    const char *exec = strrchr(path, '/');
+    if(!exec) return true;
+    exec++;
+
+    if(zqbb_wantsBlacklist([NSString stringWithUTF8String:exec])) {
+        if(isBlacklistedPath_orig(path)) return true;
+    }
+
+    if(zqbb_wantsInject(exec, injectPath))
+        return false;
+
+    return true;
+}
+
+bool zqbb_isWhiteListForSystem(const char *path, const char *injectSystemPath);
+
+bool isBlacklistedPath(const char* path)
+{
+    if(!path) return false;
+
+    if(!injectPlistPath)
+        injectPlistPath = strdup(JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.plist"));
+    if(!injectSystemPlistPath)
+        injectSystemPlistPath = strdup(JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.system.plist"));
+
+    if(access(injectPlistPath, F_OK) == 0) {
+        if(!strcmp(path, "/sbin/launchd")) return false;
+        if(zqbb_isWhiteListForSystem(path, injectSystemPlistPath)) return false;
+        return zqbb_isBlacklistedExec(path, injectPlistPath);
+    }
+
+    return isBlacklistedPath_orig(path);
 }
