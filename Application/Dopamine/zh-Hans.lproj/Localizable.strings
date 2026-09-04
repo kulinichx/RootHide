@@ -134,6 +134,7 @@
 "Mount_Path_Invalid" = "路径必须是已存在的目录，且不能是文件系统根目录。";
 "Mount_No_Paths" = "当前没有已配置的挂载路径。";
 "Mount_Unmount_Keep_Copy" = "卸载并保留副本";
+"Mount_View_In_Filza" = "Filza 查看";
 "Mount_Unmount_Delete_Copy" = "卸载并删除副本";
 "Mount_Operation_Succeeded" = "挂载操作已成功完成。";
 "Mount_Operation_Failed" = "挂载操作失败，错误码：%d。";
