@@ -50,7 +50,7 @@
 "Target" = "目标";
 "Source" = "来源";
 "Trust This Mount" = "信任此挂载";
-"Keep Warning" = "保持警告";
+"Keep Warning" = "继续提示";
 
 /* VPN/Proxy Warning */
 "VPN/Proxy Warning" = "VPN/代理警告";
