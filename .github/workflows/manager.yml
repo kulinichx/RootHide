@@ -1,0 +1,150 @@
+name: Build RootHide Manager
+
+on:
+  push:
+    branches:
+      - rc7v3-bindtrust
+    paths:
+      - 'Makefile'
+      - 'control'
+      - 'RootHide/**'
+      - 'RootHide.xcodeproj/**'
+      - 'entitlements.plist'
+      - 'nickchan.entitlements'
+      - 'layout/**'
+      - '.github/workflows/manager.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: root-hide-manager-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+  THEOS_COMMIT: 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
+  IOS_SDK_VERSION: "16.5"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "15.4"
+
+      - name: Install Procursus tools
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid findutils sed coreutils
+
+      - name: Install host dependencies
+        run: |
+          set -euo pipefail
+          brew install make xz
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Cache Theos
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.THEOS }}
+          key: manager-theos-${{ runner.os }}-${{ runner.arch }}-${{ env.THEOS_COMMIT }}-sdk${{ env.IOS_SDK_VERSION }}
+
+      - name: Install Theos and iOS SDK
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+
+          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          git -C "$THEOS" checkout --detach "$THEOS_COMMIT"
+          git -C "$THEOS" submodule update --init --recursive
+
+          mkdir -p "$THEOS/sdks"
+          sdk_archive="$RUNNER_TEMP/iPhoneOS${IOS_SDK_VERSION}.sdk.tar.xz"
+
+          curl --fail --location --retry 3 \
+            "https://github.com/theos/sdks/releases/latest/download/iPhoneOS${IOS_SDK_VERSION}.sdk.tar.xz" \
+            --output "$sdk_archive"
+
+          tar -xJf "$sdk_archive" -C "$THEOS/sdks"
+
+      - name: Verify build environment
+        run: |
+          set -euo pipefail
+
+          xcodebuild -version
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "17.5"
+          test -d "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
+
+          command -v make
+          command -v ldid
+          make --version | head -n 1
+
+      - name: Build RootHide Manager package
+        run: |
+          set -euo pipefail
+
+          export CLANG_MODULE_CACHE_PATH="$RUNNER_TEMP/clang-module-cache"
+          mkdir -p "$CLANG_MODULE_CACHE_PATH"
+
+          make clean
+          make package
+
+      - name: Collect Manager package
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+          shopt -s nullglob
+
+          debs=(packages/*.deb)
+
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "Expected exactly one Manager .deb, found ${#debs[@]}" >&2
+            find packages -maxdepth 1 -type f -print || true
+            exit 1
+          fi
+
+          deb="${debs[0]}"
+          cp "$deb" artifacts/roothideapp.deb
+
+          {
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "ref=$GITHUB_REF"
+            echo "head=$(git rev-parse HEAD)"
+            echo "xcode_requested=15.4"
+            echo "theos_commit=$THEOS_COMMIT"
+            echo "theos_sdk=$IOS_SDK_VERSION"
+            grep -E '^(Package|Version|Architecture):' control
+            echo "source_deb=$deb"
+            echo
+            echo "sha256:"
+            shasum -a 256 "$deb"
+            shasum -a 256 artifacts/roothideapp.deb
+          } > artifacts/build-provenance.txt
+
+          cat artifacts/build-provenance.txt
+          file "$deb"
+          ls -lh packages artifacts
+
+      - name: Upload Manager artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: roothide-manager-${{ github.sha }}
+          path: |
+            artifacts/roothideapp.deb
+            artifacts/build-provenance.txt
+            packages/*.deb
+          if-no-files-found: error
+          retention-days: 14
