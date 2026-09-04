@@ -3,7 +3,7 @@ name: Build RootHide Manager
 on:
   push:
     branches:
-      - rc7v3-bindtrust
+      - 'ci-build-manager-*'
     paths:
       - 'Makefile'
       - 'control'
