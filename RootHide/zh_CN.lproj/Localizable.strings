@@ -43,3 +43,15 @@
 "restore failed: %@" = "还原失败: %@";
 "hide failed: %@" = "隐藏失败: %@";
 
+
+/* Trusted BindFS Mounts */
+"BindFS Mount Trust" = "BindFS 挂载信任";
+"Jailbreak Detection Warning" = "越狱检测警告";
+"Target" = "目标";
+"Source" = "来源";
+"Trust This Mount" = "信任此挂载";
+"Keep Warning" = "保持警告";
+
+/* VPN/Proxy Warning */
+"VPN/Proxy Warning" = "VPN/代理警告";
+"Don't Show VPN/Proxy Warning Again" = "不再提示 VPN/代理";

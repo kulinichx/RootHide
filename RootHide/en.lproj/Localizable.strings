@@ -43,3 +43,15 @@
 "restore failed: %@" = "restore failed: %@";
 "hide failed: %@" = "hide failed: %@";
 
+
+/* Trusted BindFS Mounts */
+"BindFS Mount Trust" = "BindFS Mount Trust";
+"Jailbreak Detection Warning" = "Jailbreak Detection Warning";
+"Target" = "Target";
+"Source" = "Source";
+"Trust This Mount" = "Trust This Mount";
+"Keep Warning" = "Keep Warning";
+
+/* VPN/Proxy Warning */
+"VPN/Proxy Warning" = "VPN/Proxy Warning";
+"Don't Show VPN/Proxy Warning Again" = "Don't Show VPN/Proxy Warning Again";

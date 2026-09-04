@@ -13,6 +13,9 @@
 #include <netinet/in.h>
 #include <IOKit/IOKitLib.h>
 
+static NSString * const RHTrustedBindMountsKey = @"TrustedBindMountsV1";
+static NSString * const RHIgnoreVPNProxyWarningKey = @"IgnoreVPNProxyWarningV1";
+
 @implementation AppDelegate
 
 + (id)getDefaultsForKey:(NSString*)key {
@@ -27,6 +30,135 @@
     if(!defaults) defaults = [[NSMutableDictionary alloc] init];
     [defaults setValue:value forKey:key];
     [defaults writeToFile:configFilePath atomically:YES];
+}
+
++ (BOOL)ignoreVPNProxyWarning {
+    NSNumber *ignore = [self getDefaultsForKey:RHIgnoreVPNProxyWarningKey];
+    return ignore.boolValue;
+}
+
++ (NSString *)normalizedBindMountSource:(NSString *)source {
+    if(source.length == 0) return @"";
+
+    NSString *jbPrefix = jbroot(@"/");
+    if(jbPrefix.length > 0 && [source hasPrefix:jbPrefix]) {
+        NSString *relative = [source substringFromIndex:jbPrefix.length];
+        while([relative hasPrefix:@"/"]) {
+            relative = [relative substringFromIndex:1];
+        }
+        return [@"jbroot:/" stringByAppendingString:relative];
+    }
+
+    NSRange marker = [source rangeOfString:@"/.jbroot-"];
+    if(marker.location != NSNotFound) {
+        NSUInteger searchStart = NSMaxRange(marker);
+        if(searchStart < source.length) {
+            NSRange remainder = NSMakeRange(searchStart, source.length - searchStart);
+            NSRange slash = [source rangeOfString:@"/" options:0 range:remainder];
+            if(slash.location != NSNotFound && NSMaxRange(slash) <= source.length) {
+                NSString *relative = [source substringFromIndex:NSMaxRange(slash)];
+                return [@"jbroot:/" stringByAppendingString:relative];
+            }
+        }
+    }
+
+    if([source hasPrefix:@"/.jbroot/"]) {
+        return [@"jbroot:/" stringByAppendingString:
+                [source substringFromIndex:[@"/.jbroot/" length]]];
+    }
+
+    if([source hasPrefix:@"/var/jb/"]) {
+        return [@"jbroot:/" stringByAppendingString:
+                [source substringFromIndex:[@"/var/jb/" length]]];
+    }
+
+    return source;
+}
+
++ (NSArray *)trustedBindMounts {
+    id stored = [self getDefaultsForKey:RHTrustedBindMountsKey];
+    if([stored isKindOfClass:[NSArray class]]) {
+        return stored;
+    }
+    return @[];
+}
+
++ (NSDictionary *)bindMountFingerprintForSource:(NSString *)source
+                                         target:(NSString *)target {
+    return @{
+        @"fstype" : @"bindfs",
+        @"source" : [self normalizedBindMountSource:(source ?: @"")],
+        @"target" : (target ?: @""),
+    };
+}
+
++ (BOOL)isTrustedBindMount:(NSDictionary *)fingerprint {
+    return [[self trustedBindMounts] containsObject:fingerprint];
+}
+
++ (void)trustBindMount:(NSDictionary *)fingerprint {
+    if(!fingerprint) return;
+
+    NSMutableArray *trusted = [[self trustedBindMounts] mutableCopy];
+
+    if(![trusted containsObject:fingerprint]) {
+        [trusted addObject:fingerprint];
+        [self setDefaults:trusted forKey:RHTrustedBindMountsKey];
+    }
+}
+
++ (void)showBindMountTrustPrompt:(NSDictionary *)fingerprint {
+    NSString *source = fingerprint[@"source"] ?: @"";
+    NSString *target = fingerprint[@"target"] ?: @"";
+
+    NSString *message = [NSString stringWithFormat:
+        @"%@\n\n%@:\n%@\n\n%@:\n%@",
+        Localized(@"Unknown Bindfs Mount(s)"),
+        Localized(@"Target"),
+        target,
+        Localized(@"Source"),
+        source];
+
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:
+            Localized(@"BindFS Mount Trust")
+                                            message:message
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:Localized(@"Trust This Mount")
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__unused UIAlertAction *action) {
+        [AppDelegate trustBindMount:fingerprint];
+    }]];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:Localized(@"Keep Warning")
+                                 style:UIAlertActionStyleCancel
+                               handler:nil]];
+
+    [self showAlert:alert];
+}
++ (void)showVPNProxyWarningPrompt {
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:
+            Localized(@"VPN/Proxy Warning")
+                                            message:Localized(@"Some apps may refuse to run because a VPN/Proxy is enabled.")
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:Localized(@"Don't Show VPN/Proxy Warning Again")
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__unused UIAlertAction *action) {
+        [AppDelegate setDefaults:@YES forKey:RHIgnoreVPNProxyWarningKey];
+    }]];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:Localized(@"Keep Warning")
+                                 style:UIAlertActionStyleCancel
+                               handler:nil]];
+
+    [self showAlert:alert];
 }
 
 + (void)showAlert:(UIAlertController*)alert {
@@ -243,29 +375,30 @@
         @"/System/Library/Pearl/ReferenceFrames",
         @"/System/Library/Caches/com.apple.factorydata",
     ];
-    
-    NSMutableArray* unknownBindMounts = [NSMutableArray new];
-    
+
     struct statfs * ss=NULL;
     int n = getmntinfo(&ss, 0); //MNT_NOWAIT);
     for(int i=0; i<n; i++) {
         if(strcmp(ss[i].f_fstypename,"bindfs")==0) {
-            if(![defaultBindMounts containsObject:@(ss[i].f_mntonname)]) {
-                [unknownBindMounts addObject:@(ss[i].f_mntonname)];
+            NSString *target = @(ss[i].f_mntonname);
+
+            if([defaultBindMounts containsObject:target]) {
+                continue;
             }
+
+            NSString *source = @(ss[i].f_mntfromname);
+
+            NSDictionary *fingerprint =
+                [AppDelegate bindMountFingerprintForSource:source
+                                                    target:target];
+
+            if([AppDelegate isTrustedBindMount:fingerprint]) {
+                continue;
+            }
+
+            [AppDelegate showBindMountTrustPrompt:fingerprint];
         }
     }
-    
-    if(unknownBindMounts.count > 0)
-    {
-        NSMutableArray* items = [NSMutableArray new];
-        for(NSString* mnt in unknownBindMounts) {
-            [items addObject:[NSString stringWithFormat:@"\n\"%@\"", mnt]];
-        }
-        
-        [AppDelegate showDetectionWarning:[NSString stringWithFormat:@"%@:\n%@\n",Localized(@"Unknown Bindfs Mount(s)"),[items componentsJoinedByString:@"\n"]]];
-    }
-    
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         
         int ports[] = { 22, 2222 };
@@ -326,8 +459,8 @@
     
     NSDictionary *proxySettings = (__bridge NSDictionary *)(CFNetworkCopySystemProxySettings());
     NSNumber* vpn = proxySettings[(NSString *)kCFNetworkProxiesHTTPEnable];
-    if(vpn && vpn.boolValue) {
-        [AppDelegate showDetectionWarning:Localized(@"Some apps may refuse to run because a VPN/Proxy is enabled.")];
+    if(vpn && vpn.boolValue && ![AppDelegate ignoreVPNProxyWarning]) {
+        [AppDelegate showVPNProxyWarningPrompt];
     }
     
     return YES;
