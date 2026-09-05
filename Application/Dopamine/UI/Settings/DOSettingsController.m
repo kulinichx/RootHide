@@ -1692,6 +1692,14 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             [options addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Mount_Unmount_Keep_Copy") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *innerAction) {
                 [self performMountPath:path mounted:NO deleteMirror:NO];
             }]];
+            [options addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Mount_View_In_Filza") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *innerAction) {
+                NSString *standardPath = path.stringByStandardizingPath;
+                NSString *mirrorPath = [JBROOT_PATH(@"/mnt") stringByAppendingString:standardPath];
+                NSURL *filzaURL = [NSURL URLWithString:[@"filza://view" stringByAppendingString:mirrorPath]];
+                if (filzaURL) {
+                    [[UIApplication sharedApplication] openURL:filzaURL options:@{} completionHandler:nil];
+                }
+            }]];
             [options addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Mount_Unmount_Delete_Copy") style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *innerAction) {
                 [self performMountPath:path mounted:NO deleteMirror:YES];
             }]];
