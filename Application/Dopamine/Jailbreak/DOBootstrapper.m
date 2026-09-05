@@ -1391,6 +1391,19 @@ int getCFMajorVersion(void)
         if (r != 0) {
             return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"updatelinks.sh returned %d\n", r]}];
         }
+
+        // Existing bootstrap: install the bundled Manager only when missing or on the known legacy 1.3.9.
+        NSString *installedManagerVersion = [self installedVersionForPackageWithIdentifier:@"com.roothide.manager"];
+        BOOL shouldInstallRootHideManager = !installedManagerVersion ||
+            [installedManagerVersion isEqualToString:@"1.3.9"];
+
+        if (shouldInstallRootHideManager) {
+            NSString *roothideManager = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"roothideapp.deb"];
+            int r = [self installPackage:roothideManager];
+            if (r != 0) {
+                return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to update roothideManager: %d\n", r]}];
+            }
+        }
     }
     
     BOOL shouldInstallLibkrw = [self shouldInstallPackage:@"libkrw0-dopamine"];
