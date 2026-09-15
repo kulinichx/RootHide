@@ -20,6 +20,7 @@
 #include <os/log.h>
 #include <os/lock.h>
 #include "../_zqbb.h"
+#include "RCInjectPolicyCache.h"
 
 // RootHide dynamic policy lives in domain 6; jbclient_roothide.c is linked into systemhook.
 extern bool jbclient_blacklist_check_path(const char *path);
@@ -70,79 +71,29 @@ void string_enumerate_components(const char *string, const char *separator, void
 	free(stringCopy);
 }
 
-int timespec_compare(struct timespec *t1, struct timespec *t2)
-{
-	if (t1->tv_sec == t2->tv_sec && t1->tv_nsec == t2->tv_nsec) return 0;
-
-	if (t1->tv_sec == t2->tv_sec) {
-		return t1->tv_nsec > t2->tv_nsec ? 1 : -1;
-	}
-	else {
-		return t1->tv_sec > t2->tv_sec ? 1 : -1;
-	}
-}
-
-xpc_object_t xpc_object_from_plist(const char *path)
-{
-	xpc_object_t xObj = NULL;
-	int ldFd = open(path, O_RDONLY);
-	if (ldFd >= 0) {
-		struct stat s = {};
-		if(fstat(ldFd, &s) != 0) {
-			close(ldFd);
-			return NULL;
-		}
-		size_t len = s.st_size;
-		void *addr = mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, ldFd, 0);
-		close(ldFd);
-		if (addr != MAP_FAILED) {
-			xObj = xpc_create_from_plist(addr, len);
-			munmap(addr, len);
-		}
-	}
-	return xObj;
-}
-
 xpc_object_t jbuserconfig_get_value(const char *key)
 {
-	static os_unfair_lock configLock = OS_UNFAIR_LOCK_INIT;
-	static xpc_object_t configDict = NULL;
-	static struct timespec lastConfigWrite = { .tv_sec = 0, .tv_nsec = 0 };
+        static RCInjectPolicyCache configCache = RC_INJECT_POLICY_CACHE_INIT;
 
-	const char *configPath = JBROOT_PATH("/basebin/config.plist");
-	if (access(configPath, R_OK) != 0) {
-		return NULL;
-	}
+        if (!key) {
+                return NULL;
+        }
 
-	xpc_object_t value = NULL;
+        const char *configPath = JBROOT_PATH("/basebin/config.plist");
 
-	os_unfair_lock_lock(&configLock);
+        xpc_object_t configDict =
+                rc_inject_policy_cache_copy_dictionary(&configCache, configPath);
+        if (!configDict) {
+                return NULL;
+        }
 
-	struct stat configStat;
-	if (stat(configPath, &configStat) == 0) {
-		if (timespec_compare(&configStat.st_mtimespec, &lastConfigWrite) > 0) {
-			xpc_object_t newConfigDict = xpc_object_from_plist(configPath);
-			if (newConfigDict) {
-				if (configDict) {
-					xpc_release(configDict);
-				}
+        xpc_object_t value = xpc_dictionary_get_value(configDict, key);
+        if (value) {
+                xpc_retain(value);
+        }
 
-				configDict = newConfigDict;
-				lastConfigWrite = configStat.st_mtimespec;
-			}
-		}
-	}
-
-	if (configDict && xpc_get_type(configDict) == XPC_TYPE_DICTIONARY) {
-		value = xpc_dictionary_get_value(configDict, key);
-		if (value) {
-			xpc_retain(value);
-		}
-	}
-
-	os_unfair_lock_unlock(&configLock);
-
-	return value;
+        xpc_release(configDict);
+        return value;
 }
 
 static bool is_apt_helper_path(const char *path)
