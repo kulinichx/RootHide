@@ -109,10 +109,14 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 	// no trust, no systemhook injection, and no tweak propagation. Returning 0
 	// also makes spawn_exec_hook_common strip any inherited jailbreak env.
 	// RootHide app blacklist can only match executables inside a normal
-	// removable app container. Avoid a synchronous domain-6 XPC round trip
-	// for system daemons/helpers; keep the authoritative server-side check
-	// for app-container paths so RootHide Manager changes remain dynamic.
-	if (path && isRemovableBundlePath(path) && jbclient_blacklist_check_path(path)) {
+	// removable app container. Resolve the path once so both the local bundle
+	// check and the authoritative server-side blacklist check see the same path.
+	char resolvedPolicyPath[PATH_MAX];
+	const char *policyPath = path;
+	if (path && realpath(path, resolvedPolicyPath)) {
+		policyPath = resolvedPolicyPath;
+	}
+	if (policyPath && isRemovableBundlePath(policyPath) && jbclient_blacklist_check_path(policyPath)) {
 		return 0;
 	}
 
@@ -250,7 +254,7 @@ static int spawn_exec_hook_common(const char *path,
 		}
 
 		int proctype = 0;
-		if (posix_spawnattr_getprocesstype_np(&attr, &proctype) == 0) {
+		if (attr && posix_spawnattr_getprocesstype_np(&attr, &proctype) == 0) {
 			if (proctype == POSIX_SPAWN_PROC_TYPE_DRIVER) {
 				// Do not inject hook into DriverKit drivers
 				shouldInsertJBEnv = false;
@@ -327,7 +331,12 @@ static int spawn_exec_hook_common(const char *path,
 							}
 						}
 					});
-					envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+					if (first) {
+						envbuf_unsetenv(&envc, "DYLD_INSERT_LIBRARIES");
+					}
+					else {
+						envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+					}
 
 					free(newLibraryInsert);
 				}

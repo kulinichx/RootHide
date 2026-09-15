@@ -359,15 +359,19 @@ int roothide_systemhook___execve_posthook(const char *path, char *const argv[], 
 	/* the posix_spawn call above should already trust the executable
 	(also its libraries) and the inserted libraries, so we can skip them below */
 
+	kSpawnConfig spawnConfig = spawn_config_for_executable(path, argv);
+	bool shouldTrace = (spawnConfig & kSpawnConfigInject) != 0;
 	bool traced = false;
 
-	if(jbdExecTraceStart(path, &traced) != 0) { // jdb fault?
-		errno = 203;
-		return -1;
-	}
+	if (shouldTrace) {
+		if(jbdExecTraceStart(path, &traced) != 0) { // jdb fault?
+			errno = 203;
+			return -1;
+		}
 
-	//wait for SIGSTOP
-	while(!traced) usleep(10*1000);
+		//wait for SIGSTOP
+		while(!traced) usleep(10*1000);
+	}
 
 	char **envc = envbuf_mutcopy((const char **)envp);
 	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
@@ -380,6 +384,10 @@ int roothide_systemhook___execve_posthook(const char *path, char *const argv[], 
 	envbuf_free(envc);
 
 	// exec* should never return if successful
+	if (!shouldTrace) {
+		errno = olderr;
+		return ret;
+	}
 
 	bool detached = false;
 
