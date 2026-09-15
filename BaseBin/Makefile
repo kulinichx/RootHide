@@ -1,5 +1,11 @@
 #all: mktemp choma
 
+BASEBIN_BUILD_ID ?= $(strip $(COMMIT_HASH))
+
+ifeq ($(strip $(BASEBIN_BUILD_ID)),)
+BASEBIN_BUILD_ID := $(shell git rev-parse HEAD 2>/dev/null)
+endif
+
 #mktemp:
 #	rm -rf .build-dir
 #	mkdir .build-dir
@@ -83,6 +89,18 @@ jailbreakd: .build .include libjailbreak
 	mkdir -p .build
 	cp -r _external/basebin/* .build
 	cp _external/basebin/.version .build
+	@product_version="$$(tr -d '\r\n' < _external/basebin/.version)"; \
+	build_id="$(BASEBIN_BUILD_ID)"; \
+	if [ -z "$$product_version" ]; then \
+		echo "error: unable to determine ProductVersion" >&2; \
+		exit 1; \
+	fi; \
+	if [ -z "$$build_id" ]; then \
+		echo "error: unable to determine BaseBinBuildID" >&2; \
+		exit 1; \
+	fi; \
+	printf 'ProductVersion=%s\nBaseBinBuildID=%s\n' \
+		"$$product_version" "$$build_id" > .build/.build-info
 
 .include:
 	rm -rf .include
