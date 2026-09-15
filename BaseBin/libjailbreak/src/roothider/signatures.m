@@ -114,21 +114,21 @@ static NSArray *cachedRpathsForLoader(NSString *loaderPath)
 	return snapshot;
 }
 
-NSString* resolveRpaths(NSString *loadPath, NSString *mainExecutablePath, NSArray* rpathStack)
+NSString* resolveRpaths(NSString *subPath, NSString *mainExecutablePath, NSArray* rpathStack)
 {
 @autoreleasepool {
 
-	DEBUG_LOG("Resolving rpaths for %s, mainExecutable: %s, rpathStack: %s", loadPath.fileSystemRepresentation, mainExecutablePath.fileSystemRepresentation, rpathStack.description.UTF8String);
+	DEBUG_LOG("Resolving rpaths for %s, mainExecutable: %s, rpathStack: %s", subPath.fileSystemRepresentation, mainExecutablePath.fileSystemRepresentation, rpathStack.description.UTF8String);
 
 	__block NSString *rpathResolvedPath = nil;
 
 	for (NSString* loaderPath in rpathStack.reverseObjectEnumerator)
 	{
 		for (NSString *rpath in cachedRpathsForLoader(loaderPath)) {
-			NSString* possiblePath = [loadPath stringByReplacingCharactersInRange:NSMakeRange(0,sizeof("@rpath")-1) withString:rpath];
+			NSString* possiblePath = [rpath stringByAppendingPathComponent:subPath];
 			possiblePath = resolveLoaderExecutablePaths(possiblePath, loaderPath, mainExecutablePath) ?: possiblePath;
 			if(![possiblePath hasPrefix:@"/"]) { // dyld only supports relative path in rpath on macOS
-				JBLogDebug("Skipping relative rpath: %s -> %s", loadPath.fileSystemRepresentation, possiblePath.fileSystemRepresentation);
+				JBLogDebug("Skipping relative rpath: %s -> %s", subPath.fileSystemRepresentation, possiblePath.fileSystemRepresentation);
 				continue;
 			}
 			if (_dyld_shared_cache_contains_path(possiblePath.fileSystemRepresentation)
@@ -141,7 +141,7 @@ NSString* resolveRpaths(NSString *loadPath, NSString *mainExecutablePath, NSArra
 		if(rpathResolvedPath)
 			break;
 	}
-	
+
 	return rpathResolvedPath;
 
 } //autoreleasepool
@@ -151,29 +151,35 @@ NSString *resolveLoadPath(NSString *loadPath, NSString *loaderPath, NSString *ma
 {
 	if (!loadPath) return nil;
 
-	NSString *resolvedPath = nil;
-
 	if ([loadPath hasPrefix:@"@rpath/"]) {
-		resolvedPath = resolveRpaths(loadPath, mainExecutablePath, rpathStack);
-	} else {
-		resolvedPath = resolveLoaderExecutablePaths(loadPath, loaderPath, mainExecutablePath);
+		return resolveRpaths([loadPath substringFromIndex:(sizeof("@rpath/")-1)], mainExecutablePath, rpathStack);
 	}
 
-	if(!resolvedPath) {
-		resolvedPath = loadPath;
+	NSString *expandedPath = resolveLoaderExecutablePaths(loadPath, loaderPath, mainExecutablePath);
+	if (expandedPath) {
+		return expandedPath;
 	}
 
-	if([resolvedPath hasPrefix:@"@"]) { // dyld does not support this path
-		JBLogDebug("Skipping unresolvable loadPath: %s", resolvedPath.fileSystemRepresentation);
+	if([loadPath hasPrefix:@"@"]) { // dyld does not support this path
+		JBLogDebug("Skipping unresolvable loadPath: %s", loadPath.fileSystemRepresentation);
 		return nil;
 	}
 
-	if(![resolvedPath hasPrefix:@"/"]) {
-		JBLogDebug("Resolving relative path: %s + %s", workingDir.fileSystemRepresentation, resolvedPath.fileSystemRepresentation);
-		return workingDir ? [workingDir stringByAppendingPathComponent:resolvedPath] : nil;
+	if(![loadPath hasPrefix:@"/"])
+	{
+		JBLogDebug("Resolving relative path: %s", loadPath.fileSystemRepresentation);
+
+		// non-@ path is treated as an implicit @rpath first
+		NSString* resolvedPath = resolveRpaths(loadPath, mainExecutablePath, rpathStack);
+
+		if(!resolvedPath && workingDir) {
+			resolvedPath = [workingDir stringByAppendingPathComponent:loadPath];
+		}
+
+		return resolvedPath;
 	}
-	
-	return resolvedPath;
+
+	return loadPath; // absolute path
 }
 
 typedef struct {
