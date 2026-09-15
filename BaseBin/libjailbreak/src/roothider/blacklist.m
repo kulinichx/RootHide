@@ -109,7 +109,6 @@ static BOOL zqbb_wantsBlacklist(NSString *execName)
     if(!xplist) return NO;
 
     BOOL result = xpc_dictionary_get_bool(xplist, execName.UTF8String);
-    xpc_release(xplist);
 
     return result;
 }

@@ -26,11 +26,12 @@ typedef struct {
     .dictionary = NULL \
 }
 
-// Returns a retained XPC dictionary snapshot. The caller must xpc_release()
-// the returned object. NULL means the current file is missing, empty, invalid,
-// or is not an XPC dictionary.
-xpc_object_t rc_inject_policy_cache_copy_dictionary(RCInjectPolicyCache *cache,
-                                                    const char *path);
+// Returns a retained XPC dictionary snapshot. Non-ARC callers must xpc_release()
+// the returned object. ARC callers use the retained-return annotation below.
+// NULL means the current file is missing, empty, invalid, or is not an XPC dictionary.
+XPC_RETURNS_RETAINED xpc_object_t
+rc_inject_policy_cache_copy_dictionary(RCInjectPolicyCache *cache,
+                                       const char *path);
 
 // Explicit invalidation hook for future callers. Normal operation does not
 // require it because metadata changes are detected on the next lookup.
