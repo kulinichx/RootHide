@@ -1,7 +1,9 @@
 #import <Foundation/Foundation.h>
+#include <xpc/xpc.h>
 
 #include "../libjailbreak.h"
 #include "common.h"
+#include "RCInjectPolicyCache.h"
 
 
 #define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
@@ -9,6 +11,9 @@
 
 static const char *injectPlistPath = NULL;
 static const char *injectSystemPlistPath = NULL;
+
+static RCInjectPolicyCache wantsBlacklistPolicyCache =
+    RC_INJECT_POLICY_CACHE_INIT;
 
 NSString *getAppBundlePathFromSpawnPath(const char *path) {
     if (!path) return nil;
@@ -97,10 +102,16 @@ static BOOL zqbb_wantsBlacklist(NSString *execName)
     if(!execName) return NO;
 
     NSString* configFilePath = JBROOT_PATH(@"/var/mobile/Library/RootHide/cn.zqbb.inject.wantsblacklist.plist");
-    NSDictionary* wantsBlacklistConfig = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
-    if(!wantsBlacklistConfig) return NO;
+    xpc_object_t xplist =
+        rc_inject_policy_cache_copy_dictionary(
+            &wantsBlacklistPolicyCache,
+            configFilePath.UTF8String);
+    if(!xplist) return NO;
 
-    return [wantsBlacklistConfig[execName] boolValue];
+    BOOL result = xpc_dictionary_get_bool(xplist, execName.UTF8String);
+    xpc_release(xplist);
+
+    return result;
 }
 
 static bool zqbb_isBlacklistedExec(const char *path, const char *injectPath)
