@@ -8,7 +8,7 @@
 #import "DOTheme.h"
 #import "UIImage+Blur.h"
 
-static NSString * const DOCustomGlassThemeKey = @"red";
+static NSString * const DOCustomGlassThemeKey = @"purple";
 
 @interface DOTheme ()
 @property (nonatomic, retain) NSString *imageName;
@@ -46,7 +46,7 @@ static NSString * const DOCustomGlassThemeKey = @"red";
 {
     // DOTheme owns only immutable, bundle-backed theme artwork. Dynamic
     // Custom Glass user media is resolved by DONavigationController before this
-    // fallback is consulted, so a cached Background_Red image can never replace
+    // fallback is consulted, so a cached Background_Purple image can never replace
     // a user-selected wallpaper after launch.
     if (_image == nil)
         _image = [[UIImage imageNamed:self.imageName] imageWithBlur:self.blur];
