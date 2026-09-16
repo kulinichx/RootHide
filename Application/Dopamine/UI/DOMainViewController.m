@@ -230,6 +230,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, assign) CGFloat preferredCornerRadius;
 @property(nonatomic, assign) CGFloat baseTintAlpha;
 @property(nonatomic, assign) CGFloat materialScale;
+@property(nonatomic, assign) CGFloat materialBodyScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
 @property(nonatomic, assign) CGFloat lastRenderedShortDimension;
 
@@ -253,6 +254,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _preferredCornerRadius = MAX(0.0, cornerRadius);
         _baseTintAlpha = MAX(0.0, baseTintAlpha);
         _materialScale = 1.0;
+        _materialBodyScale = 1.0;
         _suppressBackdrop = NO;
         _lastRenderedShortDimension = 0.0;
 
@@ -460,11 +462,6 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     if (darkAppearance)
         tintAlpha += 0.010 * bodyAuthority;
 
-    // Grouping shells intentionally skip the second backdrop blur, but they
-    // still need enough body/edge authority to visibly contain the three pills.
-    if (self.suppressBackdrop)
-        tintAlpha = 0.060 + (0.082 * bodyAuthority);
-
     // Material separation follows the *local wallpaper*, not just global
     // Dark Mode. Bright wallpaper receives a faint dark neutral body; dark
     // wallpaper receives a faint light body. This gives every Glass surface a
@@ -488,24 +485,19 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
             (0.118 * bodyAuthority) +
             (0.10 * self.baseTintAlpha) +
             (prefersDarkForeground ? 0.034 : -0.010);
-        if (self.suppressBackdrop)
-            darkBodyAlpha = 0.105 + (0.095 * bodyAuthority);
-
         self.neutralTintView.backgroundColor = UIColor.blackColor;
-        self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.205 : 0.245,
-                                         MAX(0.072, darkBodyAlpha));
+        self.neutralTintView.alpha = MIN(0.245, MAX(0.072, darkBodyAlpha));
     }
     else {
         self.neutralTintView.backgroundColor = prefersDarkForeground ?
             UIColor.blackColor : UIColor.whiteColor;
-        self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.155 : 0.190,
+        self.neutralTintView.alpha = MIN(0.190,
                                          tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
     }
+    self.neutralTintView.alpha *= MAX(0.0, MIN(1.0, self.materialBodyScale));
 
     CGFloat geometryScale = [self surfaceGeometryScale];
-    CGFloat opticalScale = self.suppressBackdrop ?
-        MIN(0.88, geometryScale * 0.86) :
-        MIN(1.00, geometryScale);
+    CGFloat opticalScale = MIN(1.00, geometryScale);
 
     // Directional rail topology follows GlassFolders: the upper / leading rail
     // carries the specular cue, the lower / trailing rail is a weaker return,
@@ -522,11 +514,8 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // Broad illumination is intentionally independent of rail width. This is
     // the visible "light catching the material" response that was missing in
     // R6. It remains below labels/icons, so readability never gets washed out.
-    CGFloat washAlpha = self.suppressBackdrop ?
-        MIN(darkGlassAppearance ? 0.060 : 0.070,
-            (0.002 + (darkGlassAppearance ? 0.060 : 0.072) * opticalResponse) * opticalScale) :
-        MIN(darkGlassAppearance ? 0.108 : 0.145,
-            (0.002 + (darkGlassAppearance ? 0.112 : 0.148) * opticalResponse) * opticalScale);
+    CGFloat washAlpha = MIN(darkGlassAppearance ? 0.108 : 0.145,
+        (0.002 + (darkGlassAppearance ? 0.112 : 0.148) * opticalResponse) * opticalScale);
     self.surfaceHighlightLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.42].CGColor,
@@ -549,52 +538,32 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
     ];
 
-    CGFloat shoulderWidth = self.suppressBackdrop ?
-        (0.30 + (0.20 * geometryScale)) :
-        (0.30 + (0.44 * geometryScale));
-    CGFloat specularWidth = self.suppressBackdrop ?
-        (0.14 + (0.06 * geometryScale)) :
-        (0.15 + (0.13 * geometryScale));
+    CGFloat shoulderWidth = 0.30 + (0.44 * geometryScale);
+    CGFloat specularWidth = 0.15 + (0.13 * geometryScale);
     self.shoulderMaskLayer.lineWidth = shoulderWidth;
     self.specularMaskLayer.lineWidth = specularWidth;
 
-    CGFloat contrastContourAlpha = self.suppressBackdrop ?
-        (darkGlassAppearance ?
-            (0.095 + (0.075 * bodyAuthority) + (0.050 * opticalResponse)) :
-            (0.075 + (0.060 * bodyAuthority) + (0.045 * opticalResponse))) :
-        (darkGlassAppearance ?
-            ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale) :
-            ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale));
+    CGFloat contrastContourAlpha = darkGlassAppearance ?
+        ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale) :
+        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale);
     self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
-                                                            alpha:MIN(self.suppressBackdrop ?
-                                                                      (darkGlassAppearance ? 0.22 : 0.18) :
-                                                                      (darkGlassAppearance ? 0.145 : 0.09),
+                                                            alpha:MIN(darkGlassAppearance ? 0.145 : 0.09,
                                                                       contrastContourAlpha)].CGColor;
-    self.contrastContourLayer.lineWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) :
-        (darkGlassAppearance ?
-            (0.24 + (0.055 * geometryScale)) :
-            (0.22 + (0.05 * geometryScale)));
+    self.contrastContourLayer.lineWidth = darkGlassAppearance ?
+        (0.24 + (0.055 * geometryScale)) :
+        (0.22 + (0.05 * geometryScale));
 
     // Keep a hairline structural contour independent from the specular slider.
     // This is the minimum depth cue that separates Glass from wallpaper when
     // both blur and highlight are low. Highlight adds brightness, not thickness.
-    CGFloat structuralBorderAlpha = self.suppressBackdrop ?
-        (darkGlassAppearance ?
-            (0.085 + (0.118 * opticalResponse)) :
-            (0.078 + (0.105 * opticalResponse))) :
-        (darkGlassAppearance ?
-            ((0.026 + (0.036 * bodyAuthority) + (0.082 * opticalResponse)) * opticalScale) :
-            ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale));
-    self.layer.borderWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) :
-        (darkGlassAppearance ?
-            (0.14 + (0.055 * geometryScale)) :
-            (0.15 + (0.07 * geometryScale)));
+    CGFloat structuralBorderAlpha = darkGlassAppearance ?
+        ((0.026 + (0.036 * bodyAuthority) + (0.082 * opticalResponse)) * opticalScale) :
+        ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale);
+    self.layer.borderWidth = darkGlassAppearance ?
+        (0.14 + (0.055 * geometryScale)) :
+        (0.15 + (0.07 * geometryScale));
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(self.suppressBackdrop ?
-                                                       (darkGlassAppearance ? 0.215 : 0.20) :
-                                                       (darkGlassAppearance ? 0.155 : 0.14),
+                                             alpha:MIN(darkGlassAppearance ? 0.155 : 0.14,
                                                        structuralBorderAlpha)].CGColor;
 
 }
@@ -1816,10 +1785,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
-    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.040];
-    // Small pills use a deliberately lighter optical recipe than folder-sized
-    // panels; the body still samples the wallpaper, but the edge stays hairline.
-    innerGlass.materialScale = 0.72;
+    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.020];
+    // Nested restart pills stay visibly interactive, but sit one material level
+    // above the group tray: lighter body, quieter edge, same wallpaper transmission.
+    innerGlass.materialScale = 0.62;
+    innerGlass.materialBodyScale = 0.74;
     [innerGlass reloadMaterial];
 
     // Keep all restart actions on one shared icon/text grid. On iPhone the
@@ -2264,11 +2234,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
     [self refreshSupporterState];
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.028];
-    // Visible grouping shell: keep a clear total frame around the three restart
-    // actions, but never apply a second backdrop blur. Its optical rail is
-    // intentionally lighter than the three inner pills.
-    restartContainer.materialScale = 1.10;
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
+    // The group tray uses the same body/edge language as the other Glass cards,
+    // while still skipping a second backdrop blur underneath the nested pills.
+    restartContainer.materialScale = 0.86;
     restartContainer.suppressBackdrop = YES;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
