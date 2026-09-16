@@ -16,7 +16,6 @@
 #import "DOExploitManager.h"
 #import "DOPSListItemsController.h"
 #import "DOPSExploitListItemsController.h"
-#import "DOThemeManager.h"
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
 #import "DOButtonCell.h"
@@ -772,7 +771,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)viewDidLoad
 {
-    _lastKnownTheme = [[DOThemeManager sharedInstance] enabledTheme].key;
     [super viewDidLoad];
     [self customGlassInstallPageAppearance];
 }
@@ -780,22 +778,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)viewWillAppear:(BOOL)arg1
 {
     [super viewWillAppear:arg1];
-    if (_lastKnownTheme != [[DOThemeManager sharedInstance] enabledTheme].key)
-    {
-        [DOSceneDelegate relaunch];
-        NSString *icon = [[DOThemeManager sharedInstance] enabledTheme].icon;
-        [[UIApplication sharedApplication] setAlternateIconName:icon completionHandler:^(NSError * _Nullable error) {
-            if (error)
-                NSLog(@"Error changing app icon: %@", error);
-        }];
-
-        if ([DOEnvironmentManager sharedManager].isJailbroken) {
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                [[DOEnvironmentManager sharedManager] updateBootLogo];
-            });
-        }
-    }
-
     [self customGlassRefreshPageAppearance];
 
     __weak typeof(self) weakSelf = self;
@@ -876,16 +858,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         [names addObject:exploit.name];
     }
     return names;
-}
-
-- (NSArray *)themeIdentifiers
-{
-    return [[DOThemeManager sharedInstance] getAvailableThemeKeys];
-}
-
-- (NSArray *)themeNames
-{
-    return [[DOThemeManager sharedInstance] getAvailableThemeNames];
 }
 
 - (NSArray *)jetsamOptionNumbers
@@ -1157,19 +1129,6 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             }
         }
         
-        PSSpecifier *themingGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-        themingGroupSpecifier.name = DOLocalizedString(@"Section_Customization");
-        [specifiers addObject:themingGroupSpecifier];
-        
-        PSSpecifier *themeSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Theme") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
-        themeSpecifier.detailControllerClass = [DOPSListItemsController class];
-        [themeSpecifier setProperty:@YES forKey:@"enabled"];
-        [themeSpecifier setProperty:@"theme" forKey:@"key"];
-        [themeSpecifier setProperty:[[self themeIdentifiers] firstObject] forKey:@"default"];
-        [themeSpecifier setProperty:@"themeIdentifiers" forKey:@"valuesDataSource"];
-        [themeSpecifier setProperty:@"themeNames" forKey:@"titlesDataSource"];
-        [specifiers addObject:themeSpecifier];
-
         PSSpecifier *bootlogoGropSpecifier = [PSSpecifier emptyGroupSpecifier];
         bootlogoGropSpecifier.name = DOLocalizedString(@"Section_Boot_Logo");
         [specifiers addObject:bootlogoGropSpecifier];

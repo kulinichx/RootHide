@@ -8,8 +8,6 @@
 #import "DOTheme.h"
 #import "UIImage+Blur.h"
 
-static NSString * const DOCustomGlassThemeKey = @"purple";
-
 @interface DOTheme ()
 @property (nonatomic, retain) NSString *imageName;
 @end
@@ -21,10 +19,7 @@ static NSString * const DOCustomGlassThemeKey = @"purple";
     self = [super init];
     if (self) {
         self.name = [dictionary objectForKey:@"name"];
-        self.icon = [dictionary objectForKey:@"icon"];
         self.key = [dictionary objectForKey:@"key"];
-        if ([self.key isEqualToString:DOCustomGlassThemeKey])
-            self.icon = nil; // Keep Dopamine's primary/default blue app icon.
         self.imageName = [dictionary objectForKey:@"image"];
         self.windowColor = [self colorFromHexString:[dictionary objectForKey:@"windowColor"]];
         self.actionMenuColor = [self colorFromHexString:[dictionary objectForKey:@"actionMenuColor"]];
