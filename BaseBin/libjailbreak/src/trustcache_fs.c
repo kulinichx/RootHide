@@ -69,7 +69,6 @@ int directory_collect_untrusted_cdhashes_by_path(const char *directoryPath, bool
 
 	walk_machos_in_dir(directoryPath, ^(const char *path, Fat *fat){
 		if (collectionStatus != 0) return;
-		printf("Collecting cdhash of %s\n", path);
 		cdhash_t *thisCdhashes = NULL;
 		uint32_t thiscdhashCount = 0;
 		collectionStatus = file_collect_untrusted_cdhashes_by_path(path, &thisCdhashes, &thiscdhashCount);
@@ -131,7 +130,6 @@ int jb_trustcache_add_directory(const char *directoryPath, bool recursive)
 	int status = directory_collect_untrusted_cdhashes_by_path(directoryPath, recursive, &cdhashes, &cdhashCount);
 	if (status != 0) return status;
 	if (cdhashes && cdhashCount > 0) {
-		printf("Added %u cdhashes\n", cdhashCount);
 		status = jb_trustcache_add_cdhashes(cdhashes, cdhashCount);
 		free(cdhashes);
 		if (status != 0) return status;

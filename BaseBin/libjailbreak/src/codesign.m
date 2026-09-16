@@ -120,7 +120,6 @@ int resign_file(NSString *filePath, NSString *identifier, bool preserveMetadata)
 				// Difference from codesign: added kSecCSSigningInformation, kSecCSRequirementInformation, kSecCSInternalInformation
 				status = SecCodeCopySigningInformation(code, kSecCSDefaultFlags | kSecCSSigningInformation | kSecCSRequirementInformation | kSecCSInternalInformation, &newSigningInformation);
 				if (status == 0) {
-					printf("SecCodeCopySigningInformation succeeded: %s\n", ((__bridge NSDictionary*)newSigningInformation).description.UTF8String);
 					retval = 0;
 					CFRelease(newSigningInformation);
 				} else {
