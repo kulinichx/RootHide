@@ -994,6 +994,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.glassAppearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
     self.glassAppearanceControl.selectedSegmentTintColor = [UIColor colorWithWhite:1.0 alpha:0.18];
     self.glassAppearanceControl.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.12];
+    self.glassAppearanceControl.layer.cornerRadius = 21.0;
+    self.glassAppearanceControl.layer.masksToBounds = YES;
     self.glassAppearanceControl.accessibilityLabel = @"Liquid Glass";
     [self.glassAppearanceControl setTitleTextAttributes:@{
         NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.68],
