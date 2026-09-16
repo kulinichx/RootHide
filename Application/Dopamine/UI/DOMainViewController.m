@@ -84,6 +84,9 @@ static NSString * const DOCustomGlassBackgroundBlurKey = @"DOCustomGlassTheme.Ba
 static NSString * const DOCustomGlassBlurIntensityKey = @"DOCustomGlassTheme.GlassBlurIntensity";
 static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.GlassTransparency";
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
+static NSString * const DOCustomGlassAppearanceKey = @"DOCustomGlassTheme.Appearance";
+static NSString * const DOCustomGlassAppearanceLight = @"light";
+static NSString * const DOCustomGlassAppearanceDark = @"dark";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
@@ -613,6 +616,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property DOCustomWallpaperBlurView *backgroundBlurView;
 @property DOCustomLiquidGlassView *previewGlassView;
 
+@property UISegmentedControl *glassAppearanceControl;
 @property UISlider *backgroundBlurSlider;
 @property UISlider *glassBlurSlider;
 @property UISlider *glassTransparencySlider;
@@ -872,6 +876,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // This page stays transparent above that persistent source.
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        DOCustomGlassAppearanceKey : DOCustomGlassAppearanceLight,
         DOCustomGlassBackgroundBlurKey : @0.10,
         DOCustomGlassBlurIntensityKey : @0.85,
         DOCustomGlassTransparencyKey : @0.70,
@@ -963,7 +968,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // surface was frame-driven. Keep a safety floor even though contentView is
     // now Auto Layout driven, so all four sliders remain visible on every iOS 16
     // device and Dynamic Type configuration.
-    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 420.0 : 404.0)].active = YES;
+    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 488.0 : 472.0)].active = YES;
 
     UIStackView *controlsStack = [[UIStackView alloc] init];
     controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -979,6 +984,34 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     ]];
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+    UILabel *liquidGlassLabel = [[UILabel alloc] init];
+    liquidGlassLabel.text = @"Liquid Glass";
+    liquidGlassLabel.textColor = UIColor.whiteColor;
+    liquidGlassLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    [controlsStack addArrangedSubview:liquidGlassLabel];
+
+    self.glassAppearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
+    self.glassAppearanceControl.selectedSegmentTintColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    self.glassAppearanceControl.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.12];
+    self.glassAppearanceControl.accessibilityLabel = @"Liquid Glass";
+    [self.glassAppearanceControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.68],
+        NSFontAttributeName : [UIFont systemFontOfSize:14.0 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+    [self.glassAppearanceControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : UIColor.whiteColor,
+        NSFontAttributeName : [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold]
+    } forState:UIControlStateSelected];
+
+    NSString *appearance = [defaults stringForKey:DOCustomGlassAppearanceKey];
+    self.glassAppearanceControl.selectedSegmentIndex =
+        [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
+    [self.glassAppearanceControl addTarget:self
+                                    action:@selector(glassAppearanceChanged:)
+                          forControlEvents:UIControlEventValueChanged];
+    [controlsStack addArrangedSubview:self.glassAppearanceControl];
+    [self.glassAppearanceControl.heightAnchor constraintEqualToConstant:42.0].active = YES;
 
     self.backgroundBlurSlider = [self appearanceSlider];
     self.backgroundBlurSlider.minimumValue = 0.0;
@@ -1045,6 +1078,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
+    if (self.glassAppearanceControl) {
+        NSString *appearance = [defaults stringForKey:DOCustomGlassAppearanceKey];
+        self.glassAppearanceControl.selectedSegmentIndex =
+            [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
+    }
     if (self.backgroundBlurSlider)
         self.backgroundBlurSlider.value = [defaults floatForKey:DOCustomGlassBackgroundBlurKey];
     if (self.glassBlurSlider)
@@ -1087,6 +1125,22 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+}
+
+- (void)glassAppearanceChanged:(UISegmentedControl *)control
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *appearance = control.selectedSegmentIndex == 1 ?
+        DOCustomGlassAppearanceDark : DOCustomGlassAppearanceLight;
+
+    [defaults setObject:appearance forKey:DOCustomGlassAppearanceKey];
+    [defaults synchronize];
+
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
+
+    [self refreshLiquidGlassInView:self.view];
+    DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 }
 
 - (void)appearanceSliderChanged:(UISlider *)slider
@@ -1132,10 +1186,15 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)restoreRecommendedAppearanceValues
 {
+    self.glassAppearanceControl.selectedSegmentIndex = 0;
     self.backgroundBlurSlider.value = 0.10;
     self.glassBlurSlider.value = 0.85;
     self.glassTransparencySlider.value = 0.70;
     self.glassTintSlider.value = 0.05;
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:DOCustomGlassAppearanceLight forKey:DOCustomGlassAppearanceKey];
+
     [self applyAppearancePreviewAndPersist:YES];
 }
 
