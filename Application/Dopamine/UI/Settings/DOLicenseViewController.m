@@ -136,10 +136,6 @@
             @"name": @"Sileo",
             @"file": @"LICENSE_Sileo"
         },
-        @{
-            @"name": @"Zebra",
-            @"file": @"LICENSE_Zebra"
-        },
     ];
 }
 
