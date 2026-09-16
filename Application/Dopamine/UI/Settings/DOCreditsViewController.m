@@ -6,6 +6,7 @@
 //
 
 #import "DOCreditsViewController.h"
+#import "../DOSupporterLicense.h"
 #import "DOLicenseViewController.h"
 #import "DOUIManager.h"
 #import "DOEnvironmentManager.h"
@@ -97,6 +98,9 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 - (void)customGlassCleanupTableHairlines
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     UITableView *tableView = [self valueForKey:@"table"];
     if (!tableView)
         return;
@@ -142,6 +146,9 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 - (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     if (!cell)
         return;
 
@@ -182,6 +189,9 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 - (void)customGlassRefreshSectionBackdrops
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     UITableView *tableView = [self valueForKey:@"table"];
     if (!tableView)
         return;
@@ -255,6 +265,9 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 - (void)customGlassRefreshPageAppearance
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     [self customGlassApplyPageAppearance];
     UITableView *tableView = [self valueForKey:@"table"];
     [tableView setNeedsLayout];
@@ -329,6 +342,9 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
 - (void)customGlassInstallPageAppearance
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.backgroundColor = UIColor.clearColor;

@@ -123,16 +123,18 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         [self.refreshButton.heightAnchor constraintEqualToConstant:44.0],
     ]];
 
-    DOCustomLiquidGlassView *glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:18.0 baseTintAlpha:0.038];
-    glass.userInteractionEnabled = NO;
-    glass.materialScale = 0.88;
-    glass.preferredCornerRadius = 18.0;
-    glass.layer.cornerRadius = 18.0;
-    glass.layer.maskedCorners =
-        kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
-        kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
-    self.sectionGlassView = glass;
-    [tableView insertSubview:glass atIndex:0];
+    if (DORHSupporterIsVerified()) {
+        DOCustomLiquidGlassView *glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:18.0 baseTintAlpha:0.038];
+        glass.userInteractionEnabled = NO;
+        glass.materialScale = 0.88;
+        glass.preferredCornerRadius = 18.0;
+        glass.layer.cornerRadius = 18.0;
+        glass.layer.maskedCorners =
+            kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+            kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+        self.sectionGlassView = glass;
+        [tableView insertSubview:glass atIndex:0];
+    }
 
     UIScreenEdgePanGestureRecognizer *edgeGesture =
         [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(edgeBackGesture:)];
@@ -196,6 +198,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)refreshGlassAppearance
 {
+    if (!DORHSupporterIsVerified()) {
+        self.sectionGlassView.hidden = YES;
+        return;
+    }
+
     self.backButton.tintColor = [self healthForegroundWithAlpha:0.96];
     self.refreshButton.tintColor = [self healthForegroundWithAlpha:0.96];
 
@@ -457,6 +464,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassCleanupTableHairlines
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     UITableView *tableView = [self valueForKey:@"table"];
     if (!tableView)
         return;
@@ -507,6 +517,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassStyleVisibleCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     if (!cell)
         return;
 
@@ -549,6 +562,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassRefreshSectionBackdrops
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     UITableView *tableView = [self valueForKey:@"table"];
     if (!tableView)
         return;
@@ -622,6 +638,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassRefreshPageAppearance
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     [self customGlassApplyPageAppearance];
 
     UITableView *tableView = [self valueForKey:@"table"];
@@ -698,6 +717,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 - (void)customGlassInstallPageAppearance
 {
+    if (!DORHSupporterIsVerified())
+        return;
+
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.backgroundColor = UIColor.clearColor;
