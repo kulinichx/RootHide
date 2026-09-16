@@ -383,16 +383,24 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     CGFloat opticalResponse =
         (0.12 * highlightResponse) + (0.88 * pow(highlightResponse, 1.80));
     BOOL darkAppearance = [self usesDarkAppearance];
+    BOOL darkGlassAppearance =
+        [[defaults stringForKey:DOCustomGlassAppearanceKey] isEqualToString:DOCustomGlassAppearanceDark];
 
     BOOL isBackdropLayer = [NSStringFromClass(self.layer.class) containsString:@"Backdrop"];
     if (isBackdropLayer && !self.suppressBackdrop) {
-        CGFloat blurRadius = 0.35 + (17.0 * blurResponse);
-        // Keep wallpaper chroma, but do not boost it so aggressively that the
-        // Glass body becomes indistinguishable from the source wallpaper.
-        CGFloat saturation = 1.01 + (0.11 * blurResponse);
-        CGFloat brightness = darkAppearance ?
-            (0.006 + (0.012 * blurResponse)) :
-            (0.002 + (0.006 * blurResponse));
+        CGFloat blurRadius = darkGlassAppearance ?
+            (1.10 + (18.2 * blurResponse)) :
+            (0.35 + (17.0 * blurResponse));
+        // Dark Glass increases diffusion modestly, but preserves wallpaper
+        // color transmission instead of turning the material into a black blur.
+        CGFloat saturation = darkGlassAppearance ?
+            (0.98 + (0.08 * blurResponse)) :
+            (1.01 + (0.11 * blurResponse));
+        CGFloat brightness = darkGlassAppearance ?
+            (-0.018 - (0.018 * bodyAuthority)) :
+            (darkAppearance ?
+                (0.006 + (0.012 * blurResponse)) :
+                (0.002 + (0.006 * blurResponse)));
 
         id saturate = DOCustomGlassCreateCAFilter(@"colorSaturate");
         id brighten = DOCustomGlassCreateCAFilter(@"colorBrightness");
@@ -471,10 +479,28 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         prefersDarkForeground = [navigationController customGlassPrefersDarkForegroundForView:self];
     }
 
-    self.neutralTintView.backgroundColor = prefersDarkForeground ?
-        UIColor.blackColor : UIColor.whiteColor;
-    self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.155 : 0.190,
-                                     tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
+    if (darkGlassAppearance) {
+        // Dark Glass always uses a dark neutral material body. Local wallpaper
+        // luminance only changes its authority: bright wallpaper gets more body,
+        // dark wallpaper gets less. Foreground polarity remains light.
+        CGFloat darkBodyAlpha =
+            0.088 +
+            (0.118 * bodyAuthority) +
+            (0.10 * self.baseTintAlpha) +
+            (prefersDarkForeground ? 0.034 : -0.010);
+        if (self.suppressBackdrop)
+            darkBodyAlpha = 0.105 + (0.095 * bodyAuthority);
+
+        self.neutralTintView.backgroundColor = UIColor.blackColor;
+        self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.205 : 0.245,
+                                         MAX(0.072, darkBodyAlpha));
+    }
+    else {
+        self.neutralTintView.backgroundColor = prefersDarkForeground ?
+            UIColor.blackColor : UIColor.whiteColor;
+        self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.155 : 0.190,
+                                         tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
+    }
 
     CGFloat geometryScale = [self surfaceGeometryScale];
     CGFloat opticalScale = self.suppressBackdrop ?
@@ -486,19 +512,21 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // and the side walls stay quiet. R6 widens the *luminance response*, not
     // the physical line width, so the HighLight slider is obvious without
     // bringing back the thick white-border look.
-    CGFloat upperRailAlpha = MIN(0.40,
-        (0.001 + (0.395 * opticalResponse)) * opticalScale);
-    CGFloat secondaryRailAlpha = MIN(0.120,
-        (0.001 + (0.116 * opticalResponse)) * opticalScale);
-    CGFloat shoulderAlpha = MIN(0.105,
-        (0.001 + (0.096 * opticalResponse)) * opticalScale);
+    CGFloat upperRailAlpha = MIN(darkGlassAppearance ? 0.48 : 0.40,
+        (0.001 + ((darkGlassAppearance ? 0.455 : 0.395) * opticalResponse)) * opticalScale);
+    CGFloat secondaryRailAlpha = MIN(darkGlassAppearance ? 0.135 : 0.120,
+        (0.001 + ((darkGlassAppearance ? 0.128 : 0.116) * opticalResponse)) * opticalScale);
+    CGFloat shoulderAlpha = MIN(darkGlassAppearance ? 0.112 : 0.105,
+        (0.001 + ((darkGlassAppearance ? 0.103 : 0.096) * opticalResponse)) * opticalScale);
 
     // Broad illumination is intentionally independent of rail width. This is
     // the visible "light catching the material" response that was missing in
     // R6. It remains below labels/icons, so readability never gets washed out.
     CGFloat washAlpha = self.suppressBackdrop ?
-        MIN(0.070, (0.002 + 0.072 * opticalResponse) * opticalScale) :
-        MIN(0.145, (0.002 + 0.148 * opticalResponse) * opticalScale);
+        MIN(darkGlassAppearance ? 0.060 : 0.070,
+            (0.002 + (darkGlassAppearance ? 0.060 : 0.072) * opticalResponse) * opticalScale) :
+        MIN(darkGlassAppearance ? 0.108 : 0.145,
+            (0.002 + (darkGlassAppearance ? 0.112 : 0.148) * opticalResponse) * opticalScale);
     self.surfaceHighlightLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.42].CGColor,
@@ -531,25 +559,42 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     self.specularMaskLayer.lineWidth = specularWidth;
 
     CGFloat contrastContourAlpha = self.suppressBackdrop ?
-        (0.075 + (0.060 * bodyAuthority) + (0.045 * opticalResponse)) :
-        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale);
+        (darkGlassAppearance ?
+            (0.095 + (0.075 * bodyAuthority) + (0.050 * opticalResponse)) :
+            (0.075 + (0.060 * bodyAuthority) + (0.045 * opticalResponse))) :
+        (darkGlassAppearance ?
+            ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale) :
+            ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale));
     self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
-                                                            alpha:MIN(self.suppressBackdrop ? 0.18 : 0.09,
+                                                            alpha:MIN(self.suppressBackdrop ?
+                                                                      (darkGlassAppearance ? 0.22 : 0.18) :
+                                                                      (darkGlassAppearance ? 0.145 : 0.09),
                                                                       contrastContourAlpha)].CGColor;
     self.contrastContourLayer.lineWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) : (0.22 + (0.05 * geometryScale));
+        (0.30 + (0.08 * geometryScale)) :
+        (darkGlassAppearance ?
+            (0.24 + (0.055 * geometryScale)) :
+            (0.22 + (0.05 * geometryScale)));
 
     // Keep a hairline structural contour independent from the specular slider.
     // This is the minimum depth cue that separates Glass from wallpaper when
     // both blur and highlight are low. Highlight adds brightness, not thickness.
     CGFloat structuralBorderAlpha = self.suppressBackdrop ?
-        (0.078 + (0.105 * opticalResponse)) :
-        ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale);
+        (darkGlassAppearance ?
+            (0.085 + (0.118 * opticalResponse)) :
+            (0.078 + (0.105 * opticalResponse))) :
+        (darkGlassAppearance ?
+            ((0.026 + (0.036 * bodyAuthority) + (0.082 * opticalResponse)) * opticalScale) :
+            ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale));
     self.layer.borderWidth = self.suppressBackdrop ?
         (0.30 + (0.08 * geometryScale)) :
-        (0.15 + (0.07 * geometryScale));
+        (darkGlassAppearance ?
+            (0.14 + (0.055 * geometryScale)) :
+            (0.15 + (0.07 * geometryScale)));
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(self.suppressBackdrop ? 0.20 : 0.14,
+                                             alpha:MIN(self.suppressBackdrop ?
+                                                       (darkGlassAppearance ? 0.215 : 0.20) :
+                                                       (darkGlassAppearance ? 0.155 : 0.14),
                                                        structuralBorderAlpha)].CGColor;
 
 }
