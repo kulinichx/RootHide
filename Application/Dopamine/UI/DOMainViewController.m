@@ -98,6 +98,17 @@ static inline CGFloat DOCustomGlassClamp01(CGFloat value)
     return MIN(1.0, MAX(0.0, value));
 }
 
+static UIImage *DOCustomGlassSolidImage(UIColor *color)
+{
+    CGRect rect = CGRectMake(0.0, 0.0, 1.0, 1.0);
+    UIGraphicsBeginImageContextWithOptions(rect.size, NO, 0.0);
+    [color setFill];
+    UIRectFill(rect);
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+
 static id DOCustomGlassCreateCAFilter(NSString *type)
 {
     Class filterClass = NSClassFromString(@"CAFilter");
@@ -993,8 +1004,32 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
     self.glassAppearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
     self.glassAppearanceControl.selectedSegmentTintColor = [UIColor colorWithWhite:1.0 alpha:0.18];
-    self.glassAppearanceControl.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.12];
+    self.glassAppearanceControl.backgroundColor = UIColor.clearColor;
+
+    UIImage *normalSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:0.0 alpha:0.12]);
+    UIImage *selectedSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:1.0 alpha:0.18]);
+    UIImage *clearSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    [self.glassAppearanceControl setBackgroundImage:normalSegmentImage
+                                          forState:UIControlStateNormal
+                                        barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setBackgroundImage:selectedSegmentImage
+                                          forState:UIControlStateSelected
+                                        barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateNormal
+                               rightSegmentState:UIControlStateNormal
+                                      barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateSelected
+                               rightSegmentState:UIControlStateNormal
+                                      barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateNormal
+                               rightSegmentState:UIControlStateSelected
+                                      barMetrics:UIBarMetricsDefault];
+
     self.glassAppearanceControl.layer.cornerRadius = 21.0;
+    self.glassAppearanceControl.layer.cornerCurve = kCACornerCurveContinuous;
     self.glassAppearanceControl.layer.masksToBounds = YES;
     self.glassAppearanceControl.accessibilityLabel = @"Liquid Glass";
     [self.glassAppearanceControl setTitleTextAttributes:@{
