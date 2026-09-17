@@ -727,6 +727,17 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
     DOCustomLiquidGlassView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.045];
+    // Main Glass role: a normal card owns its backdrop and keeps a restrained
+    // directional rim. This same role is used by the home cards so the theme
+    // page is a faithful preview of the material hierarchy.
+    row.materialScale = 0.90;
+    row.materialBodyScale = 0.92;
+    row.materialOpticalScale = 0.84;
+    row.materialBackdropScale = 0.92;
+    row.materialSpecularScale = 0.82;
+    row.materialEdgeDarkScale = 0.88;
+    row.suppressBackdrop = NO;
+    [row reloadMaterial];
 
     UIImageSymbolConfiguration *symbolConfiguration =
         [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 21.0 : 19.0)
@@ -1021,7 +1032,16 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // cards. Slider changes therefore preview the same material rather than an
     // unrelated UIVisualEffectView approximation.
     self.previewGlassView = [self themeGlassViewWithCornerRadius:26.0 tintAlpha:0.05];
+    // Panel Glass role: keep the large settings platter a little quieter than
+    // a standalone card. It still owns one real backdrop pass, while nested
+    // controls below must not add another blur/refraction layer.
     self.previewGlassView.materialScale = 0.92;
+    self.previewGlassView.materialBodyScale = 0.88;
+    self.previewGlassView.materialOpticalScale = 0.74;
+    self.previewGlassView.materialBackdropScale = 0.86;
+    self.previewGlassView.materialSpecularScale = 0.72;
+    self.previewGlassView.materialEdgeDarkScale = 0.84;
+    self.previewGlassView.suppressBackdrop = NO;
     [self.previewGlassView reloadMaterial];
     [contentStack addArrangedSubview:self.previewGlassView];
     // This panel previously collapsed to zero height because the Glass content
@@ -1052,11 +1072,15 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [controlsStack addArrangedSubview:liquidGlassLabel];
 
     self.glassAppearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
-    self.glassAppearanceControl.selectedSegmentTintColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    self.glassAppearanceControl.translatesAutoresizingMaskIntoConstraints = NO;
+    // The segmented control is content inside an Inset Glass surface. Keep the
+    // native control itself optically quiet so it does not read as a second,
+    // unrelated grey platter pasted over the parent Glass panel.
+    self.glassAppearanceControl.selectedSegmentTintColor = UIColor.clearColor;
     self.glassAppearanceControl.backgroundColor = UIColor.clearColor;
 
-    UIImage *normalSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:0.0 alpha:0.12]);
-    UIImage *selectedSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:1.0 alpha:0.18]);
+    UIImage *normalSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *selectedSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:1.0 alpha:0.11]);
     UIImage *clearSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
     [self.glassAppearanceControl setBackgroundImage:normalSegmentImage
                                           forState:UIControlStateNormal
@@ -1077,7 +1101,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                                rightSegmentState:UIControlStateSelected
                                       barMetrics:UIBarMetricsDefault];
 
-    self.glassAppearanceControl.layer.cornerRadius = 21.0;
+    self.glassAppearanceControl.layer.cornerRadius = 19.0;
     self.glassAppearanceControl.layer.cornerCurve = kCACornerCurveContinuous;
     self.glassAppearanceControl.layer.masksToBounds = YES;
     self.glassAppearanceControl.accessibilityLabel = @"Liquid Glass";
@@ -1096,8 +1120,29 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [self.glassAppearanceControl addTarget:self
                                     action:@selector(glassAppearanceChanged:)
                           forControlEvents:UIControlEventValueChanged];
-    [controlsStack addArrangedSubview:self.glassAppearanceControl];
-    [self.glassAppearanceControl.heightAnchor constraintEqualToConstant:42.0].active = YES;
+
+    // Inset Glass role: a shallow local control surface inside the parent panel.
+    // It deliberately has no backdrop pass; the parent previewGlassView owns
+    // diffusion/transmission. Only a light body + quiet contour establish depth.
+    DOCustomLiquidGlassView *appearanceInset =
+        [self themeGlassViewWithCornerRadius:21.0 tintAlpha:0.0];
+    appearanceInset.materialScale = 0.70;
+    appearanceInset.materialBodyScale = 0.18;
+    appearanceInset.materialOpticalScale = 0.30;
+    appearanceInset.materialBackdropScale = 0.0;
+    appearanceInset.materialSpecularScale = 0.25;
+    appearanceInset.materialEdgeDarkScale = 0.30;
+    appearanceInset.suppressBackdrop = YES;
+    [appearanceInset reloadMaterial];
+    [appearanceInset.contentView addSubview:self.glassAppearanceControl];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.glassAppearanceControl.leadingAnchor constraintEqualToAnchor:appearanceInset.contentView.leadingAnchor constant:2.0],
+        [self.glassAppearanceControl.trailingAnchor constraintEqualToAnchor:appearanceInset.contentView.trailingAnchor constant:-2.0],
+        [self.glassAppearanceControl.topAnchor constraintEqualToAnchor:appearanceInset.contentView.topAnchor constant:2.0],
+        [self.glassAppearanceControl.bottomAnchor constraintEqualToAnchor:appearanceInset.contentView.bottomAnchor constant:-2.0]
+    ]];
+    [controlsStack addArrangedSubview:appearanceInset];
+    [appearanceInset.heightAnchor constraintEqualToConstant:44.0].active = YES;
 
     self.backgroundBlurSlider = [self appearanceSlider];
     self.backgroundBlurSlider.minimumValue = 0.0;
@@ -1822,7 +1867,14 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (DOCustomLiquidGlassView *)customGlassCardWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
 {
     DOCustomLiquidGlassView *card = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
-    card.materialScale = 0.86;
+    // Main Glass role shared by Settings / About / Theme Settings.
+    card.materialScale = 0.90;
+    card.materialBodyScale = 0.92;
+    card.materialOpticalScale = 0.84;
+    card.materialBackdropScale = 0.92;
+    card.materialSpecularScale = 0.82;
+    card.materialEdgeDarkScale = 0.88;
+    card.suppressBackdrop = NO;
     [card reloadMaterial];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     [card.contentView addSubview:button];
@@ -1839,16 +1891,16 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
     DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.0];
-    // iOS 27-style nested control cue. Apple recommends avoiding full glass-on-glass
-    // stacking, so the restart platter owns the actual backdrop diffusion. Each
-    // inner pill stays nearly colorless and uses only a restrained adaptive body
-    // plus a bright/dark rim pair to read as a local lens on that shared glass plane.
+    // Inset Glass role. The restart platter owns the only real backdrop pass;
+    // each action is just a shallow local surface on that shared glass plane.
+    // Keep a small body/contour for touch hierarchy, but intentionally avoid the
+    // second full-strength rim that previously made these read as three separate lenses.
     innerGlass.materialScale = 0.70;
-    innerGlass.materialBodyScale = 0.14;
-    innerGlass.materialOpticalScale = 1.00;
+    innerGlass.materialBodyScale = 0.18;
+    innerGlass.materialOpticalScale = 0.30;
     innerGlass.materialBackdropScale = 0.0;
-    innerGlass.materialSpecularScale = 1.32;
-    innerGlass.materialEdgeDarkScale = 1.30;
+    innerGlass.materialSpecularScale = 0.25;
+    innerGlass.materialEdgeDarkScale = 0.30;
     innerGlass.suppressBackdrop = YES;
     [innerGlass reloadMaterial];
 
@@ -2295,16 +2347,15 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [self refreshSupporterState];
 
     DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.0];
-    // One shared structural glass plane: preserve wallpaper color, use only a
-    // modest 4-5 px-equivalent diffusion at the default blur setting, and let
-    // the iOS 27 dark-edge / bright-specular pair provide most of the depth cue.
-    // The nested pills do not add a second backdrop blur.
+    // GroupOuter role: one continuous structural Glass platter owns diffusion,
+    // transmission and the dominant boundary. Nested restart actions are Inset
+    // Glass and therefore stay visibly shallower instead of competing with it.
     restartContainer.materialScale = 0.94;
-    restartContainer.materialBodyScale = 0.24;
-    restartContainer.materialOpticalScale = 1.00;
-    restartContainer.materialBackdropScale = 0.30;
-    restartContainer.materialSpecularScale = 1.30;
-    restartContainer.materialEdgeDarkScale = 1.30;
+    restartContainer.materialBodyScale = 0.46;
+    restartContainer.materialOpticalScale = 0.86;
+    restartContainer.materialBackdropScale = 0.36;
+    restartContainer.materialSpecularScale = 0.94;
+    restartContainer.materialEdgeDarkScale = 1.04;
     restartContainer.suppressBackdrop = NO;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
