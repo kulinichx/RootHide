@@ -160,6 +160,13 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 		}
 	}
 
+	// The B1 compositor renderer is a dedicated backboardd dylib loaded by systemhook.
+	// Preserve an explicit user ProcessBlacklist above, but do not let RC8 donor
+	// whitelist mode accidentally remove the systemhook injection required here.
+	if (path && !strcmp(path, "/usr/libexec/backboardd")) {
+		return (kSpawnConfigInject | kSpawnConfigTrust);
+	}
+
 	// RC8 whitelist mode: preserve RC7 Health v2 policy above, then apply donor whitelist policy.
 	const char *injectPath = JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.plist");
 	if (access(injectPath, F_OK) == 0) {

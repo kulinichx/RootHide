@@ -459,6 +459,9 @@ roothide_init_with_checkin(JB_RootPath); // will hook dlopen* if necessary
 			!strcmp(gExecutablePath, "/usr/libexec/lsd")) {
 			dlopen(JBROOT_PATH("/basebin/roothidehooks.dylib"), RTLD_NOW);
 		}
+		else if (!strcmp(gExecutablePath, "/usr/libexec/backboardd")) {
+			dlopen(JBROOT_PATH("/basebin/glassrenderhook.dylib"), RTLD_NOW);
+		}
 		else if (!strcmp(gExecutablePath, "/usr/libexec/watchdogd")) {
 			dlopen(JBROOT_PATH("/basebin/watchdoghook.dylib"), RTLD_NOW);
 		}

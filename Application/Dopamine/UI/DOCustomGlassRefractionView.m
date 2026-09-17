@@ -264,20 +264,21 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLTexture> _wallpaperTexture;
     UIImage *_wallpaperImage;
-    NSString *_routeB0GroupName;
+    NSString *_liveBackdropGroupName;
+    BOOL _customFilterAttached;
     float _scrimLocations[5];
     float _scrimAlphas[5];
 }
-- (BOOL)routeB0UsesBackdropLayer;
-- (void)configureRouteB0Backdrop;
+- (BOOL)usesLiveBackdropLayer;
+- (void)configureLiveBackdrop;
 @end
 
 @implementation DOCustomGlassRefractionView
 
 + (Class)layerClass
 {
-    // Route B0: prefer the compositor-backed source Mango relies on.
-    // If CABackdropLayer is unavailable, preserve the existing Metal fallback.
+    // Prefer the live compositor backdrop used by the B1 custom QuartzCore filter.
+    // Preserve the app-side Metal implementation only as a compatibility fallback.
     Class backdropClass = NSClassFromString(@"CABackdropLayer");
     return backdropClass ?: [CAMetalLayer class];
 }
@@ -300,39 +301,45 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     return self;
 }
 
-- (BOOL)routeB0UsesBackdropLayer
+- (BOOL)usesLiveBackdropLayer
 {
     Class backdropClass = NSClassFromString(@"CABackdropLayer");
     return backdropClass && [self.layer isKindOfClass:backdropClass];
 }
 
-- (void)configureRouteB0Backdrop
+- (void)configureLiveBackdrop
 {
-    if (![self routeB0UsesBackdropLayer])
+    if (![self usesLiveBackdropLayer])
         return;
 
     CALayer *backdropLayer = self.layer;
 
+    // These properties mirror the compositor-facing Mango client configuration
+    // confirmed from the iOS 16 binary. B0-only probe flags are gone.
     if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setLayerUsesCoreImageFilters:")])
         [backdropLayer setValue:@NO forKey:@"layerUsesCoreImageFilters"];
     if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setWindowServerAware:")])
-        [backdropLayer setValue:@YES forKey:@"windowServerAware"];
+        [backdropLayer setValue:@NO forKey:@"windowServerAware"];
     if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setGroupName:")])
-        [backdropLayer setValue:_routeB0GroupName forKey:@"groupName"];
-    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setAllowsInPlaceFiltering:")])
-        [backdropLayer setValue:@YES forKey:@"allowsInPlaceFiltering"];
+        [backdropLayer setValue:_liveBackdropGroupName forKey:@"groupName"];
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setGroupNamespace:")])
+        [backdropLayer setValue:@"go.roothide" forKey:@"groupNamespace"];
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setIgnoresScreenClip:")])
+        [backdropLayer setValue:@YES forKey:@"ignoresScreenClip"];
     if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setScale:")])
         [backdropLayer setValue:@1.0 forKey:@"scale"];
 
-    id blur = DOCustomGlassRefractionCreateCAFilter(@"gaussianBlur");
-    if (blur) {
-        [blur setValue:@12.0 forKey:@"inputRadius"];
-        [blur setValue:@YES forKey:@"inputNormalizeEdges"];
-        [blur setValue:@YES forKey:@"inputHardEdges"];
-        [backdropLayer setValue:@[blur] forKey:@"filters"];
-    }
-    else {
-        [backdropLayer setValue:@[] forKey:@"filters"];
+    if (!_customFilterAttached) {
+        id refraction = DOCustomGlassRefractionCreateCAFilter(@"go.roothide.refraction");
+        if (refraction) {
+            [backdropLayer setValue:@[refraction] forKey:@"filters"];
+            _customFilterAttached = YES;
+        }
+        else {
+            // Registration happens in backboardd. If it is not ready yet,
+            // leave the layer valid and let the normal view lifecycle retry.
+            [backdropLayer setValue:@[] forKey:@"filters"];
+        }
     }
 
     self.clipsToBounds = YES;
@@ -361,12 +368,12 @@ static NSString * const DOCustomGlassRefractionShaderSource =
         _scrimAlphas[index] = 0.0f;
     }
 
-    _routeB0GroupName =
-        [NSString stringWithFormat:@"com.roothide.dopamine.customglass.route-b0.%p", self];
+    _liveBackdropGroupName =
+        [NSString stringWithFormat:@"go.roothide.dopamine.customglass.%p", self];
+    _customFilterAttached = NO;
 
-    if ([self routeB0UsesBackdropLayer]) {
-        [self configureRouteB0Backdrop];
-        NSLog(@"[CustomGlass][RouteB0] live CABackdropLayer active (%@)", _routeB0GroupName);
+    if ([self usesLiveBackdropLayer]) {
+        [self configureLiveBackdrop];
         return;
     }
 
@@ -551,14 +558,26 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
 - (void)didMoveToWindow
 {
     [super didMoveToWindow];
+    if ([self usesLiveBackdropLayer] && self.window)
+        _customFilterAttached = NO;
     [self refreshRefraction];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self usesLiveBackdropLayer] &&
+        previousTraitCollection.userInterfaceStyle != self.traitCollection.userInterfaceStyle) {
+        _customFilterAttached = NO;
+        [self refreshRefraction];
+    }
 }
 
 - (void)layoutSubviews
 {
     [super layoutSubviews];
 
-    if ([self routeB0UsesBackdropLayer]) {
+    if ([self usesLiveBackdropLayer]) {
         self.layer.cornerRadius = self.glassCornerRadius;
         self.layer.cornerCurve = kCACornerCurveContinuous;
         return;
@@ -583,9 +602,9 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
         return;
     }
 
-    if ([self routeB0UsesBackdropLayer]) {
+    if ([self usesLiveBackdropLayer]) {
         if (self.window && !CGRectIsEmpty(self.bounds))
-            [self configureRouteB0Backdrop];
+            [self configureLiveBackdrop];
         return;
     }
 
