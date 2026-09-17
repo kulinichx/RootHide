@@ -2476,10 +2476,10 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         avatarMaterial.preferredCornerRadius = avatarSize / 2.0;
         avatarMaterial.materialScale = enabled ? 0.70 : 0.46;
         avatarMaterial.materialBodyScale = enabled ? 0.68 : 0.34;
-        avatarMaterial.materialOpticalScale = enabled ? 0.76 : 0.52;
+        avatarMaterial.materialOpticalScale = enabled ? 0.82 : 0.52;
         avatarMaterial.materialBackdropScale = enabled ? 0.78 : 0.34;
-        avatarMaterial.materialSpecularScale = enabled ? 0.74 : 0.54;
-        avatarMaterial.materialEdgeDarkScale = enabled ? 0.50 : 0.42;
+        avatarMaterial.materialSpecularScale = enabled ? 1.00 : 0.54;
+        avatarMaterial.materialEdgeDarkScale = enabled ? 0.38 : 0.42;
         avatarMaterial.suppressBackdrop = NO;
         [avatarMaterial reloadMaterial];
     }
@@ -2491,11 +2491,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     void (^updates)(void) = ^{
         self.customGlassAvatarContainerView.transform = CGAffineTransformIdentity;
         self.customGlassAvatarContainerView.layer.cornerRadius = avatarSize / 2.0;
-        self.customGlassAvatarContainerView.layer.shadowOpacity = enabled ? 0.07 : 0.16;
+        self.customGlassAvatarContainerView.layer.shadowOpacity = enabled ? 0.035 : 0.16;
         self.customGlassAvatarContainerView.layer.shadowRadius = enabled ? 4.0 : 6.0;
         self.customGlassAvatarPhotoView.layer.cornerRadius = MAX(0.0, (avatarSize - 2.0) / 2.0);
-        self.customGlassAvatarPhotoView.alpha = enabled ? 0.70 : 1.0;
-        self.customGlassAvatarFallbackIconView.alpha = enabled ? 0.72 : 1.0;
+        self.customGlassAvatarPhotoView.alpha = enabled ? 0.34 : 1.0;
+        self.customGlassAvatarFallbackIconView.alpha = enabled ? 0.44 : 1.0;
 
         CGFloat detailAlpha = enabled ? 0.0 : 1.0;
         self.customGlassUsernameLabel.alpha = detailAlpha;
@@ -2549,12 +2549,14 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     // Docking is deliberately edge-gated: the avatar follows the finger all the
     // way to a real screen edge, and only becomes Focus when it actually reaches
     // the magnetic edge zone. A quick short flick near the center never docks.
-    CGRect safeFrame = self.view.safeAreaLayoutGuide.layoutFrame;
+    CGRect screenFrame = self.view.bounds;
     CGPoint avatarCenter = [avatarView.superview convertPoint:avatarView.center toView:self.view];
-    CGFloat edgeInset = 8.0;
-    CGFloat halfWidth = CGRectGetWidth(avatarView.bounds) / 2.0;
-    CGFloat leftTargetX = CGRectGetMinX(safeFrame) + edgeInset + halfWidth;
-    CGFloat rightTargetX = CGRectGetMaxX(safeFrame) - edgeInset - halfWidth;
+    // Dock by the avatar's *center* against the physical view edge. Roughly 30%
+    // of the compact Focus avatar is allowed to sit outside the screen so it reads
+    // as an edge tab instead of a floating badge with an inset margin.
+    CGFloat focusPeekCenter = MAX(8.0, self.customGlassAvatarFocusSize * 0.20);
+    CGFloat leftTargetX = CGRectGetMinX(screenFrame) + focusPeekCenter;
+    CGFloat rightTargetX = CGRectGetMaxX(screenFrame) - focusPeekCenter;
     CGFloat leftTravel = leftTargetX - avatarCenter.x;
     CGFloat rightTravel = rightTargetX - avatarCenter.x;
 
@@ -2792,7 +2794,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     avatarGlass.layer.shadowOpacity = 0.16;
     avatarGlass.layer.shadowRadius = 6.0;
     avatarGlass.layer.shadowOffset = CGSizeMake(0.0, 3.0);
-    [profileView addSubview:avatarGlass];
+    // Keep the avatar as a root-view overlay rather than a child of profileView.
+    // A subview outside profileView's bounds cannot reliably receive hit-testing;
+    // placing it here lets the pan gesture reach and remain interactive at the
+    // physical left/right screen edges while its Y position still follows profileView.
+    [self.view addSubview:avatarGlass];
     self.customGlassAvatarContainerView = avatarGlass;
     self.customGlassAvatarNormalSize = avatarSize;
     self.customGlassAvatarFocusSize = isPad ? 58.0 : (compactLayout ? 46.0 : 50.0);
@@ -2800,12 +2806,14 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     self.customGlassAvatarWidthConstraint = [avatarGlass.widthAnchor constraintEqualToConstant:avatarSize];
     self.customGlassAvatarHeightConstraint = [avatarGlass.heightAnchor constraintEqualToConstant:avatarSize];
     self.customGlassAvatarCenterXConstraint = [avatarGlass.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor];
-    // Dock against the actual screen safe-area, not the inset mainStack/profileView.
-    // This lets the avatar reach the visible edge before the magnetic snap occurs.
+    // Focus is an edge tab: anchor the avatar center close to the physical screen
+    // edge so part of the circle intentionally peeks offscreen. This is visually
+    // quieter over video/Live Photo and removes the previous floating inset.
+    CGFloat focusPeekCenter = MAX(8.0, self.customGlassAvatarFocusSize * 0.20);
     self.customGlassAvatarLeadingDockConstraint =
-        [avatarGlass.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:8.0];
+        [avatarGlass.centerXAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:focusPeekCenter];
     self.customGlassAvatarTrailingDockConstraint =
-        [avatarGlass.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-8.0];
+        [avatarGlass.centerXAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-focusPeekCenter];
 
     [NSLayoutConstraint activateConstraints:@[
         self.customGlassAvatarWidthConstraint,
