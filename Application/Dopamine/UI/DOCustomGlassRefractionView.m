@@ -22,6 +22,20 @@ static inline float DOCustomGlassRefractionClamp01(CGFloat value)
     return (float)MIN(1.0, MAX(0.0, value));
 }
 
+static id DOCustomGlassRefractionCreateCAFilter(NSString *type)
+{
+    Class filterClass = NSClassFromString(@"CAFilter");
+    SEL selector = NSSelectorFromString(@"filterWithType:");
+    if (!filterClass || ![filterClass respondsToSelector:selector])
+        return nil;
+
+    IMP implementation = [filterClass methodForSelector:selector];
+    typedef id (*DOCustomGlassRefractionFilterFactoryIMP)(id, SEL, id);
+    DOCustomGlassRefractionFilterFactoryIMP factory =
+        (DOCustomGlassRefractionFilterFactoryIMP)implementation;
+    return factory(filterClass, selector, type);
+}
+
 typedef struct {
     vector_float2 viewSize;
     vector_float2 wallpaperOrigin;
@@ -250,16 +264,22 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLTexture> _wallpaperTexture;
     UIImage *_wallpaperImage;
+    NSString *_routeB0GroupName;
     float _scrimLocations[5];
     float _scrimAlphas[5];
 }
+- (BOOL)routeB0UsesBackdropLayer;
+- (void)configureRouteB0Backdrop;
 @end
 
 @implementation DOCustomGlassRefractionView
 
 + (Class)layerClass
 {
-    return [CAMetalLayer class];
+    // Route B0: prefer the compositor-backed source Mango relies on.
+    // If CABackdropLayer is unavailable, preserve the existing Metal fallback.
+    Class backdropClass = NSClassFromString(@"CABackdropLayer");
+    return backdropClass ?: [CAMetalLayer class];
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -280,6 +300,48 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     return self;
 }
 
+- (BOOL)routeB0UsesBackdropLayer
+{
+    Class backdropClass = NSClassFromString(@"CABackdropLayer");
+    return backdropClass && [self.layer isKindOfClass:backdropClass];
+}
+
+- (void)configureRouteB0Backdrop
+{
+    if (![self routeB0UsesBackdropLayer])
+        return;
+
+    CALayer *backdropLayer = self.layer;
+
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setLayerUsesCoreImageFilters:")])
+        [backdropLayer setValue:@NO forKey:@"layerUsesCoreImageFilters"];
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setWindowServerAware:")])
+        [backdropLayer setValue:@YES forKey:@"windowServerAware"];
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setGroupName:")])
+        [backdropLayer setValue:_routeB0GroupName forKey:@"groupName"];
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setAllowsInPlaceFiltering:")])
+        [backdropLayer setValue:@YES forKey:@"allowsInPlaceFiltering"];
+    if ([backdropLayer respondsToSelector:NSSelectorFromString(@"setScale:")])
+        [backdropLayer setValue:@1.0 forKey:@"scale"];
+
+    id blur = DOCustomGlassRefractionCreateCAFilter(@"gaussianBlur");
+    if (blur) {
+        [blur setValue:@12.0 forKey:@"inputRadius"];
+        [blur setValue:@YES forKey:@"inputNormalizeEdges"];
+        [blur setValue:@YES forKey:@"inputHardEdges"];
+        [backdropLayer setValue:@[blur] forKey:@"filters"];
+    }
+    else {
+        [backdropLayer setValue:@[] forKey:@"filters"];
+    }
+
+    self.clipsToBounds = YES;
+    backdropLayer.masksToBounds = YES;
+    backdropLayer.cornerRadius = self.glassCornerRadius;
+    backdropLayer.cornerCurve = kCACornerCurveContinuous;
+    [backdropLayer setNeedsDisplay];
+}
+
 - (void)commonInit
 {
     self.backgroundColor = UIColor.clearColor;
@@ -297,6 +359,15 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     for (NSUInteger index = 0; index < 5; index++) {
         _scrimLocations[index] = defaultLocations[index];
         _scrimAlphas[index] = 0.0f;
+    }
+
+    _routeB0GroupName =
+        [NSString stringWithFormat:@"com.roothide.dopamine.customglass.route-b0.%p", self];
+
+    if ([self routeB0UsesBackdropLayer]) {
+        [self configureRouteB0Backdrop];
+        NSLog(@"[CustomGlass][RouteB0] live CABackdropLayer active (%@)", _routeB0GroupName);
+        return;
     }
 
     _device = MTLCreateSystemDefaultDevice();
@@ -487,6 +558,12 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
 {
     [super layoutSubviews];
 
+    if ([self routeB0UsesBackdropLayer]) {
+        self.layer.cornerRadius = self.glassCornerRadius;
+        self.layer.cornerCurve = kCACornerCurveContinuous;
+        return;
+    }
+
     CAMetalLayer *metalLayer = (CAMetalLayer *)self.layer;
     CGFloat scale = self.window.screen.scale ?: UIScreen.mainScreen.scale;
     metalLayer.contentsScale = scale;
@@ -503,6 +580,12 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
         dispatch_async(dispatch_get_main_queue(), ^{
             [weakSelf refreshRefraction];
         });
+        return;
+    }
+
+    if ([self routeB0UsesBackdropLayer]) {
+        if (self.window && !CGRectIsEmpty(self.bounds))
+            [self configureRouteB0Backdrop];
         return;
     }
 
