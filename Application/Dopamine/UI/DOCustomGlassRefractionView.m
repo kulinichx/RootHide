@@ -2,13 +2,13 @@
 //  DOCustomGlassRefractionView.m
 //  Dopamine
 //
-//  Experimental iOS 16 edge-refraction prototype for Custom Glass.
+//  G02.R2A identity-calibration surface for Custom Glass.
 //
-//  This intentionally does not emulate Liquid Glass with another opaque tint layer.
-//  It re-samples the already-displayed wallpaper through a shallow rounded-rect lens,
-//  adds a narrow directional specular and a weak opposing dark edge, and leaves the
-//  center transparent so the real composed wallpaper remains untouched. The shader is compiled at runtime so the prototype does
-//  not depend on a separate metallib build step.
+//  This gate deliberately performs NO refraction, diffusion, tint, specular,
+//  dark edge, Fresnel, or dispersion. It reconstructs the exact Navigation
+//  background (displayed wallpaper + the live five-stop adaptive black scrim)
+//  inside the capsule. If the source mapping and color pipeline are correct,
+//  the fully opaque Metal capsule should visually disappear into the backdrop.
 //
 
 #import "DOCustomGlassRefractionView.h"
@@ -18,19 +18,25 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <simd/simd.h>
 
+static inline float DOCustomGlassRefractionClamp01(CGFloat value)
+{
+    return (float)MIN(1.0, MAX(0.0, value));
+}
+
 typedef struct {
     vector_float2 viewSize;
-    vector_float2 viewOrigin;
-    vector_float2 viewportSize;
+    vector_float2 wallpaperOrigin;
+    vector_float2 wallpaperViewportSize;
     vector_float2 textureSize;
+    vector_float2 scrimOrigin;
+    vector_float2 scrimViewportSize;
+    vector_float4 scrimLocations;
+    vector_float4 scrimAlphas;
+    vector_float4 scrimTail; // x = location[4], y = alpha[4]
     float cornerRadius;
-    float rimWidth;
-    float refractionAmount;
-    float diffusionRadius;
-    float specularStrength;
-    float darkEdgeStrength;
-    float screenScale;
-    float padding;
+    float padding0;
+    float padding1;
+    float padding2;
 } DOCustomGlassRefractionUniforms;
 
 static NSString * const DOCustomGlassRefractionShaderSource =
@@ -44,17 +50,18 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "\n"
 "struct Uniforms {\n"
 "    float2 viewSize;\n"
-"    float2 viewOrigin;\n"
-"    float2 viewportSize;\n"
+"    float2 wallpaperOrigin;\n"
+"    float2 wallpaperViewportSize;\n"
 "    float2 textureSize;\n"
+"    float2 scrimOrigin;\n"
+"    float2 scrimViewportSize;\n"
+"    float4 scrimLocations;\n"
+"    float4 scrimAlphas;\n"
+"    float4 scrimTail;\n"
 "    float cornerRadius;\n"
-"    float rimWidth;\n"
-"    float refractionAmount;\n"
-"    float diffusionRadius;\n"
-"    float specularStrength;\n"
-"    float darkEdgeStrength;\n"
-"    float screenScale;\n"
-"    float padding;\n"
+"    float padding0;\n"
+"    float padding1;\n"
+"    float padding2;\n"
 "};\n"
 "\n"
 "vertex VertexOut glass_vertex(uint vid [[vertex_id]]) {\n"
@@ -79,12 +86,30 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "}\n"
 "\n"
 "float2 aspectFillUV(float2 viewportPoint, constant Uniforms &u) {\n"
-"    float scale = max(u.viewportSize.x / max(u.textureSize.x, 1.0),\n"
-"                      u.viewportSize.y / max(u.textureSize.y, 1.0));\n"
+"    float scale = max(u.wallpaperViewportSize.x / max(u.textureSize.x, 1.0),\n"
+"                      u.wallpaperViewportSize.y / max(u.textureSize.y, 1.0));\n"
 "    float2 displayedSize = u.textureSize * scale;\n"
-"    float2 crop = (displayedSize - u.viewportSize) * 0.5;\n"
+"    float2 crop = (displayedSize - u.wallpaperViewportSize) * 0.5;\n"
 "    float2 imagePoint = (viewportPoint + crop) / max(scale, 0.0001);\n"
 "    return clamp(imagePoint / max(u.textureSize, float2(1.0)), float2(0.001), float2(0.999));\n"
+"}\n"
+"\n"
+"float scrimSegment(float y, float l0, float l1, float a0, float a1) {\n"
+"    float t = clamp((y - l0) / max(l1 - l0, 0.0001), 0.0, 1.0);\n"
+"    return mix(a0, a1, t);\n"
+"}\n"
+"\n"
+"float adaptiveScrimAlpha(float y, constant Uniforms &u) {\n"
+"    float4 l = u.scrimLocations;\n"
+"    float4 a = u.scrimAlphas;\n"
+"    float l4 = u.scrimTail.x;\n"
+"    float a4 = u.scrimTail.y;\n"
+"    if (y <= l.x) return a.x;\n"
+"    if (y <= l.y) return scrimSegment(y, l.x, l.y, a.x, a.y);\n"
+"    if (y <= l.z) return scrimSegment(y, l.y, l.z, a.y, a.z);\n"
+"    if (y <= l.w) return scrimSegment(y, l.z, l.w, a.z, a.w);\n"
+"    if (y <= l4)  return scrimSegment(y, l.w, l4, a.w, a4);\n"
+"    return a4;\n"
 "}\n"
 "\n"
 "fragment float4 glass_fragment(VertexOut in [[stage_in]],\n"
@@ -100,59 +125,20 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "        discard_fragment();\n"
 "    }\n"
 "\n"
-"    float insideDistance = max(-d, 0.0);\n"
-"    float rimWidth = max(u.rimWidth, 1.0);\n"
-"    float rimT = clamp(insideDistance / rimWidth, 0.0, 1.0);\n"
+"    // Gate A: exact wallpaper identity sample. No displaced UV.\n"
+"    float2 wallpaperPoint = u.wallpaperOrigin + localPoint;\n"
+"    float2 wallpaperUV = aspectFillUV(wallpaperPoint, u);\n"
+"    float3 color = wallpaper.sample(linearSampler, wallpaperUV).rgb;\n"
 "\n"
-"    // Zero displacement exactly at the boundary and at the inner end of the bevel;\n"
-"    // peak displacement occurs in the middle of the rim. This avoids a hard seam.\n"
-"    float lensProfile = sin(rimT * 3.14159265);\n"
-"    lensProfile *= 1.0 - smoothstep(0.96, 1.0, rimT);\n"
+"    // Reconstruct the Navigation CAGradientLayer in its own viewport space.\n"
+"    float2 scrimPoint = u.scrimOrigin + localPoint;\n"
+"    float scrimY = clamp(scrimPoint.y / max(u.scrimViewportSize.y, 1.0), 0.0, 1.0);\n"
+"    float scrimAlpha = clamp(adaptiveScrimAlpha(scrimY, u), 0.0, 1.0);\n"
+"    color *= (1.0 - scrimAlpha);\n"
 "\n"
-"    // Numerical SDF gradient gives the local rounded-rect surface normal.\n"
-"    const float eps = 0.65;\n"
-"    float dx = roundedBoxSDF(localPoint + float2(eps, 0.0), u.viewSize, radius) -\n"
-"               roundedBoxSDF(localPoint - float2(eps, 0.0), u.viewSize, radius);\n"
-"    float dy = roundedBoxSDF(localPoint + float2(0.0, eps), u.viewSize, radius) -\n"
-"               roundedBoxSDF(localPoint - float2(0.0, eps), u.viewSize, radius);\n"
-"    float2 normal = normalize(float2(dx, dy) + float2(0.00001));\n"
-"\n"
-"    float2 viewportPoint = u.viewOrigin + localPoint;\n"
-"    float2 refractedPoint = viewportPoint - (normal * (u.refractionAmount * lensProfile));\n"
-"\n"
-"    // Very small five-tap diffusion. The center remains readable; diffusion becomes\n"
-"    // slightly stronger inside the refractive rim instead of turning into frosted blur.\n"
-"    float diffusion = max(u.diffusionRadius, 0.0) * (0.45 + (0.55 * lensProfile));\n"
-"    float2 uv0 = aspectFillUV(refractedPoint, u);\n"
-"    float2 uvL = aspectFillUV(refractedPoint + float2(-diffusion, 0.0), u);\n"
-"    float2 uvR = aspectFillUV(refractedPoint + float2( diffusion, 0.0), u);\n"
-"    float2 uvT = aspectFillUV(refractedPoint + float2(0.0, -diffusion), u);\n"
-"    float2 uvB = aspectFillUV(refractedPoint + float2(0.0,  diffusion), u);\n"
-"\n"
-"    float3 color = wallpaper.sample(linearSampler, uv0).rgb * 0.56;\n"
-"    color += wallpaper.sample(linearSampler, uvL).rgb * 0.11;\n"
-"    color += wallpaper.sample(linearSampler, uvR).rgb * 0.11;\n"
-"    color += wallpaper.sample(linearSampler, uvT).rgb * 0.11;\n"
-"    color += wallpaper.sample(linearSampler, uvB).rgb * 0.11;\n"
-"\n"
-"    // The glass is revealed mainly by an asymmetric bright/dark rim pair.\n"
-"    float edgeWeight = 1.0 - smoothstep(0.0, rimWidth, insideDistance);\n"
-"    float2 lightDirection = normalize(float2(-0.62, -0.78));\n"
-"    float lightFacing = max(dot(normal, lightDirection), 0.0);\n"
-"    float darkFacing = max(dot(normal, -lightDirection), 0.0);\n"
-"    float specular = pow(lightFacing, 3.2) * pow(edgeWeight, 1.55);\n"
-"    float opposingDark = pow(darkFacing, 2.2) * pow(edgeWeight, 1.35);\n"
-"\n"
-"    color += float3(u.specularStrength * specular);\n"
-"    color *= 1.0 - (u.darkEdgeStrength * opposingDark);\n"
-"    color = clamp(color, float3(0.0), float3(1.0));\n"
-"\n"
-"    // Prototype only replaces pixels in the refractive rim. The center remains\n"
-"    // transparent so the real navigation wallpaper + adaptive scrim continue to\n"
-"    // show through unchanged; this prevents the lens from becoming a second flat\n"
-"    // wallpaper layer and makes actual edge displacement easy to verify on-device.\n"
-"    float opticalAlpha = mask * clamp(edgeWeight * 1.10, 0.0, 1.0);\n"
-"    return float4(color * opticalAlpha, opticalAlpha);\n"
+"    // Full replacement is intentional. If identity is correct, this opaque capsule\n"
+"    // should be visually indistinguishable from the backdrop underneath it.\n"
+"    return float4(color * mask, mask);\n"
 "}\n";
 
 @interface DOCustomGlassRefractionView ()
@@ -162,6 +148,8 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLTexture> _wallpaperTexture;
     UIImage *_wallpaperImage;
+    float _scrimLocations[5];
+    float _scrimAlphas[5];
 }
 @end
 
@@ -198,10 +186,16 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 
     _glassCornerRadius = 14.0;
     _refractiveRimWidth = 12.0;
-    _refractionAmount = 0.85;   // UIKit points: ~2.6 px on a 3x iPhone.
-    _diffusionRadius = 0.60;    // Deliberately much smaller than a frosted-glass blur.
-    _specularStrength = 0.18;
-    _darkEdgeStrength = 0.10;
+    _refractionAmount = 0.0;
+    _diffusionRadius = 0.0;
+    _specularStrength = 0.0;
+    _darkEdgeStrength = 0.0;
+
+    const float defaultLocations[5] = {0.0f, 0.22f, 0.48f, 0.74f, 1.0f};
+    for (NSUInteger index = 0; index < 5; index++) {
+        _scrimLocations[index] = defaultLocations[index];
+        _scrimAlphas[index] = 0.0f;
+    }
 
     _device = MTLCreateSystemDefaultDevice();
     if (!_device) {
@@ -211,10 +205,16 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 
     CAMetalLayer *metalLayer = (CAMetalLayer *)self.layer;
     metalLayer.device = _device;
-    metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
     metalLayer.framebufferOnly = YES;
     metalLayer.opaque = NO;
     metalLayer.contentsScale = UIScreen.mainScreen.scale;
+
+    CGColorSpaceRef sRGB = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    if (sRGB) {
+        metalLayer.colorspace = sRGB;
+        CGColorSpaceRelease(sRGB);
+    }
 
     _commandQueue = [_device newCommandQueue];
 
@@ -223,7 +223,7 @@ static NSString * const DOCustomGlassRefractionShaderSource =
                                                    options:nil
                                                      error:&libraryError];
     if (!library) {
-        NSLog(@"[CustomGlass] Metal refraction shader compile failed: %@", libraryError);
+        NSLog(@"[CustomGlass][Identity] Metal shader compile failed: %@", libraryError);
         self.hidden = YES;
         return;
     }
@@ -231,7 +231,7 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     id<MTLFunction> vertexFunction = [library newFunctionWithName:@"glass_vertex"];
     id<MTLFunction> fragmentFunction = [library newFunctionWithName:@"glass_fragment"];
     if (!vertexFunction || !fragmentFunction) {
-        NSLog(@"[CustomGlass] Metal refraction shader functions are unavailable");
+        NSLog(@"[CustomGlass][Identity] Metal shader functions are unavailable");
         self.hidden = YES;
         return;
     }
@@ -253,7 +253,7 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     NSError *pipelineError = nil;
     _pipelineState = [_device newRenderPipelineStateWithDescriptor:descriptor error:&pipelineError];
     if (!_pipelineState) {
-        NSLog(@"[CustomGlass] Metal refraction pipeline creation failed: %@", pipelineError);
+        NSLog(@"[CustomGlass][Identity] Metal pipeline creation failed: %@", pipelineError);
         self.hidden = YES;
     }
 }
@@ -263,17 +263,16 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
     if (!image)
         return nil;
 
+    // Preserve source resolution for the identity gate. Only normalize orientation.
+    if (image.imageOrientation == UIImageOrientationUp)
+        return image;
+
     CGSize orientedSize = image.size;
     if (orientedSize.width < 1.0 || orientedSize.height < 1.0)
         return image;
 
-    CGFloat longestEdge = MAX(orientedSize.width, orientedSize.height);
-    CGFloat downscale = longestEdge > 2048.0 ? (2048.0 / longestEdge) : 1.0;
-    CGSize targetSize = CGSizeMake(MAX(1.0, floor(orientedSize.width * downscale)),
-                                   MAX(1.0, floor(orientedSize.height * downscale)));
-
-    UIGraphicsBeginImageContextWithOptions(targetSize, YES, 1.0);
-    [image drawInRect:(CGRect){CGPointZero, targetSize}];
+    UIGraphicsBeginImageContextWithOptions(orientedSize, YES, image.scale);
+    [image drawInRect:(CGRect){CGPointZero, orientedSize}];
     UIImage *normalized = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return normalized ?: image;
@@ -309,11 +308,34 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
     NSError *error = nil;
     _wallpaperTexture = [loader newTextureWithCGImage:cgImage options:options error:&error];
     if (!_wallpaperTexture) {
-        NSLog(@"[CustomGlass] Wallpaper texture upload failed: %@", error);
+        NSLog(@"[CustomGlass][Identity] Wallpaper texture upload failed: %@", error);
         return;
     }
 
     self.hidden = NO;
+    [self refreshRefraction];
+}
+
+- (void)setWallpaperScrimLocations:(NSArray<NSNumber *> *)locations
+                            alphas:(NSArray<NSNumber *> *)alphas
+{
+    static const float fallbackLocations[5] = {0.0f, 0.22f, 0.48f, 0.74f, 1.0f};
+
+    for (NSUInteger index = 0; index < 5; index++) {
+        float location = (locations.count > index)
+            ? DOCustomGlassRefractionClamp01(locations[index].doubleValue)
+            : fallbackLocations[index];
+        if (index > 0)
+            location = MAX(location, _scrimLocations[index - 1]);
+
+        float alpha = (alphas.count > index)
+            ? DOCustomGlassRefractionClamp01(alphas[index].doubleValue)
+            : 0.0f;
+
+        _scrimLocations[index] = location;
+        _scrimAlphas[index] = alpha;
+    }
+
     [self refreshRefraction];
 }
 
@@ -325,7 +347,7 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
 
 - (void)setRefractiveRimWidth:(CGFloat)refractiveRimWidth
 {
-    _refractiveRimWidth = MAX(1.0, refractiveRimWidth);
+    _refractiveRimWidth = MAX(0.0, refractiveRimWidth);
     [self refreshRefraction];
 }
 
@@ -386,11 +408,20 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
         !self.window || CGRectIsEmpty(self.bounds))
         return;
 
-    UIView *samplingView = self.wallpaperSamplingView;
-    if (!samplingView || CGRectIsEmpty(samplingView.bounds))
+    UIView *wallpaperView = self.wallpaperSamplingView;
+    if (!wallpaperView || CGRectIsEmpty(wallpaperView.bounds))
         return;
 
-    CGRect sampleRect = [self convertRect:self.bounds toView:samplingView];
+    CGRect wallpaperRect = [self convertRect:self.bounds toView:wallpaperView];
+
+    UIView *scrimView = self.wallpaperScrimSamplingView;
+    CGRect scrimRect = CGRectZero;
+    CGSize scrimViewportSize = self.bounds.size;
+    if (scrimView && !CGRectIsEmpty(scrimView.bounds)) {
+        scrimRect = [self convertRect:self.bounds toView:scrimView];
+        scrimViewportSize = scrimView.bounds.size;
+    }
+
     CAMetalLayer *metalLayer = (CAMetalLayer *)self.layer;
     id<CAMetalDrawable> drawable = [metalLayer nextDrawable];
     if (!drawable)
@@ -398,17 +429,18 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
 
     DOCustomGlassRefractionUniforms uniforms = {
         .viewSize = {(float)CGRectGetWidth(self.bounds), (float)CGRectGetHeight(self.bounds)},
-        .viewOrigin = {(float)CGRectGetMinX(sampleRect), (float)CGRectGetMinY(sampleRect)},
-        .viewportSize = {(float)CGRectGetWidth(samplingView.bounds), (float)CGRectGetHeight(samplingView.bounds)},
+        .wallpaperOrigin = {(float)CGRectGetMinX(wallpaperRect), (float)CGRectGetMinY(wallpaperRect)},
+        .wallpaperViewportSize = {(float)CGRectGetWidth(wallpaperView.bounds), (float)CGRectGetHeight(wallpaperView.bounds)},
         .textureSize = {(float)_wallpaperTexture.width, (float)_wallpaperTexture.height},
+        .scrimOrigin = {(float)CGRectGetMinX(scrimRect), (float)CGRectGetMinY(scrimRect)},
+        .scrimViewportSize = {(float)MAX(scrimViewportSize.width, 1.0), (float)MAX(scrimViewportSize.height, 1.0)},
+        .scrimLocations = {_scrimLocations[0], _scrimLocations[1], _scrimLocations[2], _scrimLocations[3]},
+        .scrimAlphas = {_scrimAlphas[0], _scrimAlphas[1], _scrimAlphas[2], _scrimAlphas[3]},
+        .scrimTail = {_scrimLocations[4], _scrimAlphas[4], 0.0f, 0.0f},
         .cornerRadius = (float)self.glassCornerRadius,
-        .rimWidth = (float)self.refractiveRimWidth,
-        .refractionAmount = (float)self.refractionAmount,
-        .diffusionRadius = (float)self.diffusionRadius,
-        .specularStrength = (float)self.specularStrength,
-        .darkEdgeStrength = (float)self.darkEdgeStrength,
-        .screenScale = (float)(self.window.screen.scale ?: UIScreen.mainScreen.scale),
-        .padding = 0.0f,
+        .padding0 = 0.0f,
+        .padding1 = 0.0f,
+        .padding2 = 0.0f,
     };
 
     MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];

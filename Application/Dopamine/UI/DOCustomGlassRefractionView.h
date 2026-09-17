@@ -2,7 +2,7 @@
 //  DOCustomGlassRefractionView.h
 //  Dopamine
 //
-//  Experimental iOS 16 edge-refraction prototype for Custom Glass.
+//  G02.R2A identity-calibration surface for Custom Glass.
 //
 
 #import <UIKit/UIKit.h>
@@ -14,20 +14,27 @@ NS_ASSUME_NONNULL_BEGIN
 /// Coordinate space used to map this view back onto the shared wallpaper image view.
 @property(nonatomic, weak, nullable) UIView *wallpaperSamplingView;
 
-/// Rounded-rectangle optical geometry, in UIKit points.
+/// Coordinate space of the viewport-sized adaptive wallpaper scrim.
+@property(nonatomic, weak, nullable) UIView *wallpaperScrimSamplingView;
+
+/// Rounded-rectangle geometry, in UIKit points.
 @property(nonatomic, assign) CGFloat glassCornerRadius;
+
+/// Retained for the next refraction gate. G02.R2A intentionally renders identity only.
 @property(nonatomic, assign) CGFloat refractiveRimWidth;
 @property(nonatomic, assign) CGFloat refractionAmount;
 @property(nonatomic, assign) CGFloat diffusionRadius;
-
-/// Edge-lighting response. These do not tint the center of the glass.
 @property(nonatomic, assign) CGFloat specularStrength;
 @property(nonatomic, assign) CGFloat darkEdgeStrength;
 
-/// Installs/replaces the wallpaper texture. Passing nil clears the optical surface.
+/// Installs/replaces the exact wallpaper image currently displayed by Navigation.
 - (void)setWallpaperImage:(nullable UIImage *)image;
 
-/// Re-renders using the current texture and geometry.
+/// Installs the five real CAGradientLayer stop locations and effective black-scrim alphas.
+- (void)setWallpaperScrimLocations:(NSArray<NSNumber *> *)locations
+                            alphas:(NSArray<NSNumber *> *)alphas;
+
+/// Re-renders using the current texture, sampling spaces, and scrim state.
 - (void)refreshRefraction;
 
 @end

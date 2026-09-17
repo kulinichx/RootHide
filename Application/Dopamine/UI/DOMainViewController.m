@@ -31,6 +31,9 @@
 - (BOOL)customGlassHasSharedBackground;
 - (UIImage *)customGlassCurrentDisplayedBackgroundImage;
 - (UIView *)customGlassBackgroundSamplingView;
+- (UIView *)customGlassWallpaperScrimSamplingView;
+- (NSArray<NSNumber *> *)customGlassCurrentWallpaperScrimLocations;
+- (NSArray<NSNumber *> *)customGlassCurrentWallpaperScrimAlphas;
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
 @end
 
@@ -1334,13 +1337,17 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
 
-    // G02.R prototype: the Metal surface samples the exact wallpaper image view
-    // currently visible behind the navigation stack. Refreshing here keeps it
-    // aligned with wallpaper/blur changes without turning the renderer into a
-    // per-frame screen-capture path.
+    // G02.R2A identity gate: reproduce the exact Navigation backdrop inside the
+    // Metal capsule before any refraction is reintroduced. Pull the real scrim
+    // layer state instead of duplicating its luminance/alpha algorithm.
     if (self.customGlassJailbreakRefractionView) {
         self.customGlassJailbreakRefractionView.wallpaperSamplingView =
             [self.navigationController customGlassBackgroundSamplingView];
+        self.customGlassJailbreakRefractionView.wallpaperScrimSamplingView =
+            [self.navigationController customGlassWallpaperScrimSamplingView];
+        [self.customGlassJailbreakRefractionView
+            setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
+            alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
         [self.customGlassJailbreakRefractionView
             setWallpaperImage:[self.navigationController customGlassCurrentDisplayedBackgroundImage]];
         [self.customGlassJailbreakRefractionView refreshRefraction];
@@ -2403,21 +2410,24 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
 
-    // G02.R edge-refraction prototype. Unlike DOCustomLiquidGlassView this surface
-    // does not synthesize its body from tint/blur. It re-samples the actual shared
-    // wallpaper through a shallow rounded-rect lens. First scope is intentionally
-    // limited to the jailbreak/status bar so device testing can prove real pixel
-    // displacement before the renderer is generalized to the restart group.
+    // G02.R2A identity calibration. This surface intentionally has no optical
+    // treatment: it fully redraws the wallpaper + live adaptive scrim. If the
+    // reconstruction is correct, the capsule boundary should disappear on-device.
     jailbreakEmphasisGlass = [[DOCustomGlassRefractionView alloc] initWithFrame:CGRectZero];
     jailbreakEmphasisGlass.translatesAutoresizingMaskIntoConstraints = NO;
     jailbreakEmphasisGlass.wallpaperSamplingView =
         [self.navigationController customGlassBackgroundSamplingView];
+    jailbreakEmphasisGlass.wallpaperScrimSamplingView =
+        [self.navigationController customGlassWallpaperScrimSamplingView];
     jailbreakEmphasisGlass.glassCornerRadius = 14.0;
-    jailbreakEmphasisGlass.refractiveRimWidth = 12.0;
-    jailbreakEmphasisGlass.refractionAmount = 0.85;   // ~2.6 px on a 3x iPhone.
-    jailbreakEmphasisGlass.diffusionRadius = 0.60;    // Light diffusion, not frost.
-    jailbreakEmphasisGlass.specularStrength = 0.18;
-    jailbreakEmphasisGlass.darkEdgeStrength = 0.10;
+    jailbreakEmphasisGlass.refractiveRimWidth = 0.0;
+    jailbreakEmphasisGlass.refractionAmount = 0.0;
+    jailbreakEmphasisGlass.diffusionRadius = 0.0;
+    jailbreakEmphasisGlass.specularStrength = 0.0;
+    jailbreakEmphasisGlass.darkEdgeStrength = 0.0;
+    [jailbreakEmphasisGlass
+        setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
+        alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
     [jailbreakEmphasisGlass
         setWallpaperImage:[self.navigationController customGlassCurrentDisplayedBackgroundImage]];
     self.customGlassJailbreakRefractionView = jailbreakEmphasisGlass;

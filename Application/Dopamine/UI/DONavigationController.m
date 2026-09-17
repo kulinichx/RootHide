@@ -405,6 +405,40 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     return self.backgroundImageView;
 }
 
+- (UIView *)customGlassWallpaperScrimSamplingView
+{
+    return self.customGlassWallpaperScrimView;
+}
+
+- (NSArray<NSNumber *> *)customGlassCurrentWallpaperScrimLocations
+{
+    NSArray<NSNumber *> *locations = self.customGlassWallpaperScrimLayer.locations;
+    if (locations.count == 5)
+        return [locations copy];
+
+    return @[@0.0, @0.22, @0.48, @0.74, @1.0];
+}
+
+- (NSArray<NSNumber *> *)customGlassCurrentWallpaperScrimAlphas
+{
+    CAGradientLayer *scrimLayer = self.customGlassWallpaperScrimLayer;
+    NSArray *colors = scrimLayer.colors;
+    CGFloat layerOpacity = DOCustomGlassNavigationClamp01(scrimLayer.opacity);
+    NSMutableArray<NSNumber *> *alphas = [NSMutableArray arrayWithCapacity:5];
+
+    for (NSUInteger index = 0; index < 5; index++) {
+        CGFloat alpha = 0.0;
+        if (index < colors.count) {
+            CGColorRef color = (__bridge CGColorRef)colors[index];
+            if (color)
+                alpha = CGColorGetAlpha(color) * layerOpacity;
+        }
+        [alphas addObject:@(DOCustomGlassNavigationClamp01(alpha))];
+    }
+
+    return alphas;
+}
+
 - (BOOL)customGlassHasSharedBackground
 {
     return self.customGlassUsingCustomBackground && self.customGlassBackgroundSourceImage != nil;
