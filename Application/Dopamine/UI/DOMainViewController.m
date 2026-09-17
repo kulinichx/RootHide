@@ -300,24 +300,24 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _specularGradientLayer = [CAGradientLayer layer];
         _specularGradientLayer.startPoint = CGPointMake(0.0, 0.0);
         _specularGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-        _specularGradientLayer.locations = @[@0.0, @0.25, @0.50, @0.75, @1.0];
+        _specularGradientLayer.locations = @[@0.0, @0.34, @0.50, @0.66, @1.0];
         _specularGradientLayer.zPosition = 901.0;
         _specularMaskLayer = [CAShapeLayer layer];
         _specularMaskLayer.fillColor = UIColor.clearColor.CGColor;
         _specularMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _specularMaskLayer.lineWidth = 0.75;
+        _specularMaskLayer.lineWidth = 1.30;
         _specularGradientLayer.mask = _specularMaskLayer;
         [self.layer addSublayer:_specularGradientLayer];
 
         _specularBoostGradientLayer = [CAGradientLayer layer];
         _specularBoostGradientLayer.startPoint = CGPointMake(0.0, 0.0);
         _specularBoostGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-        _specularBoostGradientLayer.locations = @[@0.0, @0.14, @0.50, @0.86, @1.0];
+        _specularBoostGradientLayer.locations = @[@0.0, @0.22, @0.50, @0.78, @1.0];
         _specularBoostGradientLayer.zPosition = 902.0;
         _specularBoostMaskLayer = [CAShapeLayer layer];
         _specularBoostMaskLayer.fillColor = UIColor.clearColor.CGColor;
         _specularBoostMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _specularBoostMaskLayer.lineWidth = 0.75;
+        _specularBoostMaskLayer.lineWidth = 0.70;
         _specularBoostGradientLayer.mask = _specularBoostMaskLayer;
         [self.layer addSublayer:_specularBoostGradientLayer];
 
@@ -331,7 +331,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _specularDarkMaskLayer = [CAShapeLayer layer];
         _specularDarkMaskLayer.fillColor = UIColor.clearColor.CGColor;
         _specularDarkMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _specularDarkMaskLayer.lineWidth = 0.40;
+        _specularDarkMaskLayer.lineWidth = 0.32;
         _specularDarkGradientLayer.mask = _specularDarkMaskLayer;
         [self.layer addSublayer:_specularDarkGradientLayer];
 
@@ -531,22 +531,22 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         0.30 * opticalResponse * brightOpticalScale);
     CGFloat specularBoostAlpha = MIN(0.60,
         0.60 * opticalResponse * brightOpticalScale);
-    CGFloat specularDarkAlpha = MIN(0.16,
-        0.16 * opticalResponse * darkEdgeScale);
+    CGFloat specularDarkAlpha = MIN(0.12,
+        0.12 * opticalResponse * darkEdgeScale);
 
     self.specularGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.52].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.62].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.22].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.30].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.82].CGColor
     ];
 
     self.specularBoostGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.18].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.22].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.10].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.14].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.78].CGColor
     ];
 
@@ -554,24 +554,27 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // reinforce material separation, while every corner fades fully to zero.
     self.specularDarkGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.18].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.12].CGColor,
         (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.14].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.08].CGColor,
         (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor
     ];
 
-    self.specularMaskLayer.lineWidth = 0.75;
-    self.specularBoostMaskLayer.lineWidth = 0.75;
-    self.specularDarkMaskLayer.lineWidth = 0.40;
+    // Apple-style hierarchy: a broader low-energy reflection region plus a
+    // narrower bright filament. The dark rail stays subordinate and never
+    // closes the perimeter into a black outline.
+    self.specularMaskLayer.lineWidth = 1.30;
+    self.specularBoostMaskLayer.lineWidth = 0.70;
+    self.specularDarkMaskLayer.lineWidth = 0.32;
 
     // Keep one neutral structural hairline so Glass still has a material boundary
     // at Highlight = 0. It depends on body/appearance only, never on Highlight.
     CGFloat structuralBorderAlpha = darkGlassAppearance ?
-        (0.028 + (0.018 * bodyAuthority)) :
-        (0.018 + (0.014 * bodyAuthority));
-    self.layer.borderWidth = 0.30;
+        (0.024 + (0.014 * bodyAuthority)) :
+        (0.015 + (0.011 * bodyAuthority));
+    self.layer.borderWidth = 0.25;
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(0.045, structuralBorderAlpha)].CGColor;
+                                             alpha:MIN(0.035, structuralBorderAlpha)].CGColor;
 
 }
 
@@ -624,6 +627,23 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 }
 
 @end
+
+// Main Glass is one material across home, Theme Settings, the restart shell,
+// and the compact jailbreak status bar. Geometry may differ, but body, backdrop,
+// and optical response must not drift into separate material families.
+static void DOCustomGlassApplyMainMaterialProfile(DOCustomLiquidGlassView *glassView)
+{
+    if (!glassView)
+        return;
+
+    glassView.materialScale = 0.90;
+    glassView.materialBodyScale = 0.92;
+    glassView.materialOpticalScale = 0.84;
+    glassView.materialBackdropScale = 0.92;
+    glassView.materialSpecularScale = 0.82;
+    glassView.materialEdgeDarkScale = 0.88;
+    glassView.suppressBackdrop = NO;
+}
 
 @interface DOCustomGlassSegmentedControl : UISegmentedControl
 @property(nonatomic, strong) CALayer *glassSelectionLayer;
@@ -751,17 +771,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                                    action:(UIAction *)action
 {
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
-    DOCustomLiquidGlassView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.045];
-    // Main Glass role: a normal card owns its backdrop and keeps a restrained
-    // directional rim. This same role is used by the home cards so the theme
-    // page is a faithful preview of the material hierarchy.
-    row.materialScale = 0.90;
-    row.materialBodyScale = 0.92;
-    row.materialOpticalScale = 0.84;
-    row.materialBackdropScale = 0.92;
-    row.materialSpecularScale = 0.82;
-    row.materialEdgeDarkScale = 0.88;
-    row.suppressBackdrop = NO;
+    DOCustomLiquidGlassView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.05];
+    // Exact Main Glass profile: Theme Settings rows must render the same
+    // material as the home cards rather than a nearby approximation.
+    DOCustomGlassApplyMainMaterialProfile(row);
     [row reloadMaterial];
 
     UIImageSymbolConfiguration *symbolConfiguration =
@@ -1053,20 +1066,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     UILabel *appearanceLabel = [self themeSectionLabelWithText:@"外观效果"];
     [contentStack addArrangedSubview:appearanceLabel];
 
-    // The control panel is the actual Liquid Glass renderer used by the home
-    // cards. Slider changes therefore preview the same material rather than an
-    // unrelated UIVisualEffectView approximation.
+    // The control panel is the actual Main Glass renderer used by the home
+    // cards. Slider changes therefore preview the same body, backdrop and
+    // directional optics instead of a deliberately quieter panel variant.
     self.previewGlassView = [self themeGlassViewWithCornerRadius:26.0 tintAlpha:0.05];
-    // Panel Glass role: keep the large settings platter a little quieter than
-    // a standalone card. It still owns one real backdrop pass, while nested
-    // controls below must not add another blur/refraction layer.
-    self.previewGlassView.materialScale = 0.92;
-    self.previewGlassView.materialBodyScale = 0.88;
-    self.previewGlassView.materialOpticalScale = 0.74;
-    self.previewGlassView.materialBackdropScale = 0.86;
-    self.previewGlassView.materialSpecularScale = 0.72;
-    self.previewGlassView.materialEdgeDarkScale = 0.84;
-    self.previewGlassView.suppressBackdrop = NO;
+    DOCustomGlassApplyMainMaterialProfile(self.previewGlassView);
     [self.previewGlassView reloadMaterial];
     [contentStack addArrangedSubview:self.previewGlassView];
     // This panel previously collapsed to zero height because the Glass content
@@ -1892,14 +1896,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (DOCustomLiquidGlassView *)customGlassCardWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
 {
     DOCustomLiquidGlassView *card = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
-    // Main Glass role shared by Settings / About / Theme Settings.
-    card.materialScale = 0.90;
-    card.materialBodyScale = 0.92;
-    card.materialOpticalScale = 0.84;
-    card.materialBackdropScale = 0.92;
-    card.materialSpecularScale = 0.82;
-    card.materialEdgeDarkScale = 0.88;
-    card.suppressBackdrop = NO;
+    // Settings / About / Theme Settings consume the same Main Glass profile
+    // used by the Theme Settings preview and the compact jailbreak bar.
+    DOCustomGlassApplyMainMaterialProfile(card);
     [card reloadMaterial];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     [card.contentView addSubview:button];
@@ -2371,17 +2370,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
     [self refreshSupporterState];
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.0];
-    // GroupOuter role: one continuous structural Glass platter owns diffusion,
-    // transmission and the dominant boundary. Nested restart actions are Inset
-    // Glass and therefore stay visibly shallower instead of competing with it.
-    restartContainer.materialScale = 0.94;
-    restartContainer.materialBodyScale = 0.46;
-    restartContainer.materialOpticalScale = 0.86;
-    restartContainer.materialBackdropScale = 0.36;
-    restartContainer.materialSpecularScale = 0.94;
-    restartContainer.materialEdgeDarkScale = 1.04;
-    restartContainer.suppressBackdrop = NO;
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
+    // Restart Outer is a true Main Glass surface. The three nested actions keep
+    // their suppressBackdrop Inset role, so this does not introduce double blur.
+    DOCustomGlassApplyMainMaterialProfile(restartContainer);
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
 
@@ -2491,13 +2483,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // DOCustomLiquidGlassView itself, so no second Metal edge pass is layered above it.
     jailbreakMaterialGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.05];
     jailbreakMaterialGlass.userInteractionEnabled = NO;
-    jailbreakMaterialGlass.materialScale = 0.90;
-    jailbreakMaterialGlass.materialBodyScale = 0.92;
-    jailbreakMaterialGlass.materialOpticalScale = 0.84;
-    jailbreakMaterialGlass.materialBackdropScale = 0.92;
-    jailbreakMaterialGlass.materialSpecularScale = 1.00;
-    jailbreakMaterialGlass.materialEdgeDarkScale = 0.88;
-    jailbreakMaterialGlass.suppressBackdrop = NO;
+    DOCustomGlassApplyMainMaterialProfile(jailbreakMaterialGlass);
     [jailbreakMaterialGlass reloadMaterial];
 
     // Keep the legacy property nil so existing refresh plumbing remains a safe no-op.
