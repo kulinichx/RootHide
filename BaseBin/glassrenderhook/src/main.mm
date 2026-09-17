@@ -4,6 +4,7 @@
 #import <dispatch/dispatch.h>
 #import <objc/message.h>
 
+#include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <mach/vm_prot.h>
