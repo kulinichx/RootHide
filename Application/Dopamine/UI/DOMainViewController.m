@@ -15,6 +15,7 @@
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
 #import "DOCustomGlassMediaStore.h"
+#import "DOCustomGlassRefractionView.h"
 #import "DOSupporterLicense.h"
 #import <pthread.h>
 #import <sys/sysctl.h>
@@ -28,6 +29,11 @@
 - (void)customGlassReplaceSharedBackgroundWithImage:(UIImage *)image;
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity;
 - (BOOL)customGlassHasSharedBackground;
+- (UIImage *)customGlassCurrentDisplayedBackgroundImage;
+- (UIView *)customGlassBackgroundSamplingView;
+- (UIView *)customGlassWallpaperScrimSamplingView;
+- (NSArray<NSNumber *> *)customGlassCurrentWallpaperScrimLocations;
+- (NSArray<NSNumber *> *)customGlassCurrentWallpaperScrimAlphas;
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
 @end
 
@@ -84,6 +90,9 @@ static NSString * const DOCustomGlassBackgroundBlurKey = @"DOCustomGlassTheme.Ba
 static NSString * const DOCustomGlassBlurIntensityKey = @"DOCustomGlassTheme.GlassBlurIntensity";
 static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.GlassTransparency";
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
+static NSString * const DOCustomGlassAppearanceKey = @"DOCustomGlassTheme.Appearance";
+static NSString * const DOCustomGlassAppearanceLight = @"light";
+static NSString * const DOCustomGlassAppearanceDark = @"dark";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
@@ -93,6 +102,17 @@ static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
 static inline CGFloat DOCustomGlassClamp01(CGFloat value)
 {
     return MIN(1.0, MAX(0.0, value));
+}
+
+static UIImage *DOCustomGlassSolidImage(UIColor *color)
+{
+    CGRect rect = CGRectMake(0.0, 0.0, 1.0, 1.0);
+    UIGraphicsBeginImageContextWithOptions(rect.size, NO, 0.0);
+    [color setFill];
+    UIRectFill(rect);
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
 }
 
 static id DOCustomGlassCreateCAFilter(NSString *type)
@@ -216,6 +236,11 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, assign) CGFloat preferredCornerRadius;
 @property(nonatomic, assign) CGFloat baseTintAlpha;
 @property(nonatomic, assign) CGFloat materialScale;
+@property(nonatomic, assign) CGFloat materialBodyScale;
+@property(nonatomic, assign) CGFloat materialOpticalScale;
+@property(nonatomic, assign) CGFloat materialBackdropScale;
+@property(nonatomic, assign) CGFloat materialSpecularScale;
+@property(nonatomic, assign) CGFloat materialEdgeDarkScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
 @property(nonatomic, assign) CGFloat lastRenderedShortDimension;
 
@@ -239,6 +264,11 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _preferredCornerRadius = MAX(0.0, cornerRadius);
         _baseTintAlpha = MAX(0.0, baseTintAlpha);
         _materialScale = 1.0;
+        _materialBodyScale = 1.0;
+        _materialOpticalScale = 1.0;
+        _materialBackdropScale = 1.0;
+        _materialSpecularScale = 1.0;
+        _materialEdgeDarkScale = 1.0;
         _suppressBackdrop = NO;
         _lastRenderedShortDimension = 0.0;
 
@@ -369,16 +399,38 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     CGFloat opticalResponse =
         (0.12 * highlightResponse) + (0.88 * pow(highlightResponse, 1.80));
     BOOL darkAppearance = [self usesDarkAppearance];
+    BOOL darkGlassAppearance =
+        [[defaults stringForKey:DOCustomGlassAppearanceKey] isEqualToString:DOCustomGlassAppearanceDark];
+
+    // Per-surface optical role controls. The global sliders still define the
+    // user's material; these scales only shape how a specific control expresses
+    // that material (broad platter vs. concentrated interactive lens).
+    CGFloat materialBackdropScale = MAX(0.0, MIN(1.25, self.materialBackdropScale));
+    CGFloat materialSpecularScale = MAX(0.0, MIN(1.35, self.materialSpecularScale));
+    CGFloat materialEdgeDarkScale = MAX(0.0, MIN(1.35, self.materialEdgeDarkScale));
 
     BOOL isBackdropLayer = [NSStringFromClass(self.layer.class) containsString:@"Backdrop"];
     if (isBackdropLayer && !self.suppressBackdrop) {
-        CGFloat blurRadius = 0.35 + (17.0 * blurResponse);
-        // Keep wallpaper chroma, but do not boost it so aggressively that the
-        // Glass body becomes indistinguishable from the source wallpaper.
-        CGFloat saturation = 1.01 + (0.11 * blurResponse);
-        CGFloat brightness = darkAppearance ?
-            (0.006 + (0.012 * blurResponse)) :
-            (0.002 + (0.006 * blurResponse));
+        CGFloat blurRadius = darkGlassAppearance ?
+            (1.10 + (18.2 * blurResponse)) :
+            (0.35 + (17.0 * blurResponse));
+        // Dark Glass increases diffusion modestly, but preserves wallpaper
+        // color transmission instead of turning the material into a black blur.
+        // A structural platter gets a quieter, broader diffusion pass while
+        // an interactive lens can keep a more concentrated local backdrop.
+        // Scale the whole backdrop transform toward neutral rather than stacking
+        // a second full-strength material on top of nested controls.
+        blurRadius *= materialBackdropScale;
+        CGFloat saturation = darkGlassAppearance ?
+            (0.98 + (0.08 * blurResponse)) :
+            (1.01 + (0.11 * blurResponse));
+        saturation = 1.0 + ((saturation - 1.0) * materialBackdropScale);
+        CGFloat brightness = darkGlassAppearance ?
+            (-0.018 - (0.018 * bodyAuthority)) :
+            (darkAppearance ?
+                (0.006 + (0.012 * blurResponse)) :
+                (0.002 + (0.006 * blurResponse)));
+        brightness *= materialBackdropScale;
 
         id saturate = DOCustomGlassCreateCAFilter(@"colorSaturate");
         id brighten = DOCustomGlassCreateCAFilter(@"colorBrightness");
@@ -421,7 +473,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         }
         self.fallbackBlurView.hidden = self.suppressBackdrop;
         self.fallbackBlurView.alpha = self.suppressBackdrop ? 0.0 :
-            MIN(0.68, 0.18 + (0.50 * blurResponse));
+            MIN(0.68, (0.18 + (0.50 * blurResponse)) * materialBackdropScale);
     }
 
     // Transparency owns a real material-body range now. R5's 0.8%...6.5%
@@ -438,11 +490,6 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     if (darkAppearance)
         tintAlpha += 0.010 * bodyAuthority;
 
-    // Grouping shells intentionally skip the second backdrop blur, but they
-    // still need enough body/edge authority to visibly contain the three pills.
-    if (self.suppressBackdrop)
-        tintAlpha = 0.060 + (0.082 * bodyAuthority);
-
     // Material separation follows the *local wallpaper*, not just global
     // Dark Mode. Bright wallpaper receives a faint dark neutral body; dark
     // wallpaper receives a faint light body. This gives every Glass surface a
@@ -457,34 +504,51 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         prefersDarkForeground = [navigationController customGlassPrefersDarkForegroundForView:self];
     }
 
-    self.neutralTintView.backgroundColor = prefersDarkForeground ?
-        UIColor.blackColor : UIColor.whiteColor;
-    self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.155 : 0.190,
-                                     tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
+    if (darkGlassAppearance) {
+        // Dark Glass always uses a dark neutral material body. Local wallpaper
+        // luminance only changes its authority: bright wallpaper gets more body,
+        // dark wallpaper gets less. Foreground polarity remains light.
+        CGFloat darkBodyAlpha =
+            0.088 +
+            (0.118 * bodyAuthority) +
+            (0.10 * self.baseTintAlpha) +
+            (prefersDarkForeground ? 0.034 : -0.010);
+        self.neutralTintView.backgroundColor = UIColor.blackColor;
+        self.neutralTintView.alpha = MIN(0.245, MAX(0.072, darkBodyAlpha));
+    }
+    else {
+        self.neutralTintView.backgroundColor = prefersDarkForeground ?
+            UIColor.blackColor : UIColor.whiteColor;
+        self.neutralTintView.alpha = MIN(0.190,
+                                         tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
+    }
+    self.neutralTintView.alpha *= MAX(0.0, MIN(1.0, self.materialBodyScale));
 
     CGFloat geometryScale = [self surfaceGeometryScale];
-    CGFloat opticalScale = self.suppressBackdrop ?
-        MIN(0.88, geometryScale * 0.86) :
-        MIN(1.00, geometryScale);
+    CGFloat opticalScale = MIN(1.00, geometryScale);
+    CGFloat materialOpticalScale = MAX(0.0, MIN(1.25, self.materialOpticalScale));
+    CGFloat brightOpticalScale = materialOpticalScale * materialSpecularScale;
+    CGFloat darkEdgeScale = materialOpticalScale * materialEdgeDarkScale;
 
     // Directional rail topology follows GlassFolders: the upper / leading rail
     // carries the specular cue, the lower / trailing rail is a weaker return,
     // and the side walls stay quiet. R6 widens the *luminance response*, not
     // the physical line width, so the HighLight slider is obvious without
     // bringing back the thick white-border look.
-    CGFloat upperRailAlpha = MIN(0.40,
-        (0.001 + (0.395 * opticalResponse)) * opticalScale);
-    CGFloat secondaryRailAlpha = MIN(0.120,
-        (0.001 + (0.116 * opticalResponse)) * opticalScale);
-    CGFloat shoulderAlpha = MIN(0.105,
-        (0.001 + (0.096 * opticalResponse)) * opticalScale);
+    CGFloat upperRailAlpha = MIN(darkGlassAppearance ? 0.48 : 0.40,
+        (0.001 + ((darkGlassAppearance ? 0.455 : 0.395) * opticalResponse)) * opticalScale * brightOpticalScale);
+    CGFloat secondaryRailAlpha = MIN(darkGlassAppearance ? 0.135 : 0.120,
+        (0.001 + ((darkGlassAppearance ? 0.128 : 0.116) * opticalResponse)) * opticalScale * brightOpticalScale);
+    CGFloat shoulderAlpha = MIN(darkGlassAppearance ? 0.112 : 0.105,
+        (0.001 + ((darkGlassAppearance ? 0.103 : 0.096) * opticalResponse)) * opticalScale * brightOpticalScale);
 
     // Broad illumination is intentionally independent of rail width. This is
     // the visible "light catching the material" response that was missing in
     // R6. It remains below labels/icons, so readability never gets washed out.
-    CGFloat washAlpha = self.suppressBackdrop ?
-        MIN(0.070, (0.002 + 0.072 * opticalResponse) * opticalScale) :
-        MIN(0.145, (0.002 + 0.148 * opticalResponse) * opticalScale);
+    // Keep the broad wash quiet. SpecularScale is reserved for directional rails;
+    // boosting the whole white wash would turn clear glass back into a milky overlay.
+    CGFloat washAlpha = MIN(darkGlassAppearance ? 0.108 : 0.145,
+        (0.002 + (darkGlassAppearance ? 0.112 : 0.148) * opticalResponse) * opticalScale * materialOpticalScale);
     self.surfaceHighlightLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.42].CGColor,
@@ -502,40 +566,39 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     self.specularGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.84].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.002 * opticalScale].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.002 * opticalScale * brightOpticalScale].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.46].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
     ];
 
-    CGFloat shoulderWidth = self.suppressBackdrop ?
-        (0.30 + (0.20 * geometryScale)) :
-        (0.30 + (0.44 * geometryScale));
-    CGFloat specularWidth = self.suppressBackdrop ?
-        (0.14 + (0.06 * geometryScale)) :
-        (0.15 + (0.13 * geometryScale));
+    CGFloat shoulderWidth = 0.30 + (0.44 * geometryScale);
+    CGFloat specularWidth = 0.15 + (0.13 * geometryScale);
     self.shoulderMaskLayer.lineWidth = shoulderWidth;
     self.specularMaskLayer.lineWidth = specularWidth;
 
-    CGFloat contrastContourAlpha = self.suppressBackdrop ?
-        (0.075 + (0.060 * bodyAuthority) + (0.045 * opticalResponse)) :
-        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale);
+    CGFloat contrastContourAlpha = darkGlassAppearance ?
+        ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale * darkEdgeScale) :
+        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale * darkEdgeScale);
     self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
-                                                            alpha:MIN(self.suppressBackdrop ? 0.18 : 0.09,
+                                                            alpha:MIN(darkGlassAppearance ? 0.145 : 0.09,
                                                                       contrastContourAlpha)].CGColor;
-    self.contrastContourLayer.lineWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) : (0.22 + (0.05 * geometryScale));
+    self.contrastContourLayer.lineWidth = darkGlassAppearance ?
+        (0.24 + (0.055 * geometryScale)) :
+        (0.22 + (0.05 * geometryScale));
 
     // Keep a hairline structural contour independent from the specular slider.
     // This is the minimum depth cue that separates Glass from wallpaper when
     // both blur and highlight are low. Highlight adds brightness, not thickness.
-    CGFloat structuralBorderAlpha = self.suppressBackdrop ?
-        (0.078 + (0.105 * opticalResponse)) :
-        ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale);
-    self.layer.borderWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) :
+    // The structural hairline stays neutral; only the directional rail receives
+    // the stronger specular multiplier. This avoids a uniform white outline.
+    CGFloat structuralBorderAlpha = darkGlassAppearance ?
+        ((0.026 + (0.036 * bodyAuthority) + (0.082 * opticalResponse)) * opticalScale * materialOpticalScale) :
+        ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale * materialOpticalScale);
+    self.layer.borderWidth = darkGlassAppearance ?
+        (0.14 + (0.055 * geometryScale)) :
         (0.15 + (0.07 * geometryScale));
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(self.suppressBackdrop ? 0.20 : 0.14,
+                                             alpha:MIN(darkGlassAppearance ? 0.155 : 0.14,
                                                        structuralBorderAlpha)].CGColor;
 
 }
@@ -613,6 +676,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property DOCustomWallpaperBlurView *backgroundBlurView;
 @property DOCustomLiquidGlassView *previewGlassView;
 
+@property UISegmentedControl *glassAppearanceControl;
 @property UISlider *backgroundBlurSlider;
 @property UISlider *glassBlurSlider;
 @property UISlider *glassTransparencySlider;
@@ -872,6 +936,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // This page stays transparent above that persistent source.
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        DOCustomGlassAppearanceKey : DOCustomGlassAppearanceLight,
         DOCustomGlassBackgroundBlurKey : @0.10,
         DOCustomGlassBlurIntensityKey : @0.85,
         DOCustomGlassTransparencyKey : @0.70,
@@ -963,7 +1028,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // surface was frame-driven. Keep a safety floor even though contentView is
     // now Auto Layout driven, so all four sliders remain visible on every iOS 16
     // device and Dynamic Type configuration.
-    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 420.0 : 404.0)].active = YES;
+    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 488.0 : 472.0)].active = YES;
 
     UIStackView *controlsStack = [[UIStackView alloc] init];
     controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -979,6 +1044,60 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     ]];
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+    UILabel *liquidGlassLabel = [[UILabel alloc] init];
+    liquidGlassLabel.text = @"Liquid Glass";
+    liquidGlassLabel.textColor = UIColor.whiteColor;
+    liquidGlassLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    [controlsStack addArrangedSubview:liquidGlassLabel];
+
+    self.glassAppearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
+    self.glassAppearanceControl.selectedSegmentTintColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    self.glassAppearanceControl.backgroundColor = UIColor.clearColor;
+
+    UIImage *normalSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:0.0 alpha:0.12]);
+    UIImage *selectedSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:1.0 alpha:0.18]);
+    UIImage *clearSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    [self.glassAppearanceControl setBackgroundImage:normalSegmentImage
+                                          forState:UIControlStateNormal
+                                        barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setBackgroundImage:selectedSegmentImage
+                                          forState:UIControlStateSelected
+                                        barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateNormal
+                               rightSegmentState:UIControlStateNormal
+                                      barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateSelected
+                               rightSegmentState:UIControlStateNormal
+                                      barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateNormal
+                               rightSegmentState:UIControlStateSelected
+                                      barMetrics:UIBarMetricsDefault];
+
+    self.glassAppearanceControl.layer.cornerRadius = 21.0;
+    self.glassAppearanceControl.layer.cornerCurve = kCACornerCurveContinuous;
+    self.glassAppearanceControl.layer.masksToBounds = YES;
+    self.glassAppearanceControl.accessibilityLabel = @"Liquid Glass";
+    [self.glassAppearanceControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.68],
+        NSFontAttributeName : [UIFont systemFontOfSize:14.0 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+    [self.glassAppearanceControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : UIColor.whiteColor,
+        NSFontAttributeName : [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold]
+    } forState:UIControlStateSelected];
+
+    NSString *appearance = [defaults stringForKey:DOCustomGlassAppearanceKey];
+    self.glassAppearanceControl.selectedSegmentIndex =
+        [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
+    [self.glassAppearanceControl addTarget:self
+                                    action:@selector(glassAppearanceChanged:)
+                          forControlEvents:UIControlEventValueChanged];
+    [controlsStack addArrangedSubview:self.glassAppearanceControl];
+    [self.glassAppearanceControl.heightAnchor constraintEqualToConstant:42.0].active = YES;
 
     self.backgroundBlurSlider = [self appearanceSlider];
     self.backgroundBlurSlider.minimumValue = 0.0;
@@ -1045,6 +1164,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
+    if (self.glassAppearanceControl) {
+        NSString *appearance = [defaults stringForKey:DOCustomGlassAppearanceKey];
+        self.glassAppearanceControl.selectedSegmentIndex =
+            [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
+    }
     if (self.backgroundBlurSlider)
         self.backgroundBlurSlider.value = [defaults floatForKey:DOCustomGlassBackgroundBlurKey];
     if (self.glassBlurSlider)
@@ -1087,6 +1211,22 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+}
+
+- (void)glassAppearanceChanged:(UISegmentedControl *)control
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *appearance = control.selectedSegmentIndex == 1 ?
+        DOCustomGlassAppearanceDark : DOCustomGlassAppearanceLight;
+
+    [defaults setObject:appearance forKey:DOCustomGlassAppearanceKey];
+    [defaults synchronize];
+
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
+
+    [self refreshLiquidGlassInView:self.view];
+    DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 }
 
 - (void)appearanceSliderChanged:(UISlider *)slider
@@ -1132,10 +1272,15 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (void)restoreRecommendedAppearanceValues
 {
+    self.glassAppearanceControl.selectedSegmentIndex = 0;
     self.backgroundBlurSlider.value = 0.10;
     self.glassBlurSlider.value = 0.85;
     self.glassTransparencySlider.value = 0.70;
     self.glassTintSlider.value = 0.05;
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:DOCustomGlassAppearanceLight forKey:DOCustomGlassAppearanceKey];
+
     [self applyAppearancePreviewAndPersist:YES];
 }
 
@@ -1170,6 +1315,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property UILabel *customGlassMottoLabel;
 @property UIAlertController *customGlassMottoEditor;
 @property DOCustomLiquidGlassView *customGlassThemeCard;
+@property DOCustomGlassRefractionView *customGlassJailbreakRefractionView;
 @property UILabel *customGlassSystemLabel;
 @property UIView *supporterOnlyHintView;
 @property UITapGestureRecognizer *supporterOnlyDismissTapGesture;
@@ -1190,6 +1336,23 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [self refreshCustomGlassMaterialInView:self.view];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
+
+    // G02.R2A identity gate: reproduce the exact Navigation backdrop inside the
+    // Metal capsule before any refraction is reintroduced. Pull the real scrim
+    // layer state instead of duplicating its luminance/alpha algorithm.
+    if (self.customGlassJailbreakRefractionView) {
+        self.customGlassJailbreakRefractionView.wallpaperSamplingView =
+            [self.navigationController customGlassBackgroundSamplingView];
+        self.customGlassJailbreakRefractionView.wallpaperScrimSamplingView =
+            [self.navigationController customGlassWallpaperScrimSamplingView];
+        [self.customGlassJailbreakRefractionView
+            setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
+            alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
+        [self.customGlassJailbreakRefractionView
+            setWallpaperImage:[self.navigationController customGlassCurrentDisplayedBackgroundImage]];
+        [self.customGlassJailbreakRefractionView refreshRefraction];
+    }
+
     DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
 }
 
@@ -1675,10 +1838,18 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
-    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.040];
-    // Small pills use a deliberately lighter optical recipe than folder-sized
-    // panels; the body still samples the wallpaper, but the edge stays hairline.
-    innerGlass.materialScale = 0.72;
+    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.0];
+    // iOS 27-style nested control cue. Apple recommends avoiding full glass-on-glass
+    // stacking, so the restart platter owns the actual backdrop diffusion. Each
+    // inner pill stays nearly colorless and uses only a restrained adaptive body
+    // plus a bright/dark rim pair to read as a local lens on that shared glass plane.
+    innerGlass.materialScale = 0.70;
+    innerGlass.materialBodyScale = 0.14;
+    innerGlass.materialOpticalScale = 1.00;
+    innerGlass.materialBackdropScale = 0.0;
+    innerGlass.materialSpecularScale = 1.32;
+    innerGlass.materialEdgeDarkScale = 1.30;
+    innerGlass.suppressBackdrop = YES;
     [innerGlass reloadMaterial];
 
     // Keep all restart actions on one shared icon/text grid. On iPhone the
@@ -2123,12 +2294,18 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
     [self refreshSupporterState];
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.028];
-    // Visible grouping shell: keep a clear total frame around the three restart
-    // actions, but never apply a second backdrop blur. Its optical rail is
-    // intentionally lighter than the three inner pills.
-    restartContainer.materialScale = 1.10;
-    restartContainer.suppressBackdrop = YES;
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.0];
+    // One shared structural glass plane: preserve wallpaper color, use only a
+    // modest 4-5 px-equivalent diffusion at the default blur setting, and let
+    // the iOS 27 dark-edge / bright-specular pair provide most of the depth cue.
+    // The nested pills do not add a second backdrop blur.
+    restartContainer.materialScale = 0.94;
+    restartContainer.materialBodyScale = 0.24;
+    restartContainer.materialOpticalScale = 1.00;
+    restartContainer.materialBackdropScale = 0.30;
+    restartContainer.materialSpecularScale = 1.30;
+    restartContainer.materialEdgeDarkScale = 1.30;
+    restartContainer.suppressBackdrop = NO;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
 
@@ -2196,7 +2373,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [UIImage systemImageNamed:@"lock.slash" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
 
     __block UIColor *jailbreakExpandedBackgroundColor = nil;
-    __block DOCustomLiquidGlassView *jailbreakEmphasisGlass = nil;
+    __block DOCustomGlassRefractionView *jailbreakEmphasisGlass = nil;
 
     self.jailbreakBtn = [[DOJailbreakButton alloc] initWithAction:[UIAction actionWithTitle:jailbreakButtonTitle image:jailbreakButtonImage identifier:@"jailbreak" handler:^(__kindof UIAction * _Nonnull action) {
 /********************************** roothide specific ************************************/
@@ -2231,14 +2408,30 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.jailbreakBtn.enabled = !isJailbroken && isSupported;
 
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
-    // On the home screen, use the same blur/border language as the other cards
-    // but with a stronger tint (0.10 vs 0.05) to keep the jailbreak CTA visually
-    // more important without looking like a separate solid-blue material.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
-    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.075];
-    jailbreakEmphasisGlass.materialScale = 0.82;
-    [jailbreakEmphasisGlass reloadMaterial];
-    jailbreakEmphasisGlass.userInteractionEnabled = NO;
+
+    // Glass V2 keeps the calibrated backdrop as the source of truth. Optical
+    // displacement is concentrated near the rim so the CTA reads as a thin glass
+    // surface instead of a magnifying lens.
+    jailbreakEmphasisGlass = [[DOCustomGlassRefractionView alloc] initWithFrame:CGRectZero];
+    jailbreakEmphasisGlass.translatesAutoresizingMaskIntoConstraints = NO;
+    jailbreakEmphasisGlass.wallpaperSamplingView =
+        [self.navigationController customGlassBackgroundSamplingView];
+    jailbreakEmphasisGlass.wallpaperScrimSamplingView =
+        [self.navigationController customGlassWallpaperScrimSamplingView];
+    jailbreakEmphasisGlass.glassCornerRadius = 14.0;
+    jailbreakEmphasisGlass.refractiveRimWidth = 12.0;
+    jailbreakEmphasisGlass.refractionAmount = 0.72;
+    jailbreakEmphasisGlass.diffusionRadius = 0.55;
+    jailbreakEmphasisGlass.specularStrength = 0.18;
+    jailbreakEmphasisGlass.darkEdgeStrength = 0.08;
+    [jailbreakEmphasisGlass
+        setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
+        alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
+    [jailbreakEmphasisGlass
+        setWallpaperImage:[self.navigationController customGlassCurrentDisplayedBackgroundImage]];
+    self.customGlassJailbreakRefractionView = jailbreakEmphasisGlass;
+
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
     [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass atIndex:0];
     [NSLayoutConstraint activateConstraints:@[
