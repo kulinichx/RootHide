@@ -1777,6 +1777,8 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 @property DOCustomWallpaperBlurView *customGlassBackgroundBlurView;
 @property UIImageView *customGlassAvatarPhotoView;
 @property(nonatomic, strong) UIView *customGlassAvatarContainerView;
+@property(nonatomic, strong) DOCustomLiquidGlassView *customGlassAvatarMaterialView;
+@property(nonatomic, strong) UIImageView *customGlassAvatarFallbackIconView;
 @property(nonatomic, strong) NSArray<UILabel *> *customGlassHeaderSubtitleLabels;
 @property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarWidthConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarHeightConstraint;
@@ -2466,6 +2468,22 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     self.customGlassAvatarIconWidthConstraint.constant = avatarIconSize;
     self.customGlassAvatarIconHeightConstraint.constant = avatarIconSize;
 
+    // Focus mode is a small translucent Liquid Glass lens instead of an opaque
+    // profile sticker. Keep the photo readable, but let the live wallpaper/video
+    // transmit through it so the docked avatar belongs to the same material family.
+    DOCustomLiquidGlassView *avatarMaterial = self.customGlassAvatarMaterialView;
+    if (avatarMaterial) {
+        avatarMaterial.preferredCornerRadius = avatarSize / 2.0;
+        avatarMaterial.materialScale = enabled ? 0.70 : 0.46;
+        avatarMaterial.materialBodyScale = enabled ? 0.68 : 0.34;
+        avatarMaterial.materialOpticalScale = enabled ? 0.76 : 0.52;
+        avatarMaterial.materialBackdropScale = enabled ? 0.78 : 0.34;
+        avatarMaterial.materialSpecularScale = enabled ? 0.74 : 0.54;
+        avatarMaterial.materialEdgeDarkScale = enabled ? 0.50 : 0.42;
+        avatarMaterial.suppressBackdrop = NO;
+        [avatarMaterial reloadMaterial];
+    }
+
     self.customGlassAvatarContainerView.accessibilityLabel = enabled ? @"恢复个人资料" : @"更换头像";
     self.customGlassUsernameLabel.userInteractionEnabled = !enabled;
     self.customGlassMottoLabel.userInteractionEnabled = !enabled;
@@ -2473,7 +2491,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     void (^updates)(void) = ^{
         self.customGlassAvatarContainerView.transform = CGAffineTransformIdentity;
         self.customGlassAvatarContainerView.layer.cornerRadius = avatarSize / 2.0;
+        self.customGlassAvatarContainerView.layer.shadowOpacity = enabled ? 0.07 : 0.16;
+        self.customGlassAvatarContainerView.layer.shadowRadius = enabled ? 4.0 : 6.0;
         self.customGlassAvatarPhotoView.layer.cornerRadius = MAX(0.0, (avatarSize - 2.0) / 2.0);
+        self.customGlassAvatarPhotoView.alpha = enabled ? 0.70 : 1.0;
+        self.customGlassAvatarFallbackIconView.alpha = enabled ? 0.72 : 1.0;
 
         CGFloat detailAlpha = enabled ? 0.0 : 1.0;
         self.customGlassUsernameLabel.alpha = detailAlpha;
@@ -2524,14 +2546,26 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     CGPoint translation = [gesture translationInView:self.view];
     CGPoint velocity = [gesture velocityInView:self.view];
 
+    // Docking is deliberately edge-gated: the avatar follows the finger all the
+    // way to a real screen edge, and only becomes Focus when it actually reaches
+    // the magnetic edge zone. A quick short flick near the center never docks.
+    CGRect safeFrame = self.view.safeAreaLayoutGuide.layoutFrame;
+    CGPoint avatarCenter = [avatarView.superview convertPoint:avatarView.center toView:self.view];
+    CGFloat edgeInset = 8.0;
+    CGFloat halfWidth = CGRectGetWidth(avatarView.bounds) / 2.0;
+    CGFloat leftTargetX = CGRectGetMinX(safeFrame) + edgeInset + halfWidth;
+    CGFloat rightTargetX = CGRectGetMaxX(safeFrame) - edgeInset - halfWidth;
+    CGFloat leftTravel = leftTargetX - avatarCenter.x;
+    CGFloat rightTravel = rightTargetX - avatarCenter.x;
+
     if (gesture.state == UIGestureRecognizerStateChanged) {
         CGFloat drag = translation.x;
         if (self.customGlassProfileFocusEnabled) {
             BOOL towardCenter = self.customGlassProfileFocusDockRight ? (drag < 0.0) : (drag > 0.0);
-            drag *= towardCenter ? 0.55 : 0.16;
+            drag *= towardCenter ? 0.72 : 0.10;
         }
         else {
-            drag = MAX(-72.0, MIN(72.0, drag)) * 0.55;
+            drag = MAX(leftTravel, MIN(rightTravel, drag));
         }
         avatarView.transform = CGAffineTransformMakeTranslation(drag, 0.0);
         return;
@@ -2543,7 +2577,10 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         return;
 
     if (self.customGlassProfileFocusEnabled) {
-        BOOL shouldRestore = fabs(translation.x) >= 28.0 || fabs(velocity.x) >= 360.0;
+        BOOL towardCenter = self.customGlassProfileFocusDockRight ?
+            (translation.x < 0.0) : (translation.x > 0.0);
+        BOOL shouldRestore = towardCenter &&
+            (fabs(translation.x) >= 28.0 || fabs(velocity.x) >= 360.0);
         if (shouldRestore) {
             [self setCustomGlassProfileFocusEnabled:NO
                                           dockRight:self.customGlassProfileFocusDockRight
@@ -2557,17 +2594,22 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         return;
     }
 
-    BOOL shouldFocus = fabs(translation.x) >= 38.0 || fabs(velocity.x) >= 520.0;
-    if (!shouldFocus) {
-        [UIView animateWithDuration:0.20
-                         animations:^{ avatarView.transform = CGAffineTransformIdentity; }];
+    CGFloat edgeMagnet = 14.0;
+    BOOL reachedLeftEdge = translation.x <= (leftTravel + edgeMagnet);
+    BOOL reachedRightEdge = translation.x >= (rightTravel - edgeMagnet);
+    if (!reachedLeftEdge && !reachedRightEdge) {
+        [UIView animateWithDuration:0.22
+                              delay:0.0
+             usingSpringWithDamping:0.82
+              initialSpringVelocity:0.25
+                            options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{ avatarView.transform = CGAffineTransformIdentity; }
+                         completion:nil];
         return;
     }
 
-    CGFloat direction = fabs(velocity.x) >= 520.0 ? velocity.x : translation.x;
-    BOOL dockRight = direction > 0.0;
     [self setCustomGlassProfileFocusEnabled:YES
-                                  dockRight:dockRight
+                                  dockRight:reachedRightEdge
                                    animated:YES
                                     persist:YES];
 }
@@ -2746,8 +2788,6 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     avatarGlass.backgroundColor = UIColor.clearColor;
     avatarGlass.layer.cornerRadius = avatarSize / 2.0;
     avatarGlass.layer.cornerCurve = kCACornerCurveContinuous;
-    avatarGlass.layer.borderWidth = 1.0;
-    avatarGlass.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.22].CGColor;
     avatarGlass.layer.shadowColor = UIColor.blackColor.CGColor;
     avatarGlass.layer.shadowOpacity = 0.16;
     avatarGlass.layer.shadowRadius = 6.0;
@@ -2760,8 +2800,12 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     self.customGlassAvatarWidthConstraint = [avatarGlass.widthAnchor constraintEqualToConstant:avatarSize];
     self.customGlassAvatarHeightConstraint = [avatarGlass.heightAnchor constraintEqualToConstant:avatarSize];
     self.customGlassAvatarCenterXConstraint = [avatarGlass.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor];
-    self.customGlassAvatarLeadingDockConstraint = [avatarGlass.leadingAnchor constraintEqualToAnchor:profileView.leadingAnchor constant:4.0];
-    self.customGlassAvatarTrailingDockConstraint = [avatarGlass.trailingAnchor constraintEqualToAnchor:profileView.trailingAnchor constant:-4.0];
+    // Dock against the actual screen safe-area, not the inset mainStack/profileView.
+    // This lets the avatar reach the visible edge before the magnetic snap occurs.
+    self.customGlassAvatarLeadingDockConstraint =
+        [avatarGlass.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:8.0];
+    self.customGlassAvatarTrailingDockConstraint =
+        [avatarGlass.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-8.0];
 
     [NSLayoutConstraint activateConstraints:@[
         self.customGlassAvatarWidthConstraint,
@@ -2770,11 +2814,31 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         [avatarGlass.topAnchor constraintEqualToAnchor:profileView.topAnchor]
     ]];
 
+    DOCustomLiquidGlassView *avatarMaterial =
+        [[DOCustomLiquidGlassView alloc] initWithCornerRadius:(avatarSize / 2.0) baseTintAlpha:0.03];
+    avatarMaterial.translatesAutoresizingMaskIntoConstraints = NO;
+    avatarMaterial.userInteractionEnabled = NO;
+    avatarMaterial.materialScale = 0.46;
+    avatarMaterial.materialBodyScale = 0.34;
+    avatarMaterial.materialOpticalScale = 0.52;
+    avatarMaterial.materialBackdropScale = 0.34;
+    avatarMaterial.materialSpecularScale = 0.54;
+    avatarMaterial.materialEdgeDarkScale = 0.42;
+    [avatarGlass addSubview:avatarMaterial];
+    self.customGlassAvatarMaterialView = avatarMaterial;
+    [NSLayoutConstraint activateConstraints:@[
+        [avatarMaterial.leadingAnchor constraintEqualToAnchor:avatarGlass.leadingAnchor],
+        [avatarMaterial.trailingAnchor constraintEqualToAnchor:avatarGlass.trailingAnchor],
+        [avatarMaterial.topAnchor constraintEqualToAnchor:avatarGlass.topAnchor],
+        [avatarMaterial.bottomAnchor constraintEqualToAnchor:avatarGlass.bottomAnchor]
+    ]];
+
     UIImageView *avatarImageView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"person.crop.circle.fill"]];
     avatarImageView.translatesAutoresizingMaskIntoConstraints = NO;
     avatarImageView.tintColor = [UIColor colorWithWhite:1.0 alpha:0.92];
     avatarImageView.contentMode = UIViewContentModeScaleAspectFit;
     [avatarGlass addSubview:avatarImageView];
+    self.customGlassAvatarFallbackIconView = avatarImageView;
     self.customGlassAvatarIconWidthConstraint = [avatarImageView.widthAnchor constraintEqualToConstant:avatarIconSize];
     self.customGlassAvatarIconHeightConstraint = [avatarImageView.heightAnchor constraintEqualToConstant:avatarIconSize];
     [NSLayoutConstraint activateConstraints:@[
