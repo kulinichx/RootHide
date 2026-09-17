@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		B0B1768FF1EB8A1563036464 /* DOCustomGlassRefractionView.m in Sources */ = {isa = PBXBuildFile; fileRef = 8C572E38E8EA39BF2C4215B9 /* DOCustomGlassRefractionView.m */; };
 		91AC75DA8F6FD650E794566B /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6098AE6555D460B1CF1FFA6B /* Metal.framework */; };
+		A17F2A1B5E6D4C3B2A190001 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A17F2A1B5E6D4C3B2A190002 /* AVFoundation.framework */; };
 		9668AE9075C1CB1FA15CB820 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 599B007482CF825B033EBE8F /* MetalKit.framework */; };
 		040622AA2B77FE8E00393AAD /* DOPkgManagerPickerViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 040622A92B77FE8E00393AAD /* DOPkgManagerPickerViewController.m */; };
 		042479A22B66916B0082581B /* DOCreditsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 0424796B2B66916B0082581B /* DOCreditsViewController.m */; };
@@ -250,6 +251,7 @@
 		6D93DDE558E23C626A8E697E /* DOCustomGlassRefractionView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DOCustomGlassRefractionView.h; sourceTree = "<group>"; };
 		8C572E38E8EA39BF2C4215B9 /* DOCustomGlassRefractionView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DOCustomGlassRefractionView.m; sourceTree = "<group>"; };
 		6098AE6555D460B1CF1FFA6B /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		A17F2A1B5E6D4C3B2A190002 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		599B007482CF825B033EBE8F /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		040622A82B77FE8E00393AAD /* DOPkgManagerPickerViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DOPkgManagerPickerViewController.h; sourceTree = "<group>"; };
 		040622A92B77FE8E00393AAD /* DOPkgManagerPickerViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DOPkgManagerPickerViewController.m; sourceTree = "<group>"; };
@@ -561,6 +563,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A17F2A1B5E6D4C3B2A190001 /* AVFoundation.framework in Frameworks */,
 				91AC75DA8F6FD650E794566B /* Metal.framework in Frameworks */,
 				9668AE9075C1CB1FA15CB820 /* MetalKit.framework in Frameworks */,
 				8C029F6B2B4E320E0071DE58 /* libz.tbd in Frameworks */,
@@ -782,6 +785,7 @@
 		8C029F642B4E2E7D0071DE58 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				A17F2A1B5E6D4C3B2A190002 /* AVFoundation.framework */,
 				6098AE6555D460B1CF1FFA6B /* Metal.framework */,
 				599B007482CF825B033EBE8F /* MetalKit.framework */,
 				8C5FA9432BDD5062008C246F /* CoreML.framework */,
