@@ -390,6 +390,21 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     [self customGlassApplySharedBackgroundBlurIntensity:blur];
 }
 
+- (UIImage *)customGlassCurrentDisplayedBackgroundImage
+{
+    // Refraction surfaces must sample the exact image currently visible behind
+    // the navigation stack (including the persisted wallpaper-blur result).
+    return self.backgroundImageView.image ?: self.customGlassBackgroundSourceImage;
+}
+
+- (UIView *)customGlassBackgroundSamplingView
+{
+    // The image view is deliberately overscanned beyond navigationController.view.
+    // Returning the actual sampling view lets the Metal surface map its frame
+    // through the same ScaleAspectFill geometry without guessing crop offsets.
+    return self.backgroundImageView;
+}
+
 - (BOOL)customGlassHasSharedBackground
 {
     return self.customGlassUsingCustomBackground && self.customGlassBackgroundSourceImage != nil;
