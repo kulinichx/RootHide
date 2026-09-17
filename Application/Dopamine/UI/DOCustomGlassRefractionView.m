@@ -2,13 +2,11 @@
 //  DOCustomGlassRefractionView.m
 //  Dopamine
 //
-//  G02.R2A identity-calibration surface for Custom Glass.
+//  G02.R2B pure-displacement surface for Custom Glass.
 //
-//  This gate deliberately performs NO refraction, diffusion, tint, specular,
-//  dark edge, Fresnel, or dispersion. It reconstructs the exact Navigation
-//  background (displayed wallpaper + the live five-stop adaptive black scrim)
-//  inside the capsule. If the source mapping and color pipeline are correct,
-//  the fully opaque Metal capsule should visually disappear into the backdrop.
+//  This gate keeps the calibrated wallpaper + live adaptive scrim source and
+//  adds only analytic rim displacement. Diffusion, tint, specular, dark edge,
+//  Fresnel, and dispersion remain disabled so geometric bending is isolated.
 //
 
 #import "DOCustomGlassRefractionView.h"
@@ -34,9 +32,9 @@ typedef struct {
     vector_float4 scrimAlphas;
     vector_float4 scrimTail; // x = location[4], y = alpha[4]
     float cornerRadius;
+    float rimWidth;
+    float refractionAmount;
     float padding0;
-    float padding1;
-    float padding2;
 } DOCustomGlassRefractionUniforms;
 
 static NSString * const DOCustomGlassRefractionShaderSource =
@@ -59,9 +57,9 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "    float4 scrimAlphas;\n"
 "    float4 scrimTail;\n"
 "    float cornerRadius;\n"
+"    float rimWidth;\n"
+"    float refractionAmount;\n"
 "    float padding0;\n"
-"    float padding1;\n"
-"    float padding2;\n"
 "};\n"
 "\n"
 "vertex VertexOut glass_vertex(uint vid [[vertex_id]]) {\n"
@@ -83,6 +81,25 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "    float2 p = point - (size * 0.5);\n"
 "    float2 q = abs(p) - (size * 0.5 - radius);\n"
 "    return length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - radius;\n"
+"}\n"
+"\n"
+"float2 roundedBoxOutwardNormal(float2 point, float2 size, float radius) {\n"
+"    float2 p = point - (size * 0.5);\n"
+"    float2 q = abs(p) - (size * 0.5 - radius);\n"
+"    float2 outside = max(q, float2(0.0));\n"
+"    float2 axisSign = float2(p.x < 0.0 ? -1.0 : 1.0,\n"
+"                            p.y < 0.0 ? -1.0 : 1.0);\n"
+"    if (dot(outside, outside) > 0.000001) {\n"
+"        return normalize(outside) * axisSign;\n"
+"    }\n"
+"    return (q.x > q.y) ? float2(axisSign.x, 0.0) : float2(0.0, axisSign.y);\n"
+"}\n"
+"\n"
+"float snellRayResponse(float lensSlope) {\n"
+"    const float ior = 1.46;\n"
+"    float3 n = normalize(float3(-lensSlope, 0.0, 1.0));\n"
+"    float3 ray = refract(float3(0.0, 0.0, -1.0), n, 1.0 / ior);\n"
+"    return max(ray.x / max(-ray.z, 0.0001), 0.0);\n"
 "}\n"
 "\n"
 "float2 aspectFillUV(float2 viewportPoint, constant Uniforms &u) {\n"
@@ -125,13 +142,36 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "        discard_fragment();\n"
 "    }\n"
 "\n"
-"    // Gate A: exact wallpaper identity sample. No displaced UV.\n"
-"    float2 wallpaperPoint = u.wallpaperOrigin + localPoint;\n"
+"    // Gate B: displace only the rim. The deep interior remains exact identity.\n"
+"    float2 sourcePoint = localPoint;\n"
+"    float rimWidth = max(u.rimWidth, 0.0);\n"
+"    if (u.refractionAmount > 0.0001 && rimWidth > 0.0001) {\n"
+"        float edgeDistance = max(-d, 0.0);\n"
+"        if (edgeDistance < rimWidth) {\n"
+"            float rimT = clamp(edgeDistance / rimWidth, 0.0, 1.0);\n"
+"            float c = cos(1.57079632679 * rimT);\n"
+"            float lensSlope = 1.25 * c * c;\n"
+"            float2 outwardNormal = roundedBoxOutwardNormal(localPoint, u.viewSize, radius);\n"
+"            float3 surfaceNormal = normalize(float3(-outwardNormal.x * lensSlope,\n"
+"                                                    -outwardNormal.y * lensSlope,\n"
+"                                                    1.0));\n"
+"            float3 refractedRay = refract(float3(0.0, 0.0, -1.0),\n"
+"                                          surfaceNormal, 1.0 / 1.46);\n"
+"            float rayResponse = max(dot(refractedRay.xy, outwardNormal) /\n"
+"                                    max(-refractedRay.z, 0.0001), 0.0);\n"
+"            float normalizedResponse =\n"
+"                rayResponse / max(snellRayResponse(1.25), 0.0001);\n"
+"            sourcePoint += outwardNormal *\n"
+"                (u.refractionAmount * normalizedResponse);\n"
+"        }\n"
+"    }\n"
+"\n"
+"    float2 wallpaperPoint = u.wallpaperOrigin + sourcePoint;\n"
 "    float2 wallpaperUV = aspectFillUV(wallpaperPoint, u);\n"
 "    float3 color = wallpaper.sample(linearSampler, wallpaperUV).rgb;\n"
 "\n"
-"    // Reconstruct the Navigation CAGradientLayer in its own viewport space.\n"
-"    float2 scrimPoint = u.scrimOrigin + localPoint;\n"
+"    // Refract the same reconstructed source, including its live black scrim.\n"
+"    float2 scrimPoint = u.scrimOrigin + sourcePoint;\n"
 "    float scrimY = clamp(scrimPoint.y / max(u.scrimViewportSize.y, 1.0), 0.0, 1.0);\n"
 "    float scrimAlpha = clamp(adaptiveScrimAlpha(scrimY, u), 0.0, 1.0);\n"
 "    color *= (1.0 - scrimAlpha);\n"
@@ -438,9 +478,9 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
         .scrimAlphas = {_scrimAlphas[0], _scrimAlphas[1], _scrimAlphas[2], _scrimAlphas[3]},
         .scrimTail = {_scrimLocations[4], _scrimAlphas[4], 0.0f, 0.0f},
         .cornerRadius = (float)self.glassCornerRadius,
+        .rimWidth = (float)self.refractiveRimWidth,
+        .refractionAmount = (float)self.refractionAmount,
         .padding0 = 0.0f,
-        .padding1 = 0.0f,
-        .padding2 = 0.0f,
     };
 
     MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
