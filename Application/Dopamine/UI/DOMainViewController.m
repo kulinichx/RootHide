@@ -232,6 +232,9 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, assign) CGFloat materialScale;
 @property(nonatomic, assign) CGFloat materialBodyScale;
 @property(nonatomic, assign) CGFloat materialOpticalScale;
+@property(nonatomic, assign) CGFloat materialBackdropScale;
+@property(nonatomic, assign) CGFloat materialSpecularScale;
+@property(nonatomic, assign) CGFloat materialEdgeDarkScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
 @property(nonatomic, assign) CGFloat lastRenderedShortDimension;
 
@@ -257,6 +260,9 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _materialScale = 1.0;
         _materialBodyScale = 1.0;
         _materialOpticalScale = 1.0;
+        _materialBackdropScale = 1.0;
+        _materialSpecularScale = 1.0;
+        _materialEdgeDarkScale = 1.0;
         _suppressBackdrop = NO;
         _lastRenderedShortDimension = 0.0;
 
@@ -390,6 +396,13 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     BOOL darkGlassAppearance =
         [[defaults stringForKey:DOCustomGlassAppearanceKey] isEqualToString:DOCustomGlassAppearanceDark];
 
+    // Per-surface optical role controls. The global sliders still define the
+    // user's material; these scales only shape how a specific control expresses
+    // that material (broad platter vs. concentrated interactive lens).
+    CGFloat materialBackdropScale = MAX(0.0, MIN(1.25, self.materialBackdropScale));
+    CGFloat materialSpecularScale = MAX(0.0, MIN(1.35, self.materialSpecularScale));
+    CGFloat materialEdgeDarkScale = MAX(0.0, MIN(1.35, self.materialEdgeDarkScale));
+
     BOOL isBackdropLayer = [NSStringFromClass(self.layer.class) containsString:@"Backdrop"];
     if (isBackdropLayer && !self.suppressBackdrop) {
         CGFloat blurRadius = darkGlassAppearance ?
@@ -397,14 +410,21 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
             (0.35 + (17.0 * blurResponse));
         // Dark Glass increases diffusion modestly, but preserves wallpaper
         // color transmission instead of turning the material into a black blur.
+        // A structural platter gets a quieter, broader diffusion pass while
+        // an interactive lens can keep a more concentrated local backdrop.
+        // Scale the whole backdrop transform toward neutral rather than stacking
+        // a second full-strength material on top of nested controls.
+        blurRadius *= materialBackdropScale;
         CGFloat saturation = darkGlassAppearance ?
             (0.98 + (0.08 * blurResponse)) :
             (1.01 + (0.11 * blurResponse));
+        saturation = 1.0 + ((saturation - 1.0) * materialBackdropScale);
         CGFloat brightness = darkGlassAppearance ?
             (-0.018 - (0.018 * bodyAuthority)) :
             (darkAppearance ?
                 (0.006 + (0.012 * blurResponse)) :
                 (0.002 + (0.006 * blurResponse)));
+        brightness *= materialBackdropScale;
 
         id saturate = DOCustomGlassCreateCAFilter(@"colorSaturate");
         id brighten = DOCustomGlassCreateCAFilter(@"colorBrightness");
@@ -447,7 +467,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         }
         self.fallbackBlurView.hidden = self.suppressBackdrop;
         self.fallbackBlurView.alpha = self.suppressBackdrop ? 0.0 :
-            MIN(0.68, 0.18 + (0.50 * blurResponse));
+            MIN(0.68, (0.18 + (0.50 * blurResponse)) * materialBackdropScale);
     }
 
     // Transparency owns a real material-body range now. R5's 0.8%...6.5%
@@ -501,6 +521,8 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     CGFloat geometryScale = [self surfaceGeometryScale];
     CGFloat opticalScale = MIN(1.00, geometryScale);
     CGFloat materialOpticalScale = MAX(0.0, MIN(1.25, self.materialOpticalScale));
+    CGFloat brightOpticalScale = materialOpticalScale * materialSpecularScale;
+    CGFloat darkEdgeScale = materialOpticalScale * materialEdgeDarkScale;
 
     // Directional rail topology follows GlassFolders: the upper / leading rail
     // carries the specular cue, the lower / trailing rail is a weaker return,
@@ -508,15 +530,17 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // the physical line width, so the HighLight slider is obvious without
     // bringing back the thick white-border look.
     CGFloat upperRailAlpha = MIN(darkGlassAppearance ? 0.48 : 0.40,
-        (0.001 + ((darkGlassAppearance ? 0.455 : 0.395) * opticalResponse)) * opticalScale * materialOpticalScale);
+        (0.001 + ((darkGlassAppearance ? 0.455 : 0.395) * opticalResponse)) * opticalScale * brightOpticalScale);
     CGFloat secondaryRailAlpha = MIN(darkGlassAppearance ? 0.135 : 0.120,
-        (0.001 + ((darkGlassAppearance ? 0.128 : 0.116) * opticalResponse)) * opticalScale * materialOpticalScale);
+        (0.001 + ((darkGlassAppearance ? 0.128 : 0.116) * opticalResponse)) * opticalScale * brightOpticalScale);
     CGFloat shoulderAlpha = MIN(darkGlassAppearance ? 0.112 : 0.105,
-        (0.001 + ((darkGlassAppearance ? 0.103 : 0.096) * opticalResponse)) * opticalScale * materialOpticalScale);
+        (0.001 + ((darkGlassAppearance ? 0.103 : 0.096) * opticalResponse)) * opticalScale * brightOpticalScale);
 
     // Broad illumination is intentionally independent of rail width. This is
     // the visible "light catching the material" response that was missing in
     // R6. It remains below labels/icons, so readability never gets washed out.
+    // Keep the broad wash quiet. SpecularScale is reserved for directional rails;
+    // boosting the whole white wash would turn clear glass back into a milky overlay.
     CGFloat washAlpha = MIN(darkGlassAppearance ? 0.108 : 0.145,
         (0.002 + (darkGlassAppearance ? 0.112 : 0.148) * opticalResponse) * opticalScale * materialOpticalScale);
     self.surfaceHighlightLayer.colors = @[
@@ -536,7 +560,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     self.specularGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.84].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.002 * opticalScale].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.002 * opticalScale * brightOpticalScale].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.46].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
     ];
@@ -547,8 +571,8 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     self.specularMaskLayer.lineWidth = specularWidth;
 
     CGFloat contrastContourAlpha = darkGlassAppearance ?
-        ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale * materialOpticalScale) :
-        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale * materialOpticalScale);
+        ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale * darkEdgeScale) :
+        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale * darkEdgeScale);
     self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
                                                             alpha:MIN(darkGlassAppearance ? 0.145 : 0.09,
                                                                       contrastContourAlpha)].CGColor;
@@ -559,6 +583,8 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     // Keep a hairline structural contour independent from the specular slider.
     // This is the minimum depth cue that separates Glass from wallpaper when
     // both blur and highlight are low. Highlight adds brightness, not thickness.
+    // The structural hairline stays neutral; only the directional rail receives
+    // the stronger specular multiplier. This avoids a uniform white outline.
     CGFloat structuralBorderAlpha = darkGlassAppearance ?
         ((0.026 + (0.036 * bodyAuthority) + (0.082 * opticalResponse)) * opticalScale * materialOpticalScale) :
         ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale * materialOpticalScale);
@@ -1788,12 +1814,18 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
 - (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
-    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.020];
-    // Nested restart pills stay visibly interactive, but sit one material level
-    // above the group tray: lighter body, quieter edge, same wallpaper transmission.
-    innerGlass.materialScale = 0.62;
-    innerGlass.materialBodyScale = 0.58;
-    innerGlass.materialOpticalScale = 0.54;
+    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.0];
+    // iOS 27-style nested control cue. Apple recommends avoiding full glass-on-glass
+    // stacking, so the restart platter owns the actual backdrop diffusion. Each
+    // inner pill stays nearly colorless and uses only a restrained adaptive body
+    // plus a bright/dark rim pair to read as a local lens on that shared glass plane.
+    innerGlass.materialScale = 0.70;
+    innerGlass.materialBodyScale = 0.14;
+    innerGlass.materialOpticalScale = 1.00;
+    innerGlass.materialBackdropScale = 0.0;
+    innerGlass.materialSpecularScale = 1.32;
+    innerGlass.materialEdgeDarkScale = 1.30;
+    innerGlass.suppressBackdrop = YES;
     [innerGlass reloadMaterial];
 
     // Keep all restart actions on one shared icon/text grid. On iPhone the
@@ -2238,12 +2270,18 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
     [self refreshSupporterState];
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
-    // The group tray uses the same body/edge language as the other Glass cards,
-    // while still skipping a second backdrop blur underneath the nested pills.
-    restartContainer.materialScale = 0.86;
-    restartContainer.materialOpticalScale = 1.08;
-    restartContainer.suppressBackdrop = YES;
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.0];
+    // One shared structural glass plane: preserve wallpaper color, use only a
+    // modest 4-5 px-equivalent diffusion at the default blur setting, and let
+    // the iOS 27 dark-edge / bright-specular pair provide most of the depth cue.
+    // The nested pills do not add a second backdrop blur.
+    restartContainer.materialScale = 0.94;
+    restartContainer.materialBodyScale = 0.24;
+    restartContainer.materialOpticalScale = 1.00;
+    restartContainer.materialBackdropScale = 0.30;
+    restartContainer.materialSpecularScale = 1.30;
+    restartContainer.materialEdgeDarkScale = 1.30;
+    restartContainer.suppressBackdrop = NO;
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
 
@@ -2346,12 +2384,19 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.jailbreakBtn.enabled = !isJailbroken && isSupported;
 
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
-    // On the home screen, use the same blur/border language as the other cards
-    // but with a stronger tint (0.10 vs 0.05) to keep the jailbreak CTA visually
-    // more important without looking like a separate solid-blue material.
+    // On the home screen, keep the emphasis surface optically clear so its color
+    // comes from the wallpaper rather than from a fixed neutral fill.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
-    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.075];
-    jailbreakEmphasisGlass.materialScale = 0.82;
+    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.0];
+    // Floating clear glass bar: wallpaper transmission is the material itself.
+    // Keep the adaptive neutral veil very weak, use restrained diffusion for
+    // readability, and define the surface mainly with dark edge + bright specular.
+    jailbreakEmphasisGlass.materialScale = 0.90;
+    jailbreakEmphasisGlass.materialBodyScale = 0.22;
+    jailbreakEmphasisGlass.materialOpticalScale = 1.00;
+    jailbreakEmphasisGlass.materialBackdropScale = 0.30;
+    jailbreakEmphasisGlass.materialSpecularScale = 1.32;
+    jailbreakEmphasisGlass.materialEdgeDarkScale = 1.30;
     [jailbreakEmphasisGlass reloadMaterial];
     jailbreakEmphasisGlass.userInteractionEnabled = NO;
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
