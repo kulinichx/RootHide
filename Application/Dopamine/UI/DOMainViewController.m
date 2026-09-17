@@ -2486,12 +2486,12 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     jailbreakEmphasisGlass.wallpaperScrimSamplingView =
         [self.navigationController customGlassWallpaperScrimSamplingView];
     jailbreakEmphasisGlass.glassCornerRadius = 14.0;
-    jailbreakEmphasisGlass.refractiveRimWidth = 9.0;
-    jailbreakEmphasisGlass.refractionAmount = 0.52;
-    jailbreakEmphasisGlass.diffusionRadius = 0.30;
-    jailbreakEmphasisGlass.specularStrength = 0.10;
-    jailbreakEmphasisGlass.darkEdgeStrength = 0.035;
-    jailbreakEmphasisGlass.edgeOverlayOpacity = 0.24;
+    jailbreakEmphasisGlass.refractiveRimWidth = 7.0;
+    jailbreakEmphasisGlass.refractionAmount = 0.38;
+    jailbreakEmphasisGlass.diffusionRadius = 0.20;
+    jailbreakEmphasisGlass.specularStrength = 0.065;
+    jailbreakEmphasisGlass.darkEdgeStrength = 0.022;
+    jailbreakEmphasisGlass.edgeOverlayOpacity = 0.16;
     [jailbreakEmphasisGlass
         setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
         alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
