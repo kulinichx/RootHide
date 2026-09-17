@@ -486,37 +486,23 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     if (darkAppearance)
         tintAlpha += 0.010 * bodyAuthority;
 
-    // Material separation follows the *local wallpaper*, not just global
-    // Dark Mode. Bright wallpaper receives a faint dark neutral body; dark
-    // wallpaper receives a faint light body. This gives every Glass surface a
-    // reliable depth floor while preserving wallpaper chroma.
-    BOOL prefersDarkForeground = darkAppearance ? NO : YES;
-    UIWindow *window = self.window;
-    UINavigationController *navigationController = nil;
-    if ([window.rootViewController isKindOfClass:[UINavigationController class]])
-        navigationController = (UINavigationController *)window.rootViewController;
-    if (navigationController &&
-        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)]) {
-        prefersDarkForeground = [navigationController customGlassPrefersDarkForegroundForView:self];
-    }
-
+    // Keep the material body globally stable for a selected Glass appearance.
+    // The CABackdropLayer already reacts naturally to local wallpaper content;
+    // flipping the neutral body between black and white per surface made two
+    // identical Main Glass views look like different materials on the same page.
+    // Light Glass therefore keeps one faint white transmission body everywhere,
+    // while Dark Glass keeps one dark neutral body everywhere.
     if (darkGlassAppearance) {
-        // Dark Glass always uses a dark neutral material body. Local wallpaper
-        // luminance only changes its authority: bright wallpaper gets more body,
-        // dark wallpaper gets less. Foreground polarity remains light.
         CGFloat darkBodyAlpha =
             0.088 +
             (0.118 * bodyAuthority) +
-            (0.10 * self.baseTintAlpha) +
-            (prefersDarkForeground ? 0.034 : -0.010);
+            (0.10 * self.baseTintAlpha);
         self.neutralTintView.backgroundColor = UIColor.blackColor;
         self.neutralTintView.alpha = MIN(0.245, MAX(0.072, darkBodyAlpha));
     }
     else {
-        self.neutralTintView.backgroundColor = prefersDarkForeground ?
-            UIColor.blackColor : UIColor.whiteColor;
-        self.neutralTintView.alpha = MIN(0.190,
-                                         tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
+        self.neutralTintView.backgroundColor = UIColor.whiteColor;
+        self.neutralTintView.alpha = MIN(0.190, tintAlpha);
     }
     self.neutralTintView.alpha *= MAX(0.0, MIN(1.0, self.materialBodyScale));
 
@@ -2474,6 +2460,14 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [self startJailbreak];
     }]];
     self.jailbreakBtn.enabled = !isJailbroken && isSupported;
+
+    // DOJailbreakButton dims its whole view to 70% when disabled. When the Glass
+    // layer lives inside that view, the disabled "Jailbroken" state therefore
+    // fades the blur/body/specular together and no longer matches Main Glass.
+    // Keep the material itself at full opacity and dim only the button content.
+    CGFloat jailbreakContentAlpha = self.jailbreakBtn.enabled ? 1.0 : 0.70;
+    self.jailbreakBtn.alpha = 1.0;
+    self.jailbreakBtn.button.alpha = jailbreakContentAlpha;
 
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
