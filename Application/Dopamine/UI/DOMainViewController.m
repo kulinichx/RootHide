@@ -30,6 +30,8 @@
 - (void)customGlassRefreshSharedBackground;
 - (void)customGlassReplaceSharedBackgroundWithImage:(UIImage *)image;
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity;
+- (BOOL)customGlassIsUsingVideoWallpaper;
+- (void)customGlassSetWallpaperPlaybackRate:(CGFloat)playbackRate;
 - (BOOL)customGlassHasSharedBackground;
 - (UIImage *)customGlassCurrentDisplayedBackgroundImage;
 - (UIView *)customGlassBackgroundSamplingView;
@@ -97,6 +99,10 @@ static NSString * const DOCustomGlassAppearanceLight = @"light";
 static NSString * const DOCustomGlassAppearanceDark = @"dark";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
+static NSString * const DOCustomGlassProfileFocusEnabledKey = @"DOCustomGlassTheme.ProfileFocusEnabled";
+static NSString * const DOCustomGlassProfileFocusDockRightKey = @"DOCustomGlassTheme.ProfileFocusDockRight";
+static NSString * const DOCustomGlassWallpaperPlaybackRateKey = @"DOCustomGlassTheme.WallpaperPlaybackRate";
+static CGFloat const DOCustomGlassWallpaperPlaybackRateDefault = 0.65;
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSUInteger const DOCustomGlassUsernameCharacterLimit = 20;
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
@@ -663,24 +669,40 @@ static void DOCustomGlassApplyMainMaterialProfile(DOCustomLiquidGlassView *glass
 {
     [super layoutSubviews];
 
-    CGFloat halfWidth = CGRectGetWidth(self.bounds) * 0.5;
-    CGRect selectionFrame = self.bounds;
-    selectionFrame.size.width = halfWidth;
+    NSInteger segmentCount = MAX(1, self.numberOfSegments);
+    NSInteger selectedIndex = self.selectedSegmentIndex;
+    BOOL hasSelection = selectedIndex != UISegmentedControlNoSegment &&
+        selectedIndex >= 0 && selectedIndex < segmentCount;
+    if (!hasSelection)
+        selectedIndex = 0;
 
-    if (self.selectedSegmentIndex == 1)
-        selectionFrame.origin.x = halfWidth;
-    else
-        selectionFrame.origin.x = 0.0;
+    CGFloat totalWidth = CGRectGetWidth(self.bounds);
+    CGFloat segmentWidth = totalWidth / (CGFloat)segmentCount;
+    CGRect selectionFrame = self.bounds;
+    selectionFrame.origin.x = segmentWidth * selectedIndex;
+    selectionFrame.size.width = (selectedIndex == segmentCount - 1)
+        ? MAX(0.0, totalWidth - selectionFrame.origin.x)
+        : segmentWidth;
+
+    CACornerMask maskedCorners = 0;
+    if (segmentCount == 1) {
+        maskedCorners = kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner |
+            kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
+    }
+    else if (selectedIndex == 0) {
+        maskedCorners = kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner;
+    }
+    else if (selectedIndex == segmentCount - 1) {
+        maskedCorners = kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
+    }
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    self.glassSelectionLayer.hidden = !hasSelection;
     self.glassSelectionLayer.frame = selectionFrame;
     self.glassSelectionLayer.cornerRadius = 19.0;
     self.glassSelectionLayer.cornerCurve = kCACornerCurveContinuous;
-    self.glassSelectionLayer.maskedCorners =
-        (self.selectedSegmentIndex == 1)
-            ? (kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner)
-            : (kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner);
+    self.glassSelectionLayer.maskedCorners = maskedCorners;
     [CATransaction commit];
 }
 
@@ -714,6 +736,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property UISlider *glassBlurSlider;
 @property UISlider *glassTransparencySlider;
 @property UISlider *glassTintSlider;
+@property UIView *wallpaperPlaybackRateRow;
+@property UISegmentedControl *wallpaperPlaybackRateControl;
 
 @property UILabel *backgroundBlurValueLabel;
 @property UILabel *glassBlurValueLabel;
@@ -887,6 +911,72 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     row.axis = UILayoutConstraintAxisVertical;
     row.spacing = 7.0;
     return row;
+}
+
+- (UIView *)appearanceSegmentedRowWithTitle:(NSString *)title
+                                   subtitle:(NSString *)subtitle
+                                    control:(UISegmentedControl *)control
+{
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = title;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+
+    UILabel *subtitleLabel = [[UILabel alloc] init];
+    subtitleLabel.text = subtitle;
+    subtitleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.52];
+    subtitleLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightRegular];
+
+    UIStackView *titleStack = [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, subtitleLabel]];
+    titleStack.axis = UILayoutConstraintAxisVertical;
+    titleStack.spacing = 2.0;
+
+    DOCustomLiquidGlassView *inset = [self themeGlassViewWithCornerRadius:21.0 tintAlpha:0.0];
+    inset.materialScale = 0.70;
+    inset.materialBodyScale = 0.24;
+    inset.materialOpticalScale = 0.36;
+    inset.materialBackdropScale = 0.0;
+    inset.materialSpecularScale = 0.30;
+    inset.materialEdgeDarkScale = 0.34;
+    inset.suppressBackdrop = YES;
+    [inset reloadMaterial];
+
+    control.translatesAutoresizingMaskIntoConstraints = NO;
+    [inset.contentView addSubview:control];
+    [NSLayoutConstraint activateConstraints:@[
+        [control.leadingAnchor constraintEqualToAnchor:inset.contentView.leadingAnchor constant:2.0],
+        [control.trailingAnchor constraintEqualToAnchor:inset.contentView.trailingAnchor constant:-2.0],
+        [control.topAnchor constraintEqualToAnchor:inset.contentView.topAnchor constant:2.0],
+        [control.bottomAnchor constraintEqualToAnchor:inset.contentView.bottomAnchor constant:-2.0],
+        [inset.heightAnchor constraintEqualToConstant:42.0]
+    ]];
+
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[titleStack, inset]];
+    row.axis = UILayoutConstraintAxisVertical;
+    row.spacing = 7.0;
+    return row;
+}
+
+static NSInteger DOCustomGlassPlaybackRateSegmentIndex(CGFloat rate)
+{
+    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
+    NSInteger bestIndex = 0;
+    CGFloat bestDistance = CGFLOAT_MAX;
+    for (NSInteger index = 0; index < 4; index++) {
+        CGFloat distance = fabs(rate - rates[index]);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = index;
+        }
+    }
+    return bestIndex;
+}
+
+static CGFloat DOCustomGlassPlaybackRateForSegmentIndex(NSInteger index)
+{
+    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
+    NSInteger clampedIndex = MIN(3, MAX(0, index));
+    return rates[clampedIndex];
 }
 
 static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
@@ -1109,6 +1199,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
             [weakSelf.navigationController customGlassRefreshSharedBackground];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
+            [weakSelf syncAppearanceControlsFromDefaults];
             [weakSelf applyAppearancePreviewAndPersist:NO];
         });
     };
@@ -1221,7 +1312,8 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         DOCustomGlassTransparencyKey : @0.70,
         DOCustomGlassTintAlphaKey : @0.05,
         DOCustomGlassUsernameKey : @"",
-        DOCustomGlassMottoKey : @""
+        DOCustomGlassMottoKey : @"",
+        DOCustomGlassWallpaperPlaybackRateKey : @(DOCustomGlassWallpaperPlaybackRateDefault)
     }];
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
@@ -1413,6 +1505,58 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
                                                                    slider:self.backgroundBlurSlider
                                                                valueLabel:self.backgroundBlurValueLabel]];
 
+    self.wallpaperPlaybackRateControl = [[DOCustomGlassSegmentedControl alloc]
+        initWithItems:@[@"0.50×", @"0.65×", @"0.80×", @"1.00×"]];
+    self.wallpaperPlaybackRateControl.selectedSegmentTintColor = UIColor.clearColor;
+    self.wallpaperPlaybackRateControl.backgroundColor = UIColor.clearColor;
+    self.wallpaperPlaybackRateControl.apportionsSegmentWidthsByContent = NO;
+    self.wallpaperPlaybackRateControl.accessibilityLabel = @"动态壁纸速度";
+
+    UIImage *speedNormalImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *speedSelectedImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *speedDividerImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    [self.wallpaperPlaybackRateControl setBackgroundImage:speedNormalImage
+                                                 forState:UIControlStateNormal
+                                               barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setBackgroundImage:speedSelectedImage
+                                                 forState:UIControlStateSelected
+                                               barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setDividerImage:speedDividerImage
+                                   forLeftSegmentState:UIControlStateNormal
+                                     rightSegmentState:UIControlStateNormal
+                                            barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setDividerImage:speedDividerImage
+                                   forLeftSegmentState:UIControlStateSelected
+                                     rightSegmentState:UIControlStateNormal
+                                            barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setDividerImage:speedDividerImage
+                                   forLeftSegmentState:UIControlStateNormal
+                                     rightSegmentState:UIControlStateSelected
+                                            barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.68],
+        NSFontAttributeName : [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+    [self.wallpaperPlaybackRateControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : UIColor.whiteColor,
+        NSFontAttributeName : [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold]
+    } forState:UIControlStateSelected];
+    [self.wallpaperPlaybackRateControl addTarget:self
+                                          action:@selector(wallpaperPlaybackRateChanged:)
+                                forControlEvents:UIControlEventValueChanged];
+
+    CGFloat persistedPlaybackRate = [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
+        [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
+        DOCustomGlassWallpaperPlaybackRateDefault;
+    self.wallpaperPlaybackRateControl.selectedSegmentIndex =
+        DOCustomGlassPlaybackRateSegmentIndex(persistedPlaybackRate);
+    self.wallpaperPlaybackRateRow =
+        [self appearanceSegmentedRowWithTitle:@"动态壁纸速度"
+                                     subtitle:@"视频 / Live Photo 的播放速度"
+                                      control:self.wallpaperPlaybackRateControl];
+    self.wallpaperPlaybackRateRow.hidden = ![self.navigationController customGlassIsUsingVideoWallpaper];
+    [controlsStack addArrangedSubview:self.wallpaperPlaybackRateRow];
+
     self.glassBlurSlider = [self appearanceSlider];
     self.glassBlurSlider.minimumValue = 0.0;
     self.glassBlurSlider.maximumValue = 1.0;
@@ -1481,6 +1625,15 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         self.glassTransparencySlider.value = [defaults floatForKey:DOCustomGlassTransparencyKey];
     if (self.glassTintSlider)
         self.glassTintSlider.value = [defaults floatForKey:DOCustomGlassTintAlphaKey];
+    if (self.wallpaperPlaybackRateControl) {
+        CGFloat playbackRate = [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
+            [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
+            DOCustomGlassWallpaperPlaybackRateDefault;
+        self.wallpaperPlaybackRateControl.selectedSegmentIndex =
+            DOCustomGlassPlaybackRateSegmentIndex(playbackRate);
+    }
+    if (self.wallpaperPlaybackRateRow)
+        self.wallpaperPlaybackRateRow.hidden = ![self.navigationController customGlassIsUsingVideoWallpaper];
 }
 
 - (void)refreshThemePageFromPersistedState
@@ -1538,6 +1691,12 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     [self applyAppearancePreviewAndPersist:YES];
 }
 
+- (void)wallpaperPlaybackRateChanged:(UISegmentedControl *)control
+{
+    CGFloat playbackRate = DOCustomGlassPlaybackRateForSegmentIndex(control.selectedSegmentIndex);
+    [self.navigationController customGlassSetWallpaperPlaybackRate:playbackRate];
+}
+
 - (void)applyAppearancePreviewAndPersist:(BOOL)persist
 {
     CGFloat backgroundBlur = self.backgroundBlurSlider.value;
@@ -1581,9 +1740,12 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     self.glassBlurSlider.value = 0.85;
     self.glassTransparencySlider.value = 0.70;
     self.glassTintSlider.value = 0.05;
+    if (self.wallpaperPlaybackRateControl)
+        self.wallpaperPlaybackRateControl.selectedSegmentIndex = 1;
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults setObject:DOCustomGlassAppearanceLight forKey:DOCustomGlassAppearanceKey];
+    [self.navigationController customGlassSetWallpaperPlaybackRate:DOCustomGlassWallpaperPlaybackRateDefault];
 
     [self applyAppearancePreviewAndPersist:YES];
 }
@@ -1614,6 +1776,19 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 @property UIImageView *customGlassBackgroundImageView;
 @property DOCustomWallpaperBlurView *customGlassBackgroundBlurView;
 @property UIImageView *customGlassAvatarPhotoView;
+@property(nonatomic, strong) UIView *customGlassAvatarContainerView;
+@property(nonatomic, strong) NSArray<UILabel *> *customGlassHeaderSubtitleLabels;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarWidthConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarHeightConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarIconWidthConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarIconHeightConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarCenterXConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarLeadingDockConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarTrailingDockConstraint;
+@property(nonatomic, assign) CGFloat customGlassAvatarNormalSize;
+@property(nonatomic, assign) CGFloat customGlassAvatarFocusSize;
+@property(nonatomic, assign) BOOL customGlassProfileFocusEnabled;
+@property(nonatomic, assign) BOOL customGlassProfileFocusDockRight;
 @property UILabel *customGlassUsernameLabel;
 @property UIAlertController *customGlassUsernameEditor;
 @property UILabel *customGlassMottoLabel;
@@ -2254,6 +2429,149 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     return innerGlass;
 }
 
+- (void)setCustomGlassProfileFocusEnabled:(BOOL)enabled
+                                 dockRight:(BOOL)dockRight
+                                  animated:(BOOL)animated
+                                   persist:(BOOL)persist
+{
+    if (!self.customGlassAvatarContainerView)
+        return;
+
+    self.customGlassProfileFocusEnabled = enabled;
+    self.customGlassProfileFocusDockRight = dockRight;
+
+    if (persist) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        [defaults setBool:enabled forKey:DOCustomGlassProfileFocusEnabledKey];
+        [defaults setBool:dockRight forKey:DOCustomGlassProfileFocusDockRightKey];
+    }
+
+    [self.view layoutIfNeeded];
+
+    if (enabled) {
+        self.customGlassAvatarCenterXConstraint.active = NO;
+        self.customGlassAvatarLeadingDockConstraint.active = !dockRight;
+        self.customGlassAvatarTrailingDockConstraint.active = dockRight;
+    }
+    else {
+        self.customGlassAvatarLeadingDockConstraint.active = NO;
+        self.customGlassAvatarTrailingDockConstraint.active = NO;
+        self.customGlassAvatarCenterXConstraint.active = YES;
+    }
+
+    CGFloat avatarSize = enabled ? self.customGlassAvatarFocusSize : self.customGlassAvatarNormalSize;
+    CGFloat avatarIconSize = avatarSize * 0.62;
+    self.customGlassAvatarWidthConstraint.constant = avatarSize;
+    self.customGlassAvatarHeightConstraint.constant = avatarSize;
+    self.customGlassAvatarIconWidthConstraint.constant = avatarIconSize;
+    self.customGlassAvatarIconHeightConstraint.constant = avatarIconSize;
+
+    self.customGlassAvatarContainerView.accessibilityLabel = enabled ? @"恢复个人资料" : @"更换头像";
+    self.customGlassUsernameLabel.userInteractionEnabled = !enabled;
+    self.customGlassMottoLabel.userInteractionEnabled = !enabled;
+
+    void (^updates)(void) = ^{
+        self.customGlassAvatarContainerView.transform = CGAffineTransformIdentity;
+        self.customGlassAvatarContainerView.layer.cornerRadius = avatarSize / 2.0;
+        self.customGlassAvatarPhotoView.layer.cornerRadius = MAX(0.0, (avatarSize - 2.0) / 2.0);
+
+        CGFloat detailAlpha = enabled ? 0.0 : 1.0;
+        self.customGlassUsernameLabel.alpha = detailAlpha;
+        self.customGlassSystemLabel.alpha = detailAlpha;
+        self.customGlassMottoLabel.alpha = detailAlpha;
+        for (UILabel *label in self.customGlassHeaderSubtitleLabels)
+            label.alpha = detailAlpha;
+
+        [self.view layoutIfNeeded];
+    };
+
+    if (animated) {
+        [UIView animateWithDuration:0.26
+                              delay:0.0
+             usingSpringWithDamping:0.88
+              initialSpringVelocity:0.35
+                            options:UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionBeginFromCurrentState
+                         animations:updates
+                         completion:nil];
+    }
+    else {
+        updates();
+    }
+}
+
+- (void)customGlassAvatarTapped:(UITapGestureRecognizer *)gesture
+{
+    if (gesture.state != UIGestureRecognizerStateEnded)
+        return;
+
+    if (self.customGlassProfileFocusEnabled) {
+        [self setCustomGlassProfileFocusEnabled:NO
+                                      dockRight:self.customGlassProfileFocusDockRight
+                                       animated:YES
+                                        persist:YES];
+        return;
+    }
+
+    [self presentCustomGlassAvatarPicker];
+}
+
+- (void)customGlassAvatarPanned:(UIPanGestureRecognizer *)gesture
+{
+    UIView *avatarView = self.customGlassAvatarContainerView;
+    if (!avatarView)
+        return;
+
+    CGPoint translation = [gesture translationInView:self.view];
+    CGPoint velocity = [gesture velocityInView:self.view];
+
+    if (gesture.state == UIGestureRecognizerStateChanged) {
+        CGFloat drag = translation.x;
+        if (self.customGlassProfileFocusEnabled) {
+            BOOL towardCenter = self.customGlassProfileFocusDockRight ? (drag < 0.0) : (drag > 0.0);
+            drag *= towardCenter ? 0.55 : 0.16;
+        }
+        else {
+            drag = MAX(-72.0, MIN(72.0, drag)) * 0.55;
+        }
+        avatarView.transform = CGAffineTransformMakeTranslation(drag, 0.0);
+        return;
+    }
+
+    if (gesture.state != UIGestureRecognizerStateEnded &&
+        gesture.state != UIGestureRecognizerStateCancelled &&
+        gesture.state != UIGestureRecognizerStateFailed)
+        return;
+
+    if (self.customGlassProfileFocusEnabled) {
+        BOOL shouldRestore = fabs(translation.x) >= 28.0 || fabs(velocity.x) >= 360.0;
+        if (shouldRestore) {
+            [self setCustomGlassProfileFocusEnabled:NO
+                                          dockRight:self.customGlassProfileFocusDockRight
+                                           animated:YES
+                                            persist:YES];
+        }
+        else {
+            [UIView animateWithDuration:0.20
+                             animations:^{ avatarView.transform = CGAffineTransformIdentity; }];
+        }
+        return;
+    }
+
+    BOOL shouldFocus = fabs(translation.x) >= 38.0 || fabs(velocity.x) >= 520.0;
+    if (!shouldFocus) {
+        [UIView animateWithDuration:0.20
+                         animations:^{ avatarView.transform = CGAffineTransformIdentity; }];
+        return;
+    }
+
+    CGFloat direction = fabs(velocity.x) >= 520.0 ? velocity.x : translation.x;
+    BOOL dockRight = direction > 0.0;
+    [self setCustomGlassProfileFocusEnabled:YES
+                                  dockRight:dockRight
+                                   animated:YES
+                                    persist:YES];
+}
+
 - (void)configureCustomGlassHeaderView:(DOHeaderView *)headerView logoHeight:(CGFloat)logoHeight subtitleScale:(CGFloat)subtitleScale
 {
     // Keep the Dopamine logo centered, but present version / author / uptime as
@@ -2403,6 +2721,18 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
     [self configureCustomGlassHeaderView:headerView logoHeight:logoHeight subtitleScale:headerSubtitleScale];
+
+    NSMutableArray<UILabel *> *headerSubtitleLabels = [NSMutableArray array];
+    for (UIView *subview in headerView.subviews) {
+        if (![subview isKindOfClass:[UIStackView class]])
+            continue;
+        for (UIView *arrangedSubview in ((UIStackView *)subview).arrangedSubviews) {
+            if ([arrangedSubview isKindOfClass:[UILabel class]])
+                [headerSubtitleLabels addObject:(UILabel *)arrangedSubview];
+        }
+    }
+    self.customGlassHeaderSubtitleLabels = headerSubtitleLabels;
+
     [mainStack addArrangedSubview:headerView];
     [mainStack setCustomSpacing:headerToProfileSpacing afterView:headerView];
 
@@ -2423,11 +2753,20 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     avatarGlass.layer.shadowRadius = 6.0;
     avatarGlass.layer.shadowOffset = CGSizeMake(0.0, 3.0);
     [profileView addSubview:avatarGlass];
+    self.customGlassAvatarContainerView = avatarGlass;
+    self.customGlassAvatarNormalSize = avatarSize;
+    self.customGlassAvatarFocusSize = isPad ? 58.0 : (compactLayout ? 46.0 : 50.0);
+
+    self.customGlassAvatarWidthConstraint = [avatarGlass.widthAnchor constraintEqualToConstant:avatarSize];
+    self.customGlassAvatarHeightConstraint = [avatarGlass.heightAnchor constraintEqualToConstant:avatarSize];
+    self.customGlassAvatarCenterXConstraint = [avatarGlass.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor];
+    self.customGlassAvatarLeadingDockConstraint = [avatarGlass.leadingAnchor constraintEqualToAnchor:profileView.leadingAnchor constant:4.0];
+    self.customGlassAvatarTrailingDockConstraint = [avatarGlass.trailingAnchor constraintEqualToAnchor:profileView.trailingAnchor constant:-4.0];
 
     [NSLayoutConstraint activateConstraints:@[
-        [avatarGlass.widthAnchor constraintEqualToConstant:avatarSize],
-        [avatarGlass.heightAnchor constraintEqualToConstant:avatarSize],
-        [avatarGlass.centerXAnchor constraintEqualToAnchor:profileView.centerXAnchor],
+        self.customGlassAvatarWidthConstraint,
+        self.customGlassAvatarHeightConstraint,
+        self.customGlassAvatarCenterXConstraint,
         [avatarGlass.topAnchor constraintEqualToAnchor:profileView.topAnchor]
     ]];
 
@@ -2436,11 +2775,13 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     avatarImageView.tintColor = [UIColor colorWithWhite:1.0 alpha:0.92];
     avatarImageView.contentMode = UIViewContentModeScaleAspectFit;
     [avatarGlass addSubview:avatarImageView];
+    self.customGlassAvatarIconWidthConstraint = [avatarImageView.widthAnchor constraintEqualToConstant:avatarIconSize];
+    self.customGlassAvatarIconHeightConstraint = [avatarImageView.heightAnchor constraintEqualToConstant:avatarIconSize];
     [NSLayoutConstraint activateConstraints:@[
         [avatarImageView.centerXAnchor constraintEqualToAnchor:avatarGlass.centerXAnchor],
         [avatarImageView.centerYAnchor constraintEqualToAnchor:avatarGlass.centerYAnchor],
-        [avatarImageView.widthAnchor constraintEqualToConstant:avatarIconSize],
-        [avatarImageView.heightAnchor constraintEqualToConstant:avatarIconSize]
+        self.customGlassAvatarIconWidthConstraint,
+        self.customGlassAvatarIconHeightConstraint
     ]];
 
     self.customGlassAvatarPhotoView = [[UIImageView alloc] init];
@@ -2468,7 +2809,9 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     avatarGlass.isAccessibilityElement = YES;
     avatarGlass.accessibilityLabel = @"更换头像";
     [avatarGlass addGestureRecognizer:[[UITapGestureRecognizer alloc]
-        initWithTarget:self action:@selector(presentCustomGlassAvatarPicker)]];
+        initWithTarget:self action:@selector(customGlassAvatarTapped:)]];
+    [avatarGlass addGestureRecognizer:[[UIPanGestureRecognizer alloc]
+        initWithTarget:self action:@selector(customGlassAvatarPanned:)]];
 
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSString *username = [defaults stringForKey:DOCustomGlassUsernameKey];
@@ -2747,6 +3090,16 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         [self.jailbreakBtn.heightAnchor constraintEqualToAnchor:buttonPlaceHolder.heightAnchor],
         self.customGlassJailbreakCenterYConstraint
     ])];
+
+    NSUserDefaults *profileDefaults = NSUserDefaults.standardUserDefaults;
+    BOOL focusEnabled = [profileDefaults boolForKey:DOCustomGlassProfileFocusEnabledKey];
+    BOOL focusDockRight = [profileDefaults objectForKey:DOCustomGlassProfileFocusDockRightKey]
+        ? [profileDefaults boolForKey:DOCustomGlassProfileFocusDockRightKey]
+        : YES;
+    [self setCustomGlassProfileFocusEnabled:focusEnabled
+                                  dockRight:focusDockRight
+                                   animated:NO
+                                    persist:NO];
 
     [self applyCustomGlassHomeAppearance];
 

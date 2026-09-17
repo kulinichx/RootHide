@@ -18,6 +18,8 @@
 #import <math.h>
 
 static NSString * const DOCustomGlassNavigationBackgroundBlurKey = @"DOCustomGlassTheme.BackgroundBlur";
+static NSString * const DOCustomGlassNavigationPlaybackRateKey = @"DOCustomGlassTheme.WallpaperPlaybackRate";
+static CGFloat const DOCustomGlassNavigationPlaybackRateDefault = 0.65;
 
 static inline CGFloat DOCustomGlassNavigationClamp01(CGFloat value)
 {
@@ -310,6 +312,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 - (CGFloat)customGlassWallpaperEffectiveLuminanceAtNormalizedY:(CGFloat)normalizedY;
 - (void)customGlassUpdateWallpaperScrimIfNeeded;
 - (void)customGlassActivateVideoWallpaperWithURL:(NSURL *)videoURL;
+- (void)customGlassResumeVideoWallpaperPlayback;
 - (void)customGlassDeactivateVideoWallpaper;
 - (void)customGlassHandleApplicationWillResignActive:(NSNotification *)notification;
 - (void)customGlassHandleApplicationDidBecomeActive:(NSNotification *)notification;
@@ -581,6 +584,41 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     [self customGlassApplySharedBackgroundBlurIntensity:blur];
 }
 
+- (CGFloat)customGlassWallpaperPlaybackRate
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    CGFloat rate = [defaults objectForKey:DOCustomGlassNavigationPlaybackRateKey] ?
+        [defaults floatForKey:DOCustomGlassNavigationPlaybackRateKey] :
+        DOCustomGlassNavigationPlaybackRateDefault;
+    return MIN(1.0, MAX(0.25, rate));
+}
+
+- (void)customGlassResumeVideoWallpaperPlayback
+{
+    if (!self.customGlassUsingVideoWallpaper || !self.customGlassWallpaperPlayer)
+        return;
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive)
+        return;
+
+    CGFloat rate = [self customGlassWallpaperPlaybackRate];
+    [self.customGlassWallpaperPlayer playImmediatelyAtRate:rate];
+}
+
+- (BOOL)customGlassIsUsingVideoWallpaper
+{
+    return self.customGlassUsingVideoWallpaper && self.customGlassWallpaperVideoURL != nil;
+}
+
+- (void)customGlassSetWallpaperPlaybackRate:(CGFloat)playbackRate
+{
+    CGFloat clampedRate = MIN(1.0, MAX(0.25, playbackRate));
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setFloat:clampedRate forKey:DOCustomGlassNavigationPlaybackRateKey];
+    [defaults synchronize];
+
+    [self customGlassResumeVideoWallpaperPlayback];
+}
+
 - (void)customGlassActivateVideoWallpaperWithURL:(NSURL *)videoURL
 {
     if (!videoURL.isFileURL) {
@@ -592,8 +630,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
         [self.customGlassWallpaperVideoURL.path isEqualToString:videoURL.path]) {
         self.customGlassVideoWallpaperView.hidden = NO;
         self.customGlassVideoWallpaperBlurView.hidden = NO;
-        if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive)
-            [self.customGlassWallpaperPlayer play];
+        [self customGlassResumeVideoWallpaperPlayback];
         return;
     }
 
@@ -615,8 +652,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     self.customGlassVideoWallpaperView.hidden = NO;
     self.customGlassVideoWallpaperBlurView.hidden = NO;
 
-    if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive)
-        [player play];
+    [self customGlassResumeVideoWallpaperPlayback];
 }
 
 - (void)customGlassDeactivateVideoWallpaper
@@ -642,8 +678,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 - (void)customGlassHandleApplicationDidBecomeActive:(NSNotification *)notification
 {
     (void)notification;
-    if (self.customGlassUsingVideoWallpaper)
-        [self.customGlassWallpaperPlayer play];
+    [self customGlassResumeVideoWallpaperPlayback];
 }
 
 - (void)dealloc
