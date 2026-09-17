@@ -1127,11 +1127,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     DOCustomLiquidGlassView *appearanceInset =
         [self themeGlassViewWithCornerRadius:21.0 tintAlpha:0.0];
     appearanceInset.materialScale = 0.70;
-    appearanceInset.materialBodyScale = 0.18;
-    appearanceInset.materialOpticalScale = 0.30;
+    appearanceInset.materialBodyScale = 0.24;
+    appearanceInset.materialOpticalScale = 0.36;
     appearanceInset.materialBackdropScale = 0.0;
-    appearanceInset.materialSpecularScale = 0.25;
-    appearanceInset.materialEdgeDarkScale = 0.30;
+    appearanceInset.materialSpecularScale = 0.30;
+    appearanceInset.materialEdgeDarkScale = 0.34;
     appearanceInset.suppressBackdrop = YES;
     [appearanceInset reloadMaterial];
     [appearanceInset.contentView addSubview:self.glassAppearanceControl];
@@ -1896,11 +1896,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Keep a small body/contour for touch hierarchy, but intentionally avoid the
     // second full-strength rim that previously made these read as three separate lenses.
     innerGlass.materialScale = 0.70;
-    innerGlass.materialBodyScale = 0.18;
-    innerGlass.materialOpticalScale = 0.30;
+    innerGlass.materialBodyScale = 0.24;
+    innerGlass.materialOpticalScale = 0.36;
     innerGlass.materialBackdropScale = 0.0;
-    innerGlass.materialSpecularScale = 0.25;
-    innerGlass.materialEdgeDarkScale = 0.30;
+    innerGlass.materialSpecularScale = 0.30;
+    innerGlass.materialEdgeDarkScale = 0.34;
     innerGlass.suppressBackdrop = YES;
     [innerGlass reloadMaterial];
 
