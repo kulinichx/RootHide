@@ -38,7 +38,7 @@ typedef struct {
     float diffusionRadius;
     float specularStrength;
     float darkEdgeStrength;
-    float padding0;
+    float edgeOverlayOpacity;
     float padding1;
 } DOCustomGlassRefractionUniforms;
 
@@ -67,7 +67,7 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "    float diffusionRadius;\n"
 "    float specularStrength;\n"
 "    float darkEdgeStrength;\n"
-"    float padding0;\n"
+"    float edgeOverlayOpacity;\n"
 "    float padding1;\n"
 "};\n"
 "\n"
@@ -251,9 +251,12 @@ static NSString * const DOCustomGlassRefractionShaderSource =
 "    color += float3(specular + farGlint);\n"
 "    color = clamp(color, float3(0.0), float3(1.0));\n"
 "\n"
-"    // Premultiplied full replacement preserves the calibrated transmission while\n"
-"    // the optical signature comes from refraction and reflection at the rim.\n"
-"    return float4(color * mask, mask);\n"
+"    // V2.1B is an edge-optics overlay, not a second complete Glass surface. The\n"
+"    // app-side material underneath owns blur/tint/Light-Dark response; Metal only\n"
+"    // contributes a restrained refracted/reflected rim and stays transparent at center.\n"
+"    float overlayAlpha = mask * pow(max(edgeWeight, 0.0), 1.10) *\n"
+"                         clamp(u.edgeOverlayOpacity, 0.0, 1.0);\n"
+"    return float4(color * overlayAlpha, overlayAlpha);\n"
 "}\n";
 
 @interface DOCustomGlassRefractionView ()
@@ -305,6 +308,7 @@ static NSString * const DOCustomGlassRefractionShaderSource =
     _diffusionRadius = 0.0;
     _specularStrength = 0.0;
     _darkEdgeStrength = 0.0;
+    _edgeOverlayOpacity = 0.24;
 
     const float defaultLocations[5] = {0.0f, 0.22f, 0.48f, 0.74f, 1.0f};
     for (NSUInteger index = 0; index < 5; index++) {
@@ -490,6 +494,12 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
     [self refreshRefraction];
 }
 
+- (void)setEdgeOverlayOpacity:(CGFloat)edgeOverlayOpacity
+{
+    _edgeOverlayOpacity = MAX(0.0, MIN(1.0, edgeOverlayOpacity));
+    [self refreshRefraction];
+}
+
 - (void)didMoveToWindow
 {
     [super didMoveToWindow];
@@ -558,7 +568,7 @@ static UIImage *DOCustomGlassRefractionNormalizedImage(UIImage *image)
         .diffusionRadius = (float)self.diffusionRadius,
         .specularStrength = (float)self.specularStrength,
         .darkEdgeStrength = (float)self.darkEdgeStrength,
-        .padding0 = 0.0f,
+        .edgeOverlayOpacity = (float)self.edgeOverlayOpacity,
         .padding1 = 0.0f,
     };
 

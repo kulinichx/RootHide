@@ -2424,6 +2424,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         [UIImage systemImageNamed:@"lock.slash" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
 
     __block UIColor *jailbreakExpandedBackgroundColor = nil;
+    __block DOCustomLiquidGlassView *jailbreakMaterialGlass = nil;
     __block DOCustomGlassRefractionView *jailbreakEmphasisGlass = nil;
 
     self.jailbreakBtn = [[DOJailbreakButton alloc] initWithAction:[UIAction actionWithTitle:jailbreakButtonTitle image:jailbreakButtonImage identifier:@"jailbreak" handler:^(__kindof UIAction * _Nonnull action) {
@@ -2440,9 +2441,10 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         actionGrid.userInteractionEnabled = NO;
         self.updateButton.userInteractionEnabled = NO;
 
-        // Compact state uses an emphasized glass material. Before expansion,
-        // restore DOJailbreakButton's original opaque theme color so the stock
-        // jailbreak/progress interface keeps the author's intended treatment.
+        // Compact state uses the unified app-side Glass material plus a transparent
+        // Metal edge-optics overlay. Before expansion, hide both so the stock
+        // jailbreak/progress interface keeps the author's intended opaque treatment.
+        jailbreakMaterialGlass.hidden = YES;
         jailbreakEmphasisGlass.hidden = YES;
         self.jailbreakBtn.backgroundColor = jailbreakExpandedBackgroundColor;
         [self.jailbreakBtn expandButton:self.jailbreakButtonConstraints];
@@ -2461,9 +2463,22 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
 
-    // Glass V2 keeps the calibrated backdrop as the source of truth. Optical
-    // displacement is concentrated near the rim so the CTA reads as a thin glass
-    // surface instead of a magnifying lens.
+    // V2.1B: the CTA now belongs to the same Main Glass material family as the
+    // surrounding cards. CABackdrop/tint owns the material body and Light/Dark
+    // response; Metal is layered above it only for restrained physical edge optics.
+    jailbreakMaterialGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.05];
+    jailbreakMaterialGlass.userInteractionEnabled = NO;
+    jailbreakMaterialGlass.materialScale = 0.90;
+    jailbreakMaterialGlass.materialBodyScale = 0.92;
+    jailbreakMaterialGlass.materialOpticalScale = 0.84;
+    jailbreakMaterialGlass.materialBackdropScale = 0.92;
+    jailbreakMaterialGlass.materialSpecularScale = 0.82;
+    jailbreakMaterialGlass.materialEdgeDarkScale = 0.88;
+    jailbreakMaterialGlass.suppressBackdrop = NO;
+    [jailbreakMaterialGlass reloadMaterial];
+
+    // The Metal layer no longer replaces the full backdrop. Its center is transparent;
+    // only the narrow rim contributes refracted wallpaper, Fresnel and a quiet dark edge.
     jailbreakEmphasisGlass = [[DOCustomGlassRefractionView alloc] initWithFrame:CGRectZero];
     jailbreakEmphasisGlass.translatesAutoresizingMaskIntoConstraints = NO;
     jailbreakEmphasisGlass.wallpaperSamplingView =
@@ -2471,11 +2486,12 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     jailbreakEmphasisGlass.wallpaperScrimSamplingView =
         [self.navigationController customGlassWallpaperScrimSamplingView];
     jailbreakEmphasisGlass.glassCornerRadius = 14.0;
-    jailbreakEmphasisGlass.refractiveRimWidth = 12.0;
-    jailbreakEmphasisGlass.refractionAmount = 0.72;
-    jailbreakEmphasisGlass.diffusionRadius = 0.55;
-    jailbreakEmphasisGlass.specularStrength = 0.18;
-    jailbreakEmphasisGlass.darkEdgeStrength = 0.08;
+    jailbreakEmphasisGlass.refractiveRimWidth = 9.0;
+    jailbreakEmphasisGlass.refractionAmount = 0.52;
+    jailbreakEmphasisGlass.diffusionRadius = 0.30;
+    jailbreakEmphasisGlass.specularStrength = 0.10;
+    jailbreakEmphasisGlass.darkEdgeStrength = 0.035;
+    jailbreakEmphasisGlass.edgeOverlayOpacity = 0.24;
     [jailbreakEmphasisGlass
         setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
         alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
@@ -2484,8 +2500,13 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.customGlassJailbreakRefractionView = jailbreakEmphasisGlass;
 
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
-    [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass atIndex:0];
+    [self.jailbreakBtn insertSubview:jailbreakMaterialGlass atIndex:0];
+    [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass aboveSubview:jailbreakMaterialGlass];
     [NSLayoutConstraint activateConstraints:@[
+        [jailbreakMaterialGlass.leadingAnchor constraintEqualToAnchor:self.jailbreakBtn.leadingAnchor],
+        [jailbreakMaterialGlass.trailingAnchor constraintEqualToAnchor:self.jailbreakBtn.trailingAnchor],
+        [jailbreakMaterialGlass.topAnchor constraintEqualToAnchor:self.jailbreakBtn.topAnchor],
+        [jailbreakMaterialGlass.bottomAnchor constraintEqualToAnchor:self.jailbreakBtn.bottomAnchor],
         [jailbreakEmphasisGlass.leadingAnchor constraintEqualToAnchor:self.jailbreakBtn.leadingAnchor],
         [jailbreakEmphasisGlass.trailingAnchor constraintEqualToAnchor:self.jailbreakBtn.trailingAnchor],
         [jailbreakEmphasisGlass.topAnchor constraintEqualToAnchor:self.jailbreakBtn.topAnchor],

@@ -27,6 +27,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, assign) CGFloat specularStrength;
 @property(nonatomic, assign) CGFloat darkEdgeStrength;
 
+/// Maximum opacity of the Metal edge-optics overlay. The material body is rendered
+/// by the underlying app-side Glass view; this layer should stay transparent at center.
+@property(nonatomic, assign) CGFloat edgeOverlayOpacity;
+
 /// Installs/replaces the exact wallpaper image currently displayed by Navigation.
 - (void)setWallpaperImage:(nullable UIImage *)image;
 
