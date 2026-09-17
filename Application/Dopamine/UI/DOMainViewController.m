@@ -2410,9 +2410,9 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
 
-    // G02.R2B pure displacement. Keep the calibrated backdrop source intact;
-    // bend only the refractive rim so geometry can be judged without cosmetic
-    // blur, tint, highlight, Fresnel, dispersion, or dark-edge treatment.
+    // Physical Liquid Glass: calibrated backdrop transmission is the source of
+    // truth; a finite convex lens supplies refraction, with restrained diffusion,
+    // Fresnel/specular response, opposing dark thickness and weak dispersion.
     jailbreakEmphasisGlass = [[DOCustomGlassRefractionView alloc] initWithFrame:CGRectZero];
     jailbreakEmphasisGlass.translatesAutoresizingMaskIntoConstraints = NO;
     jailbreakEmphasisGlass.wallpaperSamplingView =
@@ -2420,11 +2420,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     jailbreakEmphasisGlass.wallpaperScrimSamplingView =
         [self.navigationController customGlassWallpaperScrimSamplingView];
     jailbreakEmphasisGlass.glassCornerRadius = 14.0;
-    jailbreakEmphasisGlass.refractiveRimWidth = 12.0;
-    jailbreakEmphasisGlass.refractionAmount = 0.85;
-    jailbreakEmphasisGlass.diffusionRadius = 0.0;
-    jailbreakEmphasisGlass.specularStrength = 0.0;
-    jailbreakEmphasisGlass.darkEdgeStrength = 0.0;
+    jailbreakEmphasisGlass.refractiveRimWidth = 10.0;
+    jailbreakEmphasisGlass.refractionAmount = 1.50;
+    jailbreakEmphasisGlass.diffusionRadius = 0.32;
+    jailbreakEmphasisGlass.specularStrength = 0.18;
+    jailbreakEmphasisGlass.darkEdgeStrength = 0.075;
     [jailbreakEmphasisGlass
         setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
         alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];

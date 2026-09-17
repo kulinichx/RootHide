@@ -2,7 +2,7 @@
 //  DOCustomGlassRefractionView.h
 //  Dopamine
 //
-//  G02.R2B pure-displacement surface for Custom Glass.
+//  Mango-style physical Liquid Glass surface for Custom Glass.
 //
 
 #import <UIKit/UIKit.h>
@@ -20,7 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Rounded-rectangle geometry, in UIKit points.
 @property(nonatomic, assign) CGFloat glassCornerRadius;
 
-/// Pure-displacement controls. Diffusion/specular/dark-edge stay zero in G02.R2B.
+/// Optical controls layered over the calibrated wallpaper + live scrim backdrop.
 @property(nonatomic, assign) CGFloat refractiveRimWidth;
 @property(nonatomic, assign) CGFloat refractionAmount;
 @property(nonatomic, assign) CGFloat diffusionRadius;
