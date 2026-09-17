@@ -227,12 +227,12 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, strong) UIView *contentView;
 @property(nonatomic, strong) UIView *neutralTintView;
 @property(nonatomic, strong) UIVisualEffectView *fallbackBlurView;
-@property(nonatomic, strong) CAGradientLayer *shoulderGradientLayer;
-@property(nonatomic, strong) CAShapeLayer *shoulderMaskLayer;
 @property(nonatomic, strong) CAGradientLayer *specularGradientLayer;
 @property(nonatomic, strong) CAShapeLayer *specularMaskLayer;
-@property(nonatomic, strong) CAGradientLayer *surfaceHighlightLayer;
-@property(nonatomic, strong) CAShapeLayer *contrastContourLayer;
+@property(nonatomic, strong) CAGradientLayer *specularBoostGradientLayer;
+@property(nonatomic, strong) CAShapeLayer *specularBoostMaskLayer;
+@property(nonatomic, strong) CAGradientLayer *specularDarkGradientLayer;
+@property(nonatomic, strong) CAShapeLayer *specularDarkMaskLayer;
 @property(nonatomic, assign) CGFloat preferredCornerRadius;
 @property(nonatomic, assign) CGFloat baseTintAlpha;
 @property(nonatomic, assign) CGFloat materialScale;
@@ -282,27 +282,6 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _neutralTintView.userInteractionEnabled = NO;
         [self addSubview:_neutralTintView];
 
-        // A broad, low-energy illumination wash sits below content. GlassFolders
-        // uses a broad directional light plus thin continuous rails; keeping the
-        // wash separate makes the HighLight control visibly useful without
-        // thickening the perimeter into a white UI border.
-        _surfaceHighlightLayer = [CAGradientLayer layer];
-        _surfaceHighlightLayer.startPoint = CGPointMake(0.02, 0.02);
-        _surfaceHighlightLayer.endPoint = CGPointMake(0.98, 0.98);
-        _surfaceHighlightLayer.locations = @[@0.0, @0.30, @0.66, @1.0];
-        _surfaceHighlightLayer.zPosition = 5.0;
-        [self.layer addSublayer:_surfaceHighlightLayer];
-
-        // A quiet opposite-tone contour is independent from the white specular
-        // rail. On bright wallpapers it supplies the separation that a white
-        // highlight cannot; on dark wallpapers the white rail remains dominant.
-        _contrastContourLayer = [CAShapeLayer layer];
-        _contrastContourLayer.fillColor = UIColor.clearColor.CGColor;
-        _contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0 alpha:0.06].CGColor;
-        _contrastContourLayer.lineWidth = 0.32;
-        _contrastContourLayer.zPosition = 898.0;
-        [self.layer addSublayer:_contrastContourLayer];
-
         _contentView = [[UIView alloc] initWithFrame:CGRectZero];
         _contentView.translatesAutoresizingMaskIntoConstraints = NO;
         _contentView.backgroundColor = UIColor.clearColor;
@@ -315,29 +294,46 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
             [_contentView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor]
         ]];
 
-        _shoulderGradientLayer = [CAGradientLayer layer];
-        _shoulderGradientLayer.startPoint = CGPointMake(0.02, 0.02);
-        _shoulderGradientLayer.endPoint = CGPointMake(0.98, 0.98);
-        _shoulderGradientLayer.locations = @[@0.0, @0.30, @0.58, @0.82, @1.0];
-        _shoulderGradientLayer.zPosition = 900.0;
-        _shoulderMaskLayer = [CAShapeLayer layer];
-        _shoulderMaskLayer.fillColor = UIColor.clearColor.CGColor;
-        _shoulderMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _shoulderMaskLayer.lineWidth = 5.0;
-        _shoulderGradientLayer.mask = _shoulderMaskLayer;
-        [self.layer addSublayer:_shoulderGradientLayer];
-
+        // Glass V2.2: the optical language is perimeter-only. The material body
+        // comes from backdrop + neutral tint; highlight owns only three thin,
+        // directional rails inspired by Mango's specular/boost/dark structure.
         _specularGradientLayer = [CAGradientLayer layer];
         _specularGradientLayer.startPoint = CGPointMake(0.0, 0.0);
         _specularGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-        _specularGradientLayer.locations = @[@0.0, @0.24, @0.56, @0.82, @1.0];
+        _specularGradientLayer.locations = @[@0.0, @0.25, @0.50, @0.75, @1.0];
         _specularGradientLayer.zPosition = 901.0;
         _specularMaskLayer = [CAShapeLayer layer];
         _specularMaskLayer.fillColor = UIColor.clearColor.CGColor;
         _specularMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _specularMaskLayer.lineWidth = 1.05;
+        _specularMaskLayer.lineWidth = 0.75;
         _specularGradientLayer.mask = _specularMaskLayer;
         [self.layer addSublayer:_specularGradientLayer];
+
+        _specularBoostGradientLayer = [CAGradientLayer layer];
+        _specularBoostGradientLayer.startPoint = CGPointMake(0.0, 0.0);
+        _specularBoostGradientLayer.endPoint = CGPointMake(1.0, 1.0);
+        _specularBoostGradientLayer.locations = @[@0.0, @0.14, @0.50, @0.86, @1.0];
+        _specularBoostGradientLayer.zPosition = 902.0;
+        _specularBoostMaskLayer = [CAShapeLayer layer];
+        _specularBoostMaskLayer.fillColor = UIColor.clearColor.CGColor;
+        _specularBoostMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
+        _specularBoostMaskLayer.lineWidth = 0.75;
+        _specularBoostGradientLayer.mask = _specularBoostMaskLayer;
+        [self.layer addSublayer:_specularBoostGradientLayer];
+
+        // Rotate the dark field by 90 degrees relative to the bright field so the
+        // opposite edges carry a quiet contour instead of a uniform black stroke.
+        _specularDarkGradientLayer = [CAGradientLayer layer];
+        _specularDarkGradientLayer.startPoint = CGPointMake(1.0, 0.0);
+        _specularDarkGradientLayer.endPoint = CGPointMake(0.0, 1.0);
+        _specularDarkGradientLayer.locations = @[@0.0, @0.25, @0.50, @0.75, @1.0];
+        _specularDarkGradientLayer.zPosition = 900.0;
+        _specularDarkMaskLayer = [CAShapeLayer layer];
+        _specularDarkMaskLayer.fillColor = UIColor.clearColor.CGColor;
+        _specularDarkMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
+        _specularDarkMaskLayer.lineWidth = 0.75;
+        _specularDarkGradientLayer.mask = _specularDarkMaskLayer;
+        [self.layer addSublayer:_specularDarkGradientLayer];
 
         [self reloadMaterial];
     }
@@ -524,82 +520,56 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     }
     self.neutralTintView.alpha *= MAX(0.0, MIN(1.0, self.materialBodyScale));
 
-    CGFloat geometryScale = [self surfaceGeometryScale];
-    CGFloat opticalScale = MIN(1.00, geometryScale);
     CGFloat materialOpticalScale = MAX(0.0, MIN(1.25, self.materialOpticalScale));
     CGFloat brightOpticalScale = materialOpticalScale * materialSpecularScale;
     CGFloat darkEdgeScale = materialOpticalScale * materialEdgeDarkScale;
 
-    // Directional rail topology follows GlassFolders: the upper / leading rail
-    // carries the specular cue, the lower / trailing rail is a weaker return,
-    // and the side walls stay quiet. R6 widens the *luminance response*, not
-    // the physical line width, so the HighLight slider is obvious without
-    // bringing back the thick white-border look.
-    CGFloat upperRailAlpha = MIN(darkGlassAppearance ? 0.48 : 0.40,
-        (0.001 + ((darkGlassAppearance ? 0.455 : 0.395) * opticalResponse)) * opticalScale * brightOpticalScale);
-    CGFloat secondaryRailAlpha = MIN(darkGlassAppearance ? 0.135 : 0.120,
-        (0.001 + ((darkGlassAppearance ? 0.128 : 0.116) * opticalResponse)) * opticalScale * brightOpticalScale);
-    CGFloat shoulderAlpha = MIN(darkGlassAppearance ? 0.112 : 0.105,
-        (0.001 + ((darkGlassAppearance ? 0.103 : 0.096) * opticalResponse)) * opticalScale * brightOpticalScale);
+    // V2.2 contract: Glass Highlight maps only to perimeter specular intensity.
+    // Geometry no longer attenuates compact CTA surfaces; Role scales preserve
+    // Main/Outer > Inset hierarchy without changing physical rail thickness.
+    CGFloat specularAlpha = MIN(0.30,
+        0.30 * opticalResponse * brightOpticalScale);
+    CGFloat specularBoostAlpha = MIN(0.60,
+        0.60 * opticalResponse * brightOpticalScale);
+    CGFloat specularDarkAlpha = MIN(0.35,
+        0.35 * opticalResponse * darkEdgeScale);
 
-    // Broad illumination is intentionally independent of rail width. This is
-    // the visible "light catching the material" response that was missing in
-    // R6. It remains below labels/icons, so readability never gets washed out.
-    // Keep the broad wash quiet. SpecularScale is reserved for directional rails;
-    // boosting the whole white wash would turn clear glass back into a milky overlay.
-    CGFloat washAlpha = MIN(darkGlassAppearance ? 0.108 : 0.145,
-        (0.002 + (darkGlassAppearance ? 0.112 : 0.148) * opticalResponse) * opticalScale * materialOpticalScale);
-    self.surfaceHighlightLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:washAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.42].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.08].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor
-    ];
-
-    self.shoulderGradientLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha * 0.72].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.18].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.42].CGColor
-    ];
     self.specularGradientLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.84].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.002 * opticalScale * brightOpticalScale].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.46].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.52].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.22].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.82].CGColor
     ];
 
-    CGFloat shoulderWidth = 0.30 + (0.44 * geometryScale);
-    CGFloat specularWidth = 0.15 + (0.13 * geometryScale);
-    self.shoulderMaskLayer.lineWidth = shoulderWidth;
-    self.specularMaskLayer.lineWidth = specularWidth;
+    self.specularBoostGradientLayer.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.18].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.10].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.78].CGColor
+    ];
 
-    CGFloat contrastContourAlpha = darkGlassAppearance ?
-        ((0.052 + (0.080 * bodyAuthority) + (0.028 * opticalResponse)) * opticalScale * darkEdgeScale) :
-        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale * darkEdgeScale);
-    self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
-                                                            alpha:MIN(darkGlassAppearance ? 0.145 : 0.09,
-                                                                      contrastContourAlpha)].CGColor;
-    self.contrastContourLayer.lineWidth = darkGlassAppearance ?
-        (0.24 + (0.055 * geometryScale)) :
-        (0.22 + (0.05 * geometryScale));
+    self.specularDarkGradientLayer.colors = @[
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.82].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.25].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.18].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha].CGColor
+    ];
 
-    // Keep a hairline structural contour independent from the specular slider.
-    // This is the minimum depth cue that separates Glass from wallpaper when
-    // both blur and highlight are low. Highlight adds brightness, not thickness.
-    // The structural hairline stays neutral; only the directional rail receives
-    // the stronger specular multiplier. This avoids a uniform white outline.
+    self.specularMaskLayer.lineWidth = 0.75;
+    self.specularBoostMaskLayer.lineWidth = 0.75;
+    self.specularDarkMaskLayer.lineWidth = 0.75;
+
+    // Keep one neutral structural hairline so Glass still has a material boundary
+    // at Highlight = 0. It depends on body/appearance only, never on Highlight.
     CGFloat structuralBorderAlpha = darkGlassAppearance ?
-        ((0.026 + (0.036 * bodyAuthority) + (0.082 * opticalResponse)) * opticalScale * materialOpticalScale) :
-        ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale * materialOpticalScale);
-    self.layer.borderWidth = darkGlassAppearance ?
-        (0.14 + (0.055 * geometryScale)) :
-        (0.15 + (0.07 * geometryScale));
+        (0.040 + (0.028 * bodyAuthority)) :
+        (0.032 + (0.024 * bodyAuthority));
+    self.layer.borderWidth = 0.35;
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(darkGlassAppearance ? 0.155 : 0.14,
-                                                       structuralBorderAlpha)].CGColor;
+                                             alpha:MIN(0.075, structuralBorderAlpha)].CGColor;
 
 }
 
@@ -609,7 +579,6 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 
     self.layer.cornerRadius = self.preferredCornerRadius;
     self.neutralTintView.frame = self.bounds;
-    self.surfaceHighlightLayer.frame = self.bounds;
     self.fallbackBlurView.frame = self.bounds;
 
     CGFloat shortDimension = MIN(CGRectGetWidth(self.bounds), CGRectGetHeight(self.bounds));
@@ -624,16 +593,17 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     UIBezierPath *rimPath = [UIBezierPath bezierPathWithRoundedRect:rimRect
                                                       cornerRadius:rimRadius];
 
-    self.contrastContourLayer.frame = self.bounds;
-    self.contrastContourLayer.path = rimPath.CGPath;
-
-    self.shoulderGradientLayer.frame = self.bounds;
-    self.shoulderMaskLayer.frame = self.bounds;
-    self.shoulderMaskLayer.path = rimPath.CGPath;
-
     self.specularGradientLayer.frame = self.bounds;
     self.specularMaskLayer.frame = self.bounds;
     self.specularMaskLayer.path = rimPath.CGPath;
+
+    self.specularBoostGradientLayer.frame = self.bounds;
+    self.specularBoostMaskLayer.frame = self.bounds;
+    self.specularBoostMaskLayer.path = rimPath.CGPath;
+
+    self.specularDarkGradientLayer.frame = self.bounds;
+    self.specularDarkMaskLayer.frame = self.bounds;
+    self.specularDarkMaskLayer.path = rimPath.CGPath;
 }
 
 - (void)didMoveToWindow
@@ -2425,7 +2395,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 
     __block UIColor *jailbreakExpandedBackgroundColor = nil;
     __block DOCustomLiquidGlassView *jailbreakMaterialGlass = nil;
-    __block DOCustomGlassRefractionView *jailbreakEmphasisGlass = nil;
 
     self.jailbreakBtn = [[DOJailbreakButton alloc] initWithAction:[UIAction actionWithTitle:jailbreakButtonTitle image:jailbreakButtonImage identifier:@"jailbreak" handler:^(__kindof UIAction * _Nonnull action) {
 /********************************** roothide specific ************************************/
@@ -2445,7 +2414,6 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         // Metal edge-optics overlay. Before expansion, hide both so the stock
         // jailbreak/progress interface keeps the author's intended opaque treatment.
         jailbreakMaterialGlass.hidden = YES;
-        jailbreakEmphasisGlass.hidden = YES;
         self.jailbreakBtn.backgroundColor = jailbreakExpandedBackgroundColor;
         [self.jailbreakBtn expandButton:self.jailbreakButtonConstraints];
 
@@ -2463,54 +2431,30 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     // Preserve the original DOJailbreakButton color for expanded/progress mode.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
 
-    // V2.1B: the CTA now belongs to the same Main Glass material family as the
-    // surrounding cards. CABackdrop/tint owns the material body and Light/Dark
-    // response; Metal is layered above it only for restrained physical edge optics.
+    // Glass V2.2: CTA uses the same single Liquid Glass material as the surrounding
+    // Main surfaces. Directional perimeter optics are now produced by
+    // DOCustomLiquidGlassView itself, so no second Metal edge pass is layered above it.
     jailbreakMaterialGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.05];
     jailbreakMaterialGlass.userInteractionEnabled = NO;
     jailbreakMaterialGlass.materialScale = 0.90;
     jailbreakMaterialGlass.materialBodyScale = 0.92;
     jailbreakMaterialGlass.materialOpticalScale = 0.84;
     jailbreakMaterialGlass.materialBackdropScale = 0.92;
-    jailbreakMaterialGlass.materialSpecularScale = 0.82;
+    jailbreakMaterialGlass.materialSpecularScale = 1.00;
     jailbreakMaterialGlass.materialEdgeDarkScale = 0.88;
     jailbreakMaterialGlass.suppressBackdrop = NO;
     [jailbreakMaterialGlass reloadMaterial];
 
-    // The Metal layer no longer replaces the full backdrop. Its center is transparent;
-    // only the narrow rim contributes refracted wallpaper, Fresnel and a quiet dark edge.
-    jailbreakEmphasisGlass = [[DOCustomGlassRefractionView alloc] initWithFrame:CGRectZero];
-    jailbreakEmphasisGlass.translatesAutoresizingMaskIntoConstraints = NO;
-    jailbreakEmphasisGlass.wallpaperSamplingView =
-        [self.navigationController customGlassBackgroundSamplingView];
-    jailbreakEmphasisGlass.wallpaperScrimSamplingView =
-        [self.navigationController customGlassWallpaperScrimSamplingView];
-    jailbreakEmphasisGlass.glassCornerRadius = 14.0;
-    jailbreakEmphasisGlass.refractiveRimWidth = 7.0;
-    jailbreakEmphasisGlass.refractionAmount = 0.38;
-    jailbreakEmphasisGlass.diffusionRadius = 0.20;
-    jailbreakEmphasisGlass.specularStrength = 0.065;
-    jailbreakEmphasisGlass.darkEdgeStrength = 0.022;
-    jailbreakEmphasisGlass.edgeOverlayOpacity = 0.16;
-    [jailbreakEmphasisGlass
-        setWallpaperScrimLocations:[self.navigationController customGlassCurrentWallpaperScrimLocations]
-        alphas:[self.navigationController customGlassCurrentWallpaperScrimAlphas]];
-    [jailbreakEmphasisGlass
-        setWallpaperImage:[self.navigationController customGlassCurrentDisplayedBackgroundImage]];
-    self.customGlassJailbreakRefractionView = jailbreakEmphasisGlass;
+    // Keep the legacy property nil so existing refresh plumbing remains a safe no-op.
+    self.customGlassJailbreakRefractionView = nil;
 
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
     [self.jailbreakBtn insertSubview:jailbreakMaterialGlass atIndex:0];
-    [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass aboveSubview:jailbreakMaterialGlass];
     [NSLayoutConstraint activateConstraints:@[
         [jailbreakMaterialGlass.leadingAnchor constraintEqualToAnchor:self.jailbreakBtn.leadingAnchor],
         [jailbreakMaterialGlass.trailingAnchor constraintEqualToAnchor:self.jailbreakBtn.trailingAnchor],
         [jailbreakMaterialGlass.topAnchor constraintEqualToAnchor:self.jailbreakBtn.topAnchor],
-        [jailbreakMaterialGlass.bottomAnchor constraintEqualToAnchor:self.jailbreakBtn.bottomAnchor],
-        [jailbreakEmphasisGlass.leadingAnchor constraintEqualToAnchor:self.jailbreakBtn.leadingAnchor],
-        [jailbreakEmphasisGlass.trailingAnchor constraintEqualToAnchor:self.jailbreakBtn.trailingAnchor],
-        [jailbreakEmphasisGlass.topAnchor constraintEqualToAnchor:self.jailbreakBtn.topAnchor],
-        [jailbreakEmphasisGlass.bottomAnchor constraintEqualToAnchor:self.jailbreakBtn.bottomAnchor]
+        [jailbreakMaterialGlass.bottomAnchor constraintEqualToAnchor:self.jailbreakBtn.bottomAnchor]
     ]];
 
     [self.view addSubview:self.jailbreakBtn];
