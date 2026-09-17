@@ -326,12 +326,12 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _specularDarkGradientLayer = [CAGradientLayer layer];
         _specularDarkGradientLayer.startPoint = CGPointMake(1.0, 0.0);
         _specularDarkGradientLayer.endPoint = CGPointMake(0.0, 1.0);
-        _specularDarkGradientLayer.locations = @[@0.0, @0.25, @0.50, @0.75, @1.0];
+        _specularDarkGradientLayer.locations = @[@0.0, @0.24, @0.50, @0.76, @1.0];
         _specularDarkGradientLayer.zPosition = 900.0;
         _specularDarkMaskLayer = [CAShapeLayer layer];
         _specularDarkMaskLayer.fillColor = UIColor.clearColor.CGColor;
         _specularDarkMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _specularDarkMaskLayer.lineWidth = 0.75;
+        _specularDarkMaskLayer.lineWidth = 0.40;
         _specularDarkGradientLayer.mask = _specularDarkMaskLayer;
         [self.layer addSublayer:_specularDarkGradientLayer];
 
@@ -531,8 +531,8 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         0.30 * opticalResponse * brightOpticalScale);
     CGFloat specularBoostAlpha = MIN(0.60,
         0.60 * opticalResponse * brightOpticalScale);
-    CGFloat specularDarkAlpha = MIN(0.35,
-        0.35 * opticalResponse * darkEdgeScale);
+    CGFloat specularDarkAlpha = MIN(0.16,
+        0.16 * opticalResponse * darkEdgeScale);
 
     self.specularGradientLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha].CGColor,
@@ -550,26 +550,28 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.78].CGColor
     ];
 
+    // Back-facing edges stay almost transparent. The two small dark lobes
+    // reinforce material separation, while every corner fades fully to zero.
     self.specularDarkGradientLayer.colors = @[
-        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.82].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.25].CGColor,
         (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
         (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.18].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha].CGColor
+        (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.14].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor
     ];
 
     self.specularMaskLayer.lineWidth = 0.75;
     self.specularBoostMaskLayer.lineWidth = 0.75;
-    self.specularDarkMaskLayer.lineWidth = 0.75;
+    self.specularDarkMaskLayer.lineWidth = 0.40;
 
     // Keep one neutral structural hairline so Glass still has a material boundary
     // at Highlight = 0. It depends on body/appearance only, never on Highlight.
     CGFloat structuralBorderAlpha = darkGlassAppearance ?
-        (0.040 + (0.028 * bodyAuthority)) :
-        (0.032 + (0.024 * bodyAuthority));
-    self.layer.borderWidth = 0.35;
+        (0.028 + (0.018 * bodyAuthority)) :
+        (0.018 + (0.014 * bodyAuthority));
+    self.layer.borderWidth = 0.30;
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(0.075, structuralBorderAlpha)].CGColor;
+                                             alpha:MIN(0.045, structuralBorderAlpha)].CGColor;
 
 }
 
@@ -619,6 +621,59 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     [super traitCollectionDidChange:previousTraitCollection];
     if (previousTraitCollection.userInterfaceStyle != self.traitCollection.userInterfaceStyle)
         [self reloadMaterial];
+}
+
+@end
+
+@interface DOCustomGlassSegmentedControl : UISegmentedControl
+@property(nonatomic, strong) CALayer *glassSelectionLayer;
+@end
+
+@implementation DOCustomGlassSegmentedControl
+
+- (instancetype)initWithItems:(NSArray *)items
+{
+    self = [super initWithItems:items];
+    if (self) {
+        _glassSelectionLayer = [CALayer layer];
+        _glassSelectionLayer.backgroundColor =
+            [UIColor colorWithWhite:1.0 alpha:0.11].CGColor;
+        _glassSelectionLayer.cornerRadius = 19.0;
+        _glassSelectionLayer.cornerCurve = kCACornerCurveContinuous;
+        [self.layer insertSublayer:_glassSelectionLayer atIndex:0];
+    }
+    return self;
+}
+
+- (void)setSelectedSegmentIndex:(NSInteger)selectedSegmentIndex
+{
+    [super setSelectedSegmentIndex:selectedSegmentIndex];
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+
+    CGFloat halfWidth = CGRectGetWidth(self.bounds) * 0.5;
+    CGRect selectionFrame = self.bounds;
+    selectionFrame.size.width = halfWidth;
+
+    if (self.selectedSegmentIndex == 1)
+        selectionFrame.origin.x = halfWidth;
+    else
+        selectionFrame.origin.x = 0.0;
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.glassSelectionLayer.frame = selectionFrame;
+    self.glassSelectionLayer.cornerRadius = 19.0;
+    self.glassSelectionLayer.cornerCurve = kCACornerCurveContinuous;
+    self.glassSelectionLayer.maskedCorners =
+        (self.selectedSegmentIndex == 1)
+            ? (kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner)
+            : (kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner);
+    [CATransaction commit];
 }
 
 @end
@@ -1041,7 +1096,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     liquidGlassLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
     [controlsStack addArrangedSubview:liquidGlassLabel];
 
-    self.glassAppearanceControl = [[UISegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
+    self.glassAppearanceControl = [[DOCustomGlassSegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
     self.glassAppearanceControl.translatesAutoresizingMaskIntoConstraints = NO;
     // The segmented control is content inside an Inset Glass surface. Keep the
     // native control itself optically quiet so it does not read as a second,
@@ -1050,7 +1105,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     self.glassAppearanceControl.backgroundColor = UIColor.clearColor;
 
     UIImage *normalSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
-    UIImage *selectedSegmentImage = DOCustomGlassSolidImage([UIColor colorWithWhite:1.0 alpha:0.11]);
+    UIImage *selectedSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
     UIImage *clearSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
     [self.glassAppearanceControl setBackgroundImage:normalSegmentImage
                                           forState:UIControlStateNormal
@@ -1869,8 +1924,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     innerGlass.materialBodyScale = 0.24;
     innerGlass.materialOpticalScale = 0.36;
     innerGlass.materialBackdropScale = 0.0;
-    innerGlass.materialSpecularScale = 0.30;
-    innerGlass.materialEdgeDarkScale = 0.34;
+    innerGlass.materialSpecularScale = 0.48;
+    innerGlass.materialEdgeDarkScale = 0.58;
     innerGlass.suppressBackdrop = YES;
     [innerGlass reloadMaterial];
 
