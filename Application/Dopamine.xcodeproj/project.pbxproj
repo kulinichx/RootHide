@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A17F2A1B5E6D4C3B2A190001 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A17F2A1B5E6D4C3B2A190002 /* AVFoundation.framework */; };
 		040622AA2B77FE8E00393AAD /* DOPkgManagerPickerViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 040622A92B77FE8E00393AAD /* DOPkgManagerPickerViewController.m */; };
 		042479A22B66916B0082581B /* DOCreditsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 0424796B2B66916B0082581B /* DOCreditsViewController.m */; };
 		042479A32B66916B0082581B /* DOSettingsController.m in Sources */ = {isa = PBXBuildFile; fileRef = 0424796C2B66916B0082581B /* DOSettingsController.m */; };
@@ -247,6 +248,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A17F2A1B5E6D4C3B2A190002 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		040622A82B77FE8E00393AAD /* DOPkgManagerPickerViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DOPkgManagerPickerViewController.h; sourceTree = "<group>"; };
 		040622A92B77FE8E00393AAD /* DOPkgManagerPickerViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DOPkgManagerPickerViewController.m; sourceTree = "<group>"; };
 		042479682B66916B0082581B /* DOJailbreakButton.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DOJailbreakButton.h; sourceTree = "<group>"; };
@@ -560,6 +562,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A17F2A1B5E6D4C3B2A190001 /* AVFoundation.framework in Frameworks */,
 				8C029F6B2B4E320E0071DE58 /* libz.tbd in Frameworks */,
 				8CDD08472B4F6DD800A32B61 /* libxpf.dylib in Frameworks */,
 				8CDD08462B4F6DD800A32B61 /* libchoma.dylib in Frameworks */,
@@ -777,6 +780,7 @@
 		8C029F642B4E2E7D0071DE58 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				A17F2A1B5E6D4C3B2A190002 /* AVFoundation.framework */,
 				8C5FA9432BDD5062008C246F /* CoreML.framework */,
 				8C5FA9412BDD503D008C246F /* IOSurface.framework */,
 				8C5FA93F2BDD5039008C246F /* IOKit.framework */,

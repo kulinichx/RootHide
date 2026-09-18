@@ -20,6 +20,7 @@
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
 #import <PhotosUI/PhotosUI.h>
+#import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
@@ -790,10 +791,40 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return row;
 }
 
+static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
+{
+    if (!videoURL.isFileURL)
+        return nil;
+
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:videoURL options:nil];
+    AVAssetImageGenerator *generator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+    generator.appliesPreferredTrackTransform = YES;
+    generator.maximumSize = CGSizeMake(2048.0, 2048.0);
+
+    NSError *error = nil;
+    CMTime requestedTime = CMTimeMakeWithSeconds(0.10, 600);
+    CGImageRef frame = [generator copyCGImageAtTime:requestedTime actualTime:NULL error:&error];
+    if (!frame) {
+        error = nil;
+        frame = [generator copyCGImageAtTime:kCMTimeZero actualTime:NULL error:&error];
+    }
+    if (!frame) {
+        NSLog(@"[CustomGlass][VideoWallpaper] poster generation failed: %@", error);
+        return nil;
+    }
+
+    UIImage *poster = [UIImage imageWithCGImage:frame];
+    CGImageRelease(frame);
+    return poster;
+}
+
 - (void)presentCustomGlassBackgroundPicker
 {
     PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
-    configuration.filter = [PHPickerFilter imagesFilter];
+    configuration.filter = [PHPickerFilter anyFilterMatchingSubfilters:@[
+        [PHPickerFilter imagesFilter],
+        [PHPickerFilter videosFilter]
+    ]];
     configuration.selectionLimit = 1;
 
     PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:configuration];
@@ -810,31 +841,52 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
         return;
 
     NSItemProvider *provider = result.itemProvider;
-    if (![provider canLoadObjectOfClass:UIImage.class])
-        return;
-
     __weak typeof(self) weakSelf = self;
-    [provider loadObjectOfClass:UIImage.class
-              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
-        if (error || ![object isKindOfClass:UIImage.class])
-            return;
 
-        UIImage *image = (UIImage *)object;
-        BOOL saved = DOCustomGlassMediaStoreSaveWallpaper(image, NULL);
-
+    void (^finishWallpaperImport)(BOOL) = ^(BOOL saved) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!saved)
                 return;
 
             [[UIApplication sharedApplication] ignoreSnapshotOnNextApplicationLaunch];
 
-            // Live preview intentionally goes back through MediaStore. The image
-            // shown now and the image loaded by the next process share one path.
+            // Always re-resolve MediaStore so image and video imports share the
+            // exact same cold-launch and live-preview path.
             [weakSelf.navigationController customGlassRefreshSharedBackground];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
             [weakSelf applyAppearancePreviewAndPersist:NO];
         });
+    };
+
+    if ([provider hasItemConformingToTypeIdentifier:@"public.movie"]) {
+        [provider loadFileRepresentationForTypeIdentifier:@"public.movie"
+                                         completionHandler:^(NSURL *fileURL, NSError *error) {
+            if (error || !fileURL) {
+                NSLog(@"[CustomGlass][VideoWallpaper] provider failed: %@", error);
+                return;
+            }
+
+            // PHPicker's representation URL is temporary. Generate the poster
+            // and copy the movie into MediaStore before this callback returns.
+            UIImage *poster = DOCustomGlassCreateVideoPosterImage(fileURL);
+            BOOL saved = poster ?
+                DOCustomGlassMediaStoreSaveWallpaperVideo(fileURL, poster, NULL) : NO;
+            finishWallpaperImport(saved);
+        }];
+        return;
+    }
+
+    if (![provider canLoadObjectOfClass:UIImage.class])
+        return;
+
+    [provider loadObjectOfClass:UIImage.class
+              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
+        if (error || ![object isKindOfClass:UIImage.class])
+            return;
+
+        BOOL saved = DOCustomGlassMediaStoreSaveWallpaper((UIImage *)object, NULL);
+        finishWallpaperImport(saved);
     }];
 }
 
@@ -941,7 +993,7 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     [contentStack addArrangedSubview:wallpaperLabel];
 
     [contentStack addArrangedSubview:[self themeRowWithTitle:@"背景"
-                                                    subtitle:@"选择首页背景图片"
+                                                    subtitle:@"选择首页背景图片或视频"
                                                    imageName:@"photo"
                                                       action:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         [weakSelf presentCustomGlassBackgroundPicker];
