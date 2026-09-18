@@ -20,6 +20,7 @@
 #import <sys/sysctl.h>
 #import <libjailbreak/libjailbreak.h>
 #import <PhotosUI/PhotosUI.h>
+#import <Photos/Photos.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
@@ -818,13 +819,169 @@ static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
     return poster;
 }
 
+static NSInteger DOCustomGlassLivePhotoVideoResourcePriority(PHAssetResourceType type)
+{
+    switch (type) {
+        case PHAssetResourceTypeFullSizePairedVideo:
+            return 3;
+        case PHAssetResourceTypePairedVideo:
+            return 2;
+        case PHAssetResourceTypeAdjustmentBasePairedVideo:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static NSInteger DOCustomGlassLivePhotoImageResourcePriority(PHAssetResourceType type)
+{
+    switch (type) {
+        case PHAssetResourceTypeFullSizePhoto:
+            return 3;
+        case PHAssetResourceTypePhoto:
+            return 2;
+        case PHAssetResourceTypeAdjustmentBasePhoto:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static NSError *DOCustomGlassLivePhotoImportError(NSInteger code, NSString *message)
+{
+    return [NSError errorWithDomain:@"DOCustomGlassLivePhotoImport"
+                               code:code
+                           userInfo:@{NSLocalizedDescriptionKey: message ?: @"Live Photo import failed."}];
+}
+
+// PHPicker can vend a PHLivePhoto without granting broad Photo Library access.
+// PHAssetResource then exposes that selected object's paired resources directly,
+// so Live Photo stays inside the same privacy model as the existing picker.
+static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
+                                         void (^completion)(NSURL *videoURL,
+                                                            UIImage *posterImage,
+                                                            NSError *error))
+{
+    if (!livePhoto || !completion)
+        return;
+
+    NSArray<PHAssetResource *> *resources = [PHAssetResource assetResourcesForLivePhoto:livePhoto];
+    PHAssetResource *videoResource = nil;
+    PHAssetResource *imageResource = nil;
+    NSInteger videoPriority = 0;
+    NSInteger imagePriority = 0;
+
+    for (PHAssetResource *resource in resources) {
+        NSInteger candidateVideoPriority = DOCustomGlassLivePhotoVideoResourcePriority(resource.type);
+        if (candidateVideoPriority > videoPriority) {
+            videoPriority = candidateVideoPriority;
+            videoResource = resource;
+        }
+
+        NSInteger candidateImagePriority = DOCustomGlassLivePhotoImageResourcePriority(resource.type);
+        if (candidateImagePriority > imagePriority) {
+            imagePriority = candidateImagePriority;
+            imageResource = resource;
+        }
+    }
+
+    if (!videoResource) {
+        completion(nil, nil,
+                   DOCustomGlassLivePhotoImportError(1, @"Live Photo has no paired video resource."));
+        return;
+    }
+
+    NSURL *temporaryRoot = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
+    NSURL *temporaryDirectory = [temporaryRoot
+        URLByAppendingPathComponent:[NSString stringWithFormat:@"CustomGlass-LivePhoto-%@",
+                                                               NSUUID.UUID.UUIDString]
+                         isDirectory:YES];
+    NSError *directoryError = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtURL:temporaryDirectory
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&directoryError]) {
+        completion(nil, nil, directoryError ?: DOCustomGlassLivePhotoImportError(2, @"Unable to create Live Photo staging directory."));
+        return;
+    }
+
+    NSURL *videoURL = [temporaryDirectory URLByAppendingPathComponent:@"paired.mov" isDirectory:NO];
+    NSString *imageExtension = imageResource.originalFilename.pathExtension.lowercaseString;
+    if (imageExtension.length == 0)
+        imageExtension = @"jpg";
+    NSURL *imageURL = [temporaryDirectory
+        URLByAppendingPathComponent:[NSString stringWithFormat:@"poster.%@", imageExtension]
+                         isDirectory:NO];
+
+    PHAssetResourceRequestOptions *options = [[PHAssetResourceRequestOptions alloc] init];
+    options.networkAccessAllowed = YES;
+
+    PHAssetResourceManager *manager = [PHAssetResourceManager defaultManager];
+    dispatch_group_t group = dispatch_group_create();
+    __block NSError *videoError = nil;
+    __block NSError *imageError = nil;
+
+    dispatch_group_enter(group);
+    [manager writeDataForAssetResource:videoResource
+                                toFile:videoURL
+                               options:options
+                     completionHandler:^(NSError *error) {
+        videoError = error;
+        dispatch_group_leave(group);
+    }];
+
+    if (imageResource) {
+        dispatch_group_enter(group);
+        [manager writeDataForAssetResource:imageResource
+                                    toFile:imageURL
+                                   options:options
+                         completionHandler:^(NSError *error) {
+            imageError = error;
+            dispatch_group_leave(group);
+        }];
+    }
+
+    dispatch_group_notify(group,
+                          dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        BOOL hasVideo = !videoError && [fileManager fileExistsAtPath:videoURL.path];
+        if (!hasVideo) {
+            NSError *error = videoError ?:
+                DOCustomGlassLivePhotoImportError(3, @"Unable to export Live Photo paired video.");
+            completion(nil, nil, error);
+            [fileManager removeItemAtURL:temporaryDirectory error:nil];
+            return;
+        }
+
+        UIImage *poster = nil;
+        if (imageResource && !imageError && [fileManager fileExistsAtPath:imageURL.path])
+            poster = [UIImage imageWithContentsOfFile:imageURL.path];
+        if (!poster)
+            poster = DOCustomGlassCreateVideoPosterImage(videoURL);
+
+        if (!poster) {
+            completion(nil, nil,
+                       DOCustomGlassLivePhotoImportError(4, @"Unable to create Live Photo poster image."));
+            [fileManager removeItemAtURL:temporaryDirectory error:nil];
+            return;
+        }
+
+        // The callback must synchronously consume videoURL. MediaStore does so
+        // by copying it into the persistent CustomGlass directory.
+        completion(videoURL, poster, nil);
+        [fileManager removeItemAtURL:temporaryDirectory error:nil];
+    });
+}
+
 - (void)presentCustomGlassBackgroundPicker
 {
     PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
     configuration.filter = [PHPickerFilter anyFilterMatchingSubfilters:@[
         [PHPickerFilter imagesFilter],
+        [PHPickerFilter livePhotosFilter],
         [PHPickerFilter videosFilter]
     ]];
+    configuration.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
     configuration.selectionLimit = 1;
 
     PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:configuration];
@@ -859,6 +1016,51 @@ static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
         });
     };
 
+    void (^importStaticImage)(void) = ^{
+        if (![provider canLoadObjectOfClass:UIImage.class])
+            return;
+
+        [provider loadObjectOfClass:UIImage.class
+                  completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
+            if (error || ![object isKindOfClass:UIImage.class]) {
+                NSLog(@"[CustomGlass][Wallpaper] image provider failed: %@", error);
+                return;
+            }
+
+            BOOL saved = DOCustomGlassMediaStoreSaveWallpaper((UIImage *)object, NULL);
+            finishWallpaperImport(saved);
+        }];
+    };
+
+    // Detect Live Photo before public.movie. A Live Photo is imported as its
+    // paired motion resource plus key photo, then handed to the exact same
+    // persistent AVPlayer pipeline as an ordinary video wallpaper.
+    if ([provider canLoadObjectOfClass:PHLivePhoto.class]) {
+        [provider loadObjectOfClass:PHLivePhoto.class
+                  completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
+            if (error || ![object isKindOfClass:PHLivePhoto.class]) {
+                NSLog(@"[CustomGlass][LivePhoto] provider failed: %@", error);
+                importStaticImage();
+                return;
+            }
+
+            DOCustomGlassExportLivePhoto((PHLivePhoto *)object,
+                                         ^(NSURL *videoURL, UIImage *poster, NSError *exportError) {
+                if (exportError || !videoURL || !poster) {
+                    NSLog(@"[CustomGlass][LivePhoto] export failed: %@", exportError);
+                    importStaticImage();
+                    return;
+                }
+
+                BOOL saved = DOCustomGlassMediaStoreSaveWallpaperVideo(videoURL, poster, NULL);
+                if (!saved)
+                    NSLog(@"[CustomGlass][LivePhoto] MediaStore commit failed");
+                finishWallpaperImport(saved);
+            });
+        }];
+        return;
+    }
+
     if ([provider hasItemConformingToTypeIdentifier:@"public.movie"]) {
         [provider loadFileRepresentationForTypeIdentifier:@"public.movie"
                                          completionHandler:^(NSURL *fileURL, NSError *error) {
@@ -877,17 +1079,7 @@ static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
         return;
     }
 
-    if (![provider canLoadObjectOfClass:UIImage.class])
-        return;
-
-    [provider loadObjectOfClass:UIImage.class
-              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
-        if (error || ![object isKindOfClass:UIImage.class])
-            return;
-
-        BOOL saved = DOCustomGlassMediaStoreSaveWallpaper((UIImage *)object, NULL);
-        finishWallpaperImport(saved);
-    }];
+    importStaticImage();
 }
 
 - (void)showThemePlaceholderForTitle:(NSString *)title
