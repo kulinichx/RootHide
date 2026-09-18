@@ -14,6 +14,23 @@ static NSString * const DORHSupporterLicenseDefaultsKey = @"DORHSupporter.Licens
 static NSString * const DORHSupporterLicenseDidChangeNotification = @"DORHSupporter.LicenseDidChange";
 static NSString * const DORHSupporterLicenseErrorDomain = @"DORHSupporterLicense";
 
+//
+// Persistence V2
+//
+// NSUserDefaults lives inside the app data container and can disappear when
+// some installers rebuild that container during an update. Keep a second,
+// signed-license-backed state outside the application container so normal
+// DopamineRH upgrades do not require supporter activation again.
+//
+static NSString * const DORHSupporterPersistentDirectoryPath =
+    @"/var/mobile/Library/Application Support/DopamineRH";
+static NSString * const DORHSupporterPersistentStateFilename =
+    @"supporter-state.plist";
+static NSString * const DORHSupporterPersistentDeviceCodeKey =
+    @"DeviceCode";
+static NSString * const DORHSupporterPersistentLicenseCodeKey =
+    @"LicenseCode";
+
 static inline NSError *DORHSupporterLicenseError(NSInteger code, NSString *description)
 {
     return [NSError errorWithDomain:DORHSupporterLicenseErrorDomain
@@ -41,31 +58,213 @@ static inline NSData *DORHSupporterDecodeBase64URL(NSString *value)
                                                 options:0];
 }
 
+static inline NSString *DORHSupporterPersistentStatePath(void)
+{
+    return [DORHSupporterPersistentDirectoryPath
+        stringByAppendingPathComponent:DORHSupporterPersistentStateFilename];
+}
+
+static inline NSMutableDictionary<NSString *, id> *DORHSupporterReadPersistentState(void)
+{
+    NSDictionary *state =
+        [NSDictionary dictionaryWithContentsOfFile:DORHSupporterPersistentStatePath()];
+
+    if (![state isKindOfClass:NSDictionary.class])
+        return [NSMutableDictionary dictionary];
+
+    return [state mutableCopy];
+}
+
+static inline BOOL DORHSupporterWritePersistentState(NSDictionary<NSString *, id> *state)
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+
+    NSError *directoryError = nil;
+    BOOL directoryReady =
+        [fileManager createDirectoryAtPath:DORHSupporterPersistentDirectoryPath
+               withIntermediateDirectories:YES
+                                attributes:nil
+                                     error:&directoryError];
+
+    if (!directoryReady) {
+        NSLog(@"[Supporter] unable to create persistent directory: %@",
+              directoryError);
+        return NO;
+    }
+
+    BOOL written =
+        [state writeToFile:DORHSupporterPersistentStatePath()
+                atomically:YES];
+
+    if (!written)
+        NSLog(@"[Supporter] unable to write persistent supporter state");
+
+    return written;
+}
+
+static inline NSString *DORHSupporterPersistentString(NSString *key)
+{
+    id value = DORHSupporterReadPersistentState()[key];
+    return [value isKindOfClass:NSString.class] ? value : nil;
+}
+
+static inline BOOL DORHSupporterSetPersistentString(NSString *key, NSString *value)
+{
+    NSMutableDictionary<NSString *, id> *state =
+        DORHSupporterReadPersistentState();
+
+    if (value.length != 0)
+        state[key] = value;
+    else
+        [state removeObjectForKey:key];
+
+    return DORHSupporterWritePersistentState(state);
+}
+
+static inline NSString *DORHSupporterEmbeddedDeviceCode(NSString *licenseCode)
+{
+    NSString *trimmed =
+        [licenseCode stringByTrimmingCharactersInSet:
+            NSCharacterSet.whitespaceAndNewlineCharacterSet];
+
+    NSArray<NSString *> *parts =
+        [trimmed componentsSeparatedByString:@"."];
+
+    if (parts.count != 3 || ![parts[0] isEqualToString:@"RH1"])
+        return nil;
+
+    NSData *payload = DORHSupporterDecodeBase64URL(parts[1]);
+    if (payload.length == 0)
+        return nil;
+
+    id object = [NSJSONSerialization JSONObjectWithData:payload
+                                                options:0
+                                                  error:nil];
+
+    if (![object isKindOfClass:NSDictionary.class])
+        return nil;
+
+    NSDictionary<NSString *, id> *info = object;
+    NSString *product = info[@"product"];
+    NSString *device = info[@"device"];
+
+    if (![product isKindOfClass:NSString.class] ||
+        ![product isEqualToString:@"DopamineRH"] ||
+        ![device isKindOfClass:NSString.class] ||
+        device.length == 0)
+        return nil;
+
+    return device;
+}
+
+static inline NSDictionary<NSString *, id> *
+DORHSupporterVerifyLicenseCodeForDevice(NSString *licenseCode,
+                                        NSString *expectedDeviceCode,
+                                        NSError **error);
+
 static inline NSString *DORHSupporterDeviceCode(void)
 {
     static NSString *deviceCode = nil;
     static dispatch_once_t onceToken;
+
     dispatch_once(&onceToken, ^{
-        NSString *vendorID = UIDevice.currentDevice.identifierForVendor.UUIDString;
+        // From V2 onward this is the canonical device identifier.
+        deviceCode =
+            DORHSupporterPersistentString(
+                DORHSupporterPersistentDeviceCodeKey);
+
+        if (deviceCode.length != 0)
+            return;
+
+        //
+        // Migration path for already activated RC7 installations.
+        //
+        // If identifierForVendor changed during an update but the old license
+        // survived in NSUserDefaults, the signed license itself still contains
+        // the original device code. Verify that signed payload against its own
+        // device value before adopting it.
+        //
+        NSString *legacyLicense =
+            DORHSupporterPersistentString(
+                DORHSupporterPersistentLicenseCodeKey);
+
+        if (legacyLicense.length == 0) {
+            legacyLicense =
+                [NSUserDefaults.standardUserDefaults
+                    stringForKey:DORHSupporterLicenseDefaultsKey];
+        }
+
+        NSString *legacyDevice =
+            DORHSupporterEmbeddedDeviceCode(legacyLicense);
+
+        if (legacyDevice.length != 0 &&
+            DORHSupporterVerifyLicenseCodeForDevice(
+                legacyLicense, legacyDevice, NULL) != nil) {
+
+            deviceCode = legacyDevice;
+
+            DORHSupporterSetPersistentString(
+                DORHSupporterPersistentDeviceCodeKey,
+                deviceCode);
+
+            if (legacyLicense.length != 0) {
+                DORHSupporterSetPersistentString(
+                    DORHSupporterPersistentLicenseCodeKey,
+                    legacyLicense);
+            }
+
+            return;
+        }
+
+        //
+        // Fresh installation: preserve the legacy RC7 algorithm exactly,
+        // then persist its result so later app updates cannot change it.
+        //
+        NSString *vendorID =
+            UIDevice.currentDevice.identifierForVendor.UUIDString;
+
         if (vendorID.length == 0)
             return;
 
-        NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"com.opa334.Dopamine-roothide";
-        NSString *seed = [NSString stringWithFormat:@"%@|%@", vendorID, bundleID];
-        NSData *seedData = [seed dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *bundleID =
+            NSBundle.mainBundle.bundleIdentifier ?:
+            @"com.opa334.Dopamine-roothide";
+
+        NSString *seed =
+            [NSString stringWithFormat:@"%@|%@", vendorID, bundleID];
+
+        NSData *seedData =
+            [seed dataUsingEncoding:NSUTF8StringEncoding];
 
         unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
-        CC_SHA256(seedData.bytes, (CC_LONG)seedData.length, digest);
+        CC_SHA256(seedData.bytes,
+                  (CC_LONG)seedData.length,
+                  digest);
 
-        NSMutableString *hex = [NSMutableString stringWithCapacity:32];
+        NSMutableString *hex =
+            [NSMutableString stringWithCapacity:32];
+
         for (NSUInteger i = 0; i < 16; i++)
             [hex appendFormat:@"%02X", digest[i]];
 
-        NSMutableArray<NSString *> *groups = [NSMutableArray arrayWithCapacity:8];
-        for (NSUInteger i = 0; i < hex.length; i += 4)
-            [groups addObject:[hex substringWithRange:NSMakeRange(i, MIN((NSUInteger)4, hex.length - i))]];
+        NSMutableArray<NSString *> *groups =
+            [NSMutableArray arrayWithCapacity:8];
+
+        for (NSUInteger i = 0; i < hex.length; i += 4) {
+            [groups addObject:
+                [hex substringWithRange:
+                    NSMakeRange(i,
+                        MIN((NSUInteger)4,
+                            hex.length - i))]];
+        }
+
         deviceCode = [groups componentsJoinedByString:@"-"];
+
+        DORHSupporterSetPersistentString(
+            DORHSupporterPersistentDeviceCodeKey,
+            deviceCode);
     });
+
     return deviceCode;
 }
 
@@ -95,8 +294,10 @@ static inline SecKeyRef DORHSupporterCreatePublicKey(void)
     return publicKey;
 }
 
-static inline NSDictionary<NSString *, id> *DORHSupporterVerifyLicenseCode(NSString *licenseCode,
-                                                                           NSError **error)
+static inline NSDictionary<NSString *, id> *
+DORHSupporterVerifyLicenseCodeForDevice(NSString *licenseCode,
+                                        NSString *expectedDeviceCode,
+                                        NSError **error)
 {
     NSString *trimmed = [licenseCode stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSArray<NSString *> *parts = [trimmed componentsSeparatedByString:@"."];
@@ -156,13 +357,12 @@ static inline NSDictionary<NSString *, id> *DORHSupporterVerifyLicenseCode(NSStr
         return nil;
     }
 
-    NSString *currentDeviceCode = DORHSupporterDeviceCode();
-    if (currentDeviceCode.length == 0) {
+    if (expectedDeviceCode.length == 0) {
         if (error) *error = DORHSupporterLicenseError(7, @"Device identifier unavailable");
         return nil;
     }
 
-    if (![device isEqualToString:currentDeviceCode]) {
+    if (![device isEqualToString:expectedDeviceCode]) {
         if (error) *error = DORHSupporterLicenseError(8, @"License is for another device");
         return nil;
     }
@@ -170,12 +370,59 @@ static inline NSDictionary<NSString *, id> *DORHSupporterVerifyLicenseCode(NSStr
     return info;
 }
 
+
+static inline NSDictionary<NSString *, id> *
+DORHSupporterVerifyLicenseCode(NSString *licenseCode, NSError **error)
+{
+    return DORHSupporterVerifyLicenseCodeForDevice(
+        licenseCode,
+        DORHSupporterDeviceCode(),
+        error);
+}
+
 static inline NSDictionary<NSString *, id> *DORHSupporterCurrentLicenseInfo(void)
 {
-    NSString *storedLicense = [NSUserDefaults.standardUserDefaults stringForKey:DORHSupporterLicenseDefaultsKey];
-    if (storedLicense.length == 0)
-        return nil;
-    return DORHSupporterVerifyLicenseCode(storedLicense, NULL);
+    NSString *persistentLicense =
+        DORHSupporterPersistentString(
+            DORHSupporterPersistentLicenseCodeKey);
+
+    NSString *legacyLicense =
+        [NSUserDefaults.standardUserDefaults
+            stringForKey:DORHSupporterLicenseDefaultsKey];
+
+    NSArray<NSString *> *candidates =
+        persistentLicense.length != 0 &&
+        legacyLicense.length != 0 &&
+        ![persistentLicense isEqualToString:legacyLicense]
+            ? @[persistentLicense, legacyLicense]
+            : (persistentLicense.length != 0
+                ? @[persistentLicense]
+                : (legacyLicense.length != 0
+                    ? @[legacyLicense]
+                    : @[]));
+
+    for (NSString *license in candidates) {
+        NSDictionary<NSString *, id> *info =
+            DORHSupporterVerifyLicenseCode(license, NULL);
+
+        if (!info)
+            continue;
+
+        // Keep both stores synchronized during the migration period.
+        DORHSupporterSetPersistentString(
+            DORHSupporterPersistentLicenseCodeKey,
+            license);
+
+        [NSUserDefaults.standardUserDefaults
+            setObject:license
+               forKey:DORHSupporterLicenseDefaultsKey];
+
+        [NSUserDefaults.standardUserDefaults synchronize];
+
+        return info;
+    }
+
+    return nil;
 }
 
 static inline BOOL DORHSupporterIsVerified(void)
@@ -191,18 +438,56 @@ static inline NSString *DORHSupporterCurrentID(void)
 
 static inline BOOL DORHSupporterStoreLicenseCode(NSString *licenseCode, NSError **error)
 {
-    NSDictionary *info = DORHSupporterVerifyLicenseCode(licenseCode, error);
+    NSDictionary *info =
+        DORHSupporterVerifyLicenseCode(licenseCode, error);
+
     if (!info)
         return NO;
 
-    NSString *trimmed = [licenseCode stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    [NSUserDefaults.standardUserDefaults setObject:trimmed forKey:DORHSupporterLicenseDefaultsKey];
-    [[NSNotificationCenter defaultCenter] postNotificationName:DORHSupporterLicenseDidChangeNotification object:nil];
+    NSString *trimmed =
+        [licenseCode stringByTrimmingCharactersInSet:
+            NSCharacterSet.whitespaceAndNewlineCharacterSet];
+
+    BOOL persisted =
+        DORHSupporterSetPersistentString(
+            DORHSupporterPersistentLicenseCodeKey,
+            trimmed);
+
+    if (!persisted) {
+        NSLog(@"[Supporter] persistent license write failed; using NSUserDefaults fallback");
+    }
+
+    [NSUserDefaults.standardUserDefaults
+        setObject:trimmed
+           forKey:DORHSupporterLicenseDefaultsKey];
+
+    [NSUserDefaults.standardUserDefaults synchronize];
+
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:
+            DORHSupporterLicenseDidChangeNotification
+                      object:nil];
+
     return YES;
 }
 
 static inline void DORHSupporterRemoveLicense(void)
 {
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:DORHSupporterLicenseDefaultsKey];
-    [[NSNotificationCenter defaultCenter] postNotificationName:DORHSupporterLicenseDidChangeNotification object:nil];
+    //
+    // Deliberately keep the stable DeviceCode. Removing entitlement should not
+    // turn the same physical device into a new licensing identity.
+    //
+    DORHSupporterSetPersistentString(
+        DORHSupporterPersistentLicenseCodeKey,
+        nil);
+
+    [NSUserDefaults.standardUserDefaults
+        removeObjectForKey:DORHSupporterLicenseDefaultsKey];
+
+    [NSUserDefaults.standardUserDefaults synchronize];
+
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:
+            DORHSupporterLicenseDidChangeNotification
+                      object:nil];
 }
