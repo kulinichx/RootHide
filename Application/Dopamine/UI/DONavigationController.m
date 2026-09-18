@@ -28,7 +28,7 @@ static CGFloat DOCustomGlassNavigationPerceivedLuminance(CGFloat red, CGFloat gr
     return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
 }
 
-static NSString * const DOCustomGlassNavigationThemeKey = @"red";
+static NSString * const DOCustomGlassNavigationThemeKey = @"purple";
 
 static UIImage *DOCustomGlassNavigationResolveBackground(DOTheme *theme, BOOL *usingUserWallpaper)
 {
@@ -39,7 +39,7 @@ static UIImage *DOCustomGlassNavigationResolveBackground(DOTheme *theme, BOOL *u
         *usingUserWallpaper = (userWallpaper != nil);
 
     // User media always has priority. DOTheme is consulted only for immutable
-    // bundle artwork (including Background_Red as Custom Glass fallback).
+    // bundle artwork (including Background_Purple as Custom Glass fallback).
     return userWallpaper ?: [theme image];
 }
 

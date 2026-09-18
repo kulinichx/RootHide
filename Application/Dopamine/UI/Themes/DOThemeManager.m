@@ -38,24 +38,6 @@
     return self;
 }
 
-- (NSArray*)getAvailableThemeKeys
-{
-    NSMutableArray *keys = [[NSMutableArray alloc] init];
-    for (DOTheme *theme in _themes) {
-        [keys addObject:theme.key];
-    }
-    return keys;
-}
-
-- (NSArray*)getAvailableThemeNames
-{
-    NSMutableArray *names = [[NSMutableArray alloc] init];
-    for (DOTheme *theme in _themes) {
-        [names addObject:theme.name];
-    }
-    return names;
-}
-
 - (DOTheme*)getThemeForKey:(NSString*)key
 {
     for (DOTheme *theme in _themes) {

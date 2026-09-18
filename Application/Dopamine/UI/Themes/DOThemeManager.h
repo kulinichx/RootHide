@@ -17,8 +17,6 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)sharedInstance;
 
 + (UIColor*)menuColorWithAlpha:(float)alpha;
-- (NSArray*)getAvailableThemeKeys;
-- (NSArray*)getAvailableThemeNames;
 - (DOTheme*)getThemeForKey:(NSString*)key;
 - (DOTheme*)enabledTheme;
 

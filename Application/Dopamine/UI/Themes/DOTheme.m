@@ -8,8 +8,6 @@
 #import "DOTheme.h"
 #import "UIImage+Blur.h"
 
-static NSString * const DOCustomGlassThemeKey = @"red";
-
 @interface DOTheme ()
 @property (nonatomic, retain) NSString *imageName;
 @end
@@ -21,10 +19,7 @@ static NSString * const DOCustomGlassThemeKey = @"red";
     self = [super init];
     if (self) {
         self.name = [dictionary objectForKey:@"name"];
-        self.icon = [dictionary objectForKey:@"icon"];
         self.key = [dictionary objectForKey:@"key"];
-        if ([self.key isEqualToString:DOCustomGlassThemeKey])
-            self.icon = nil; // Keep Dopamine's primary/default blue app icon.
         self.imageName = [dictionary objectForKey:@"image"];
         self.windowColor = [self colorFromHexString:[dictionary objectForKey:@"windowColor"]];
         self.actionMenuColor = [self colorFromHexString:[dictionary objectForKey:@"actionMenuColor"]];
@@ -46,7 +41,7 @@ static NSString * const DOCustomGlassThemeKey = @"red";
 {
     // DOTheme owns only immutable, bundle-backed theme artwork. Dynamic
     // Custom Glass user media is resolved by DONavigationController before this
-    // fallback is consulted, so a cached Background_Red image can never replace
+    // fallback is consulted, so a cached Background_Purple image can never replace
     // a user-selected wallpaper after launch.
     if (_image == nil)
         _image = [[UIImage imageNamed:self.imageName] imageWithBlur:self.blur];

@@ -1,6 +1,6 @@
 .PHONY: all clean build_clean
 
-XCODEBUILD_SETTINGS = CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO EXCLUDED_SOURCE_FILE_NAMES='Assets.xcassets LaunchScreen.storyboard' ASSETCATALOG_COMPILER_APPICON_NAME='' ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES='' INFOPLIST_KEY_UILaunchStoryboardName=LaunchScreen
+XCODEBUILD_SETTINGS = CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO EXCLUDED_SOURCE_FILE_NAMES='LaunchScreen.storyboard' INFOPLIST_KEY_UILaunchStoryboardName=LaunchScreen
 DOPAMINE_VERSION ?= 3.0.7
 
 all: Dopamine.ipa
@@ -26,7 +26,6 @@ build/Build/Products/Debug-iphoneos/Dopamine.app: FORCE
 	xcodebuild -project Dopamine.xcodeproj -target Dopamine -sdk iphoneos -configuration Debug CONFIGURATION_BUILD_DIR="$(CURDIR)/build/Build/Products/Debug-iphoneos" $(XCODEBUILD_SETTINGS) MARKETING_VERSION="$(DOPAMINE_VERSION)"
 endif
 	touch build/Build/Products/Debug-iphoneos/Dopamine.app/Dopamine.roothide
-	cp -a Dopamine/Prebuilt/Assets.car build/Build/Products/Debug-iphoneos/Dopamine.app/Assets.car
 	mkdir -p build/Build/Products/Debug-iphoneos/Dopamine.app/Base.lproj
 	cp -a Dopamine/Prebuilt/Base.lproj/LaunchScreen.storyboardc build/Build/Products/Debug-iphoneos/Dopamine.app/Base.lproj/
 	cp -a Dopamine/Resources/*.deb build/Build/Products/Debug-iphoneos/Dopamine.app/
