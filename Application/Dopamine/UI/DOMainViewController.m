@@ -29,6 +29,8 @@
 - (void)customGlassRefreshSharedBackground;
 - (void)customGlassReplaceSharedBackgroundWithImage:(UIImage *)image;
 - (void)customGlassApplySharedBackgroundBlurIntensity:(CGFloat)blurIntensity;
+- (BOOL)customGlassIsUsingVideoWallpaper;
+- (void)customGlassSetWallpaperPlaybackRate:(CGFloat)playbackRate;
 - (BOOL)customGlassHasSharedBackground;
 - (BOOL)customGlassPrefersDarkForegroundForView:(UIView *)view;
 @end
@@ -90,6 +92,8 @@ static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 static NSString * const DOCustomGlassProfileFocusEnabledKey = @"DOCustomGlassTheme.ProfileFocusEnabled";
 static NSString * const DOCustomGlassProfileFocusDockRightKey = @"DOCustomGlassTheme.ProfileFocusDockRight";
+static NSString * const DOCustomGlassWallpaperPlaybackRateKey = @"DOCustomGlassTheme.WallpaperPlaybackRate";
+static CGFloat const DOCustomGlassWallpaperPlaybackRateDefault = 0.65;
 static NSString * const DOCustomGlassThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSUInteger const DOCustomGlassUsernameCharacterLimit = 20;
 static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
@@ -97,6 +101,30 @@ static NSUInteger const DOCustomGlassMottoCharacterLimit = 32;
 static inline CGFloat DOCustomGlassClamp01(CGFloat value)
 {
     return MIN(1.0, MAX(0.0, value));
+}
+
+static NSInteger DOCustomGlassPlaybackRateSegmentIndex(CGFloat rate)
+{
+    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
+    NSInteger bestIndex = 0;
+    CGFloat bestDistance = CGFLOAT_MAX;
+
+    for (NSInteger index = 0; index < 4; index++) {
+        CGFloat distance = fabs(rate - rates[index]);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = index;
+        }
+    }
+
+    return bestIndex;
+}
+
+static CGFloat DOCustomGlassPlaybackRateForSegmentIndex(NSInteger index)
+{
+    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
+    NSInteger clampedIndex = MIN(3, MAX(0, index));
+    return rates[clampedIndex];
 }
 
 static id DOCustomGlassCreateCAFilter(NSString *type)
@@ -621,6 +649,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 @property UISlider *glassBlurSlider;
 @property UISlider *glassTransparencySlider;
 @property UISlider *glassTintSlider;
+@property UIView *wallpaperPlaybackRateRow;
+@property UISegmentedControl *wallpaperPlaybackRateControl;
 
 @property UILabel *backgroundBlurValueLabel;
 @property UILabel *glassBlurValueLabel;
@@ -789,6 +819,34 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[headerRow, slider]];
     row.axis = UILayoutConstraintAxisVertical;
     row.spacing = 7.0;
+    return row;
+}
+
+- (UIView *)appearanceSegmentedRowWithTitle:(NSString *)title
+                                    subtitle:(NSString *)subtitle
+                                     control:(UISegmentedControl *)control
+{
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = title;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+
+    UILabel *subtitleLabel = [[UILabel alloc] init];
+    subtitleLabel.text = subtitle;
+    subtitleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.52];
+    subtitleLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightRegular];
+
+    UIStackView *titleStack =
+        [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, subtitleLabel]];
+    titleStack.axis = UILayoutConstraintAxisVertical;
+    titleStack.spacing = 2.0;
+
+    UIStackView *row =
+        [[UIStackView alloc] initWithArrangedSubviews:@[titleStack, control]];
+    row.axis = UILayoutConstraintAxisVertical;
+    row.spacing = 7.0;
+
+    [control.heightAnchor constraintEqualToConstant:34.0].active = YES;
     return row;
 }
 
@@ -1123,7 +1181,8 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         DOCustomGlassTransparencyKey : @0.70,
         DOCustomGlassTintAlphaKey : @0.05,
         DOCustomGlassUsernameKey : @"",
-        DOCustomGlassMottoKey : @""
+        DOCustomGlassMottoKey : @"",
+        DOCustomGlassWallpaperPlaybackRateKey : @(DOCustomGlassWallpaperPlaybackRateDefault)
     }];
 
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
@@ -1209,7 +1268,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     // surface was frame-driven. Keep a safety floor even though contentView is
     // now Auto Layout driven, so all four sliders remain visible on every iOS 16
     // device and Dynamic Type configuration.
-    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 420.0 : 404.0)].active = YES;
+    [self.previewGlassView.heightAnchor constraintGreaterThanOrEqualToConstant:(isPad ? 488.0 : 472.0)].active = YES;
 
     UIStackView *controlsStack = [[UIStackView alloc] init];
     controlsStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1235,6 +1294,47 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
                                                                  subtitle:@"整张背景的模糊程度"
                                                                    slider:self.backgroundBlurSlider
                                                                valueLabel:self.backgroundBlurValueLabel]];
+
+    self.wallpaperPlaybackRateControl =
+        [[UISegmentedControl alloc] initWithItems:@[@"0.50×", @"0.65×", @"0.80×", @"1.00×"]];
+    self.wallpaperPlaybackRateControl.selectedSegmentTintColor =
+        [UIColor colorWithWhite:1.0 alpha:0.14];
+    self.wallpaperPlaybackRateControl.backgroundColor = UIColor.clearColor;
+    self.wallpaperPlaybackRateControl.apportionsSegmentWidthsByContent = NO;
+    self.wallpaperPlaybackRateControl.accessibilityLabel = @"动态壁纸速度";
+
+    [self.wallpaperPlaybackRateControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.66],
+        NSFontAttributeName : [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+
+    [self.wallpaperPlaybackRateControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : UIColor.whiteColor,
+        NSFontAttributeName : [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold]
+    } forState:UIControlStateSelected];
+
+    CGFloat persistedPlaybackRate =
+        [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
+            [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
+            DOCustomGlassWallpaperPlaybackRateDefault;
+
+    self.wallpaperPlaybackRateControl.selectedSegmentIndex =
+        DOCustomGlassPlaybackRateSegmentIndex(persistedPlaybackRate);
+
+    [self.wallpaperPlaybackRateControl
+        addTarget:self
+           action:@selector(wallpaperPlaybackRateChanged:)
+ forControlEvents:UIControlEventValueChanged];
+
+    self.wallpaperPlaybackRateRow =
+        [self appearanceSegmentedRowWithTitle:@"动态壁纸速度"
+                                    subtitle:@"视频 / Live Photo 的播放速度"
+                                     control:self.wallpaperPlaybackRateControl];
+
+    self.wallpaperPlaybackRateRow.hidden =
+        ![self.navigationController customGlassIsUsingVideoWallpaper];
+
+    [controlsStack addArrangedSubview:self.wallpaperPlaybackRateRow];
 
     self.glassBlurSlider = [self appearanceSlider];
     self.glassBlurSlider.minimumValue = 0.0;
@@ -1299,6 +1399,20 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         self.glassTransparencySlider.value = [defaults floatForKey:DOCustomGlassTransparencyKey];
     if (self.glassTintSlider)
         self.glassTintSlider.value = [defaults floatForKey:DOCustomGlassTintAlphaKey];
+
+    if (self.wallpaperPlaybackRateControl) {
+        CGFloat playbackRate =
+            [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
+                [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
+                DOCustomGlassWallpaperPlaybackRateDefault;
+
+        self.wallpaperPlaybackRateControl.selectedSegmentIndex =
+            DOCustomGlassPlaybackRateSegmentIndex(playbackRate);
+    }
+
+    if (self.wallpaperPlaybackRateRow)
+        self.wallpaperPlaybackRateRow.hidden =
+            ![self.navigationController customGlassIsUsingVideoWallpaper];
 }
 
 - (void)refreshThemePageFromPersistedState
@@ -1338,6 +1452,13 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 - (void)appearanceSliderChanged:(UISlider *)slider
 {
     [self applyAppearancePreviewAndPersist:YES];
+}
+
+- (void)wallpaperPlaybackRateChanged:(UISegmentedControl *)control
+{
+    CGFloat playbackRate =
+        DOCustomGlassPlaybackRateForSegmentIndex(control.selectedSegmentIndex);
+    [self.navigationController customGlassSetWallpaperPlaybackRate:playbackRate];
 }
 
 - (void)applyAppearancePreviewAndPersist:(BOOL)persist
@@ -1382,6 +1503,13 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     self.glassBlurSlider.value = 0.85;
     self.glassTransparencySlider.value = 0.70;
     self.glassTintSlider.value = 0.05;
+
+    if (self.wallpaperPlaybackRateControl)
+        self.wallpaperPlaybackRateControl.selectedSegmentIndex = 1;
+
+    [self.navigationController
+        customGlassSetWallpaperPlaybackRate:DOCustomGlassWallpaperPlaybackRateDefault];
+
     [self applyAppearancePreviewAndPersist:YES];
 }
 
