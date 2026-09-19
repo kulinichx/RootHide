@@ -640,6 +640,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     if (!DORHSupporterIsVerified())
         return;
 
+    [self customGlassInstallBackNavigation];
     [self customGlassApplyPageAppearance];
 
     UITableView *tableView = [self valueForKey:@"table"];
@@ -648,6 +649,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     [self customGlassRefreshSectionBackdrops];
 
     UIView *backButton = [self.view viewWithTag:0xC653];
+    if (backButton)
+        [self.view bringSubviewToFront:backButton];
     if ([backButton isKindOfClass:[UIButton class]]) {
         ((UIButton *)backButton).tintColor = [self customGlassForegroundWithAlpha:0.96];
     }
