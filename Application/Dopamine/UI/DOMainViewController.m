@@ -88,6 +88,9 @@ static NSString * const DOCustomGlassBackgroundBlurKey = @"DOCustomGlassTheme.Ba
 static NSString * const DOCustomGlassBlurIntensityKey = @"DOCustomGlassTheme.GlassBlurIntensity";
 static NSString * const DOCustomGlassTransparencyKey = @"DOCustomGlassTheme.GlassTransparency";
 static NSString * const DOCustomGlassTintAlphaKey = @"DOCustomGlassTheme.GlassTintAlpha";
+static NSString * const DOCustomGlassAppearanceKey = @"DOCustomGlassTheme.Appearance";
+static NSString * const DOCustomGlassAppearanceLight = @"light";
+static NSString * const DOCustomGlassAppearanceDark = @"dark";
 static NSString * const DOCustomGlassUsernameKey = @"DOCustomGlassTheme.Username";
 static NSString * const DOCustomGlassMottoKey = @"DOCustomGlassTheme.Motto";
 static NSString * const DOCustomGlassProfileFocusEnabledKey = @"DOCustomGlassTheme.ProfileFocusEnabled";
@@ -239,15 +242,20 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 @property(nonatomic, strong) UIView *contentView;
 @property(nonatomic, strong) UIView *neutralTintView;
 @property(nonatomic, strong) UIVisualEffectView *fallbackBlurView;
-@property(nonatomic, strong) CAGradientLayer *shoulderGradientLayer;
-@property(nonatomic, strong) CAShapeLayer *shoulderMaskLayer;
 @property(nonatomic, strong) CAGradientLayer *specularGradientLayer;
 @property(nonatomic, strong) CAShapeLayer *specularMaskLayer;
-@property(nonatomic, strong) CAGradientLayer *surfaceHighlightLayer;
-@property(nonatomic, strong) CAShapeLayer *contrastContourLayer;
+@property(nonatomic, strong) CAGradientLayer *specularBoostGradientLayer;
+@property(nonatomic, strong) CAShapeLayer *specularBoostMaskLayer;
+@property(nonatomic, strong) CAGradientLayer *specularDarkGradientLayer;
+@property(nonatomic, strong) CAShapeLayer *specularDarkMaskLayer;
 @property(nonatomic, assign) CGFloat preferredCornerRadius;
 @property(nonatomic, assign) CGFloat baseTintAlpha;
 @property(nonatomic, assign) CGFloat materialScale;
+@property(nonatomic, assign) CGFloat materialBodyScale;
+@property(nonatomic, assign) CGFloat materialOpticalScale;
+@property(nonatomic, assign) CGFloat materialBackdropScale;
+@property(nonatomic, assign) CGFloat materialSpecularScale;
+@property(nonatomic, assign) CGFloat materialEdgeDarkScale;
 @property(nonatomic, assign) BOOL suppressBackdrop;
 @property(nonatomic, assign) CGFloat lastRenderedShortDimension;
 
@@ -271,6 +279,11 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _preferredCornerRadius = MAX(0.0, cornerRadius);
         _baseTintAlpha = MAX(0.0, baseTintAlpha);
         _materialScale = 1.0;
+        _materialBodyScale = 1.0;
+        _materialOpticalScale = 1.0;
+        _materialBackdropScale = 1.0;
+        _materialSpecularScale = 1.0;
+        _materialEdgeDarkScale = 1.0;
         _suppressBackdrop = NO;
         _lastRenderedShortDimension = 0.0;
 
@@ -284,27 +297,6 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         _neutralTintView.userInteractionEnabled = NO;
         [self addSubview:_neutralTintView];
 
-        // A broad, low-energy illumination wash sits below content. GlassFolders
-        // uses a broad directional light plus thin continuous rails; keeping the
-        // wash separate makes the HighLight control visibly useful without
-        // thickening the perimeter into a white UI border.
-        _surfaceHighlightLayer = [CAGradientLayer layer];
-        _surfaceHighlightLayer.startPoint = CGPointMake(0.02, 0.02);
-        _surfaceHighlightLayer.endPoint = CGPointMake(0.98, 0.98);
-        _surfaceHighlightLayer.locations = @[@0.0, @0.30, @0.66, @1.0];
-        _surfaceHighlightLayer.zPosition = 5.0;
-        [self.layer addSublayer:_surfaceHighlightLayer];
-
-        // A quiet opposite-tone contour is independent from the white specular
-        // rail. On bright wallpapers it supplies the separation that a white
-        // highlight cannot; on dark wallpapers the white rail remains dominant.
-        _contrastContourLayer = [CAShapeLayer layer];
-        _contrastContourLayer.fillColor = UIColor.clearColor.CGColor;
-        _contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0 alpha:0.06].CGColor;
-        _contrastContourLayer.lineWidth = 0.32;
-        _contrastContourLayer.zPosition = 898.0;
-        [self.layer addSublayer:_contrastContourLayer];
-
         _contentView = [[UIView alloc] initWithFrame:CGRectZero];
         _contentView.translatesAutoresizingMaskIntoConstraints = NO;
         _contentView.backgroundColor = UIColor.clearColor;
@@ -317,29 +309,46 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
             [_contentView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor]
         ]];
 
-        _shoulderGradientLayer = [CAGradientLayer layer];
-        _shoulderGradientLayer.startPoint = CGPointMake(0.02, 0.02);
-        _shoulderGradientLayer.endPoint = CGPointMake(0.98, 0.98);
-        _shoulderGradientLayer.locations = @[@0.0, @0.30, @0.58, @0.82, @1.0];
-        _shoulderGradientLayer.zPosition = 900.0;
-        _shoulderMaskLayer = [CAShapeLayer layer];
-        _shoulderMaskLayer.fillColor = UIColor.clearColor.CGColor;
-        _shoulderMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _shoulderMaskLayer.lineWidth = 5.0;
-        _shoulderGradientLayer.mask = _shoulderMaskLayer;
-        [self.layer addSublayer:_shoulderGradientLayer];
-
+        // Glass V2.2: the optical language is perimeter-only. The material body
+        // comes from backdrop + neutral tint; highlight owns only three thin,
+        // directional rails inspired by Mango's specular/boost/dark structure.
         _specularGradientLayer = [CAGradientLayer layer];
         _specularGradientLayer.startPoint = CGPointMake(0.0, 0.0);
         _specularGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-        _specularGradientLayer.locations = @[@0.0, @0.24, @0.56, @0.82, @1.0];
+        _specularGradientLayer.locations = @[@0.0, @0.34, @0.50, @0.66, @1.0];
         _specularGradientLayer.zPosition = 901.0;
         _specularMaskLayer = [CAShapeLayer layer];
         _specularMaskLayer.fillColor = UIColor.clearColor.CGColor;
         _specularMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
-        _specularMaskLayer.lineWidth = 1.05;
+        _specularMaskLayer.lineWidth = 1.30;
         _specularGradientLayer.mask = _specularMaskLayer;
         [self.layer addSublayer:_specularGradientLayer];
+
+        _specularBoostGradientLayer = [CAGradientLayer layer];
+        _specularBoostGradientLayer.startPoint = CGPointMake(0.0, 0.0);
+        _specularBoostGradientLayer.endPoint = CGPointMake(1.0, 1.0);
+        _specularBoostGradientLayer.locations = @[@0.0, @0.22, @0.50, @0.78, @1.0];
+        _specularBoostGradientLayer.zPosition = 902.0;
+        _specularBoostMaskLayer = [CAShapeLayer layer];
+        _specularBoostMaskLayer.fillColor = UIColor.clearColor.CGColor;
+        _specularBoostMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
+        _specularBoostMaskLayer.lineWidth = 0.70;
+        _specularBoostGradientLayer.mask = _specularBoostMaskLayer;
+        [self.layer addSublayer:_specularBoostGradientLayer];
+
+        // Rotate the dark field by 90 degrees relative to the bright field so the
+        // opposite edges carry a quiet contour instead of a uniform black stroke.
+        _specularDarkGradientLayer = [CAGradientLayer layer];
+        _specularDarkGradientLayer.startPoint = CGPointMake(1.0, 0.0);
+        _specularDarkGradientLayer.endPoint = CGPointMake(0.0, 1.0);
+        _specularDarkGradientLayer.locations = @[@0.0, @0.24, @0.50, @0.76, @1.0];
+        _specularDarkGradientLayer.zPosition = 900.0;
+        _specularDarkMaskLayer = [CAShapeLayer layer];
+        _specularDarkMaskLayer.fillColor = UIColor.clearColor.CGColor;
+        _specularDarkMaskLayer.strokeColor = UIColor.whiteColor.CGColor;
+        _specularDarkMaskLayer.lineWidth = 0.32;
+        _specularDarkGradientLayer.mask = _specularDarkMaskLayer;
+        [self.layer addSublayer:_specularDarkGradientLayer];
 
         [self reloadMaterial];
     }
@@ -401,16 +410,38 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     CGFloat opticalResponse =
         (0.12 * highlightResponse) + (0.88 * pow(highlightResponse, 1.80));
     BOOL darkAppearance = [self usesDarkAppearance];
+    BOOL darkGlassAppearance =
+        [[defaults stringForKey:DOCustomGlassAppearanceKey] isEqualToString:DOCustomGlassAppearanceDark];
+
+    // Per-surface optical role controls. The global sliders still define the
+    // user's material; these scales only shape how a specific control expresses
+    // that material (broad platter vs. concentrated interactive lens).
+    CGFloat materialBackdropScale = MAX(0.0, MIN(1.25, self.materialBackdropScale));
+    CGFloat materialSpecularScale = MAX(0.0, MIN(1.35, self.materialSpecularScale));
+    CGFloat materialEdgeDarkScale = MAX(0.0, MIN(1.35, self.materialEdgeDarkScale));
 
     BOOL isBackdropLayer = [NSStringFromClass(self.layer.class) containsString:@"Backdrop"];
     if (isBackdropLayer && !self.suppressBackdrop) {
-        CGFloat blurRadius = 0.35 + (17.0 * blurResponse);
-        // Keep wallpaper chroma, but do not boost it so aggressively that the
-        // Glass body becomes indistinguishable from the source wallpaper.
-        CGFloat saturation = 1.01 + (0.11 * blurResponse);
-        CGFloat brightness = darkAppearance ?
-            (0.006 + (0.012 * blurResponse)) :
-            (0.002 + (0.006 * blurResponse));
+        CGFloat blurRadius = darkGlassAppearance ?
+            (1.10 + (18.2 * blurResponse)) :
+            (0.35 + (17.0 * blurResponse));
+        // Dark Glass increases diffusion modestly, but preserves wallpaper
+        // color transmission instead of turning the material into a black blur.
+        // A structural platter gets a quieter, broader diffusion pass while
+        // an interactive lens can keep a more concentrated local backdrop.
+        // Scale the whole backdrop transform toward neutral rather than stacking
+        // a second full-strength material on top of nested controls.
+        blurRadius *= materialBackdropScale;
+        CGFloat saturation = darkGlassAppearance ?
+            (0.98 + (0.08 * blurResponse)) :
+            (1.01 + (0.11 * blurResponse));
+        saturation = 1.0 + ((saturation - 1.0) * materialBackdropScale);
+        CGFloat brightness = darkGlassAppearance ?
+            (-0.018 - (0.018 * bodyAuthority)) :
+            (darkAppearance ?
+                (0.006 + (0.012 * blurResponse)) :
+                (0.002 + (0.006 * blurResponse)));
+        brightness *= materialBackdropScale;
 
         id saturate = DOCustomGlassCreateCAFilter(@"colorSaturate");
         id brighten = DOCustomGlassCreateCAFilter(@"colorBrightness");
@@ -453,7 +484,7 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
         }
         self.fallbackBlurView.hidden = self.suppressBackdrop;
         self.fallbackBlurView.alpha = self.suppressBackdrop ? 0.0 :
-            MIN(0.68, 0.18 + (0.50 * blurResponse));
+            MIN(0.68, (0.18 + (0.50 * blurResponse)) * materialBackdropScale);
     }
 
     // Transparency owns a real material-body range now. R5's 0.8%...6.5%
@@ -470,105 +501,81 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     if (darkAppearance)
         tintAlpha += 0.010 * bodyAuthority;
 
-    // Grouping shells intentionally skip the second backdrop blur, but they
-    // still need enough body/edge authority to visibly contain the three pills.
-    if (self.suppressBackdrop)
-        tintAlpha = 0.060 + (0.082 * bodyAuthority);
-
-    // Material separation follows the *local wallpaper*, not just global
-    // Dark Mode. Bright wallpaper receives a faint dark neutral body; dark
-    // wallpaper receives a faint light body. This gives every Glass surface a
-    // reliable depth floor while preserving wallpaper chroma.
-    BOOL prefersDarkForeground = darkAppearance ? NO : YES;
-    UIWindow *window = self.window;
-    UINavigationController *navigationController = nil;
-    if ([window.rootViewController isKindOfClass:[UINavigationController class]])
-        navigationController = (UINavigationController *)window.rootViewController;
-    if (navigationController &&
-        [navigationController respondsToSelector:@selector(customGlassPrefersDarkForegroundForView:)]) {
-        prefersDarkForeground = [navigationController customGlassPrefersDarkForegroundForView:self];
+    // Keep the material body globally stable for a selected Glass appearance.
+    // The CABackdropLayer already reacts naturally to local wallpaper content;
+    // flipping the neutral body between black and white per surface made two
+    // identical Main Glass views look like different materials on the same page.
+    // Light Glass therefore keeps one faint white transmission body everywhere,
+    // while Dark Glass keeps one dark neutral body everywhere.
+    if (darkGlassAppearance) {
+        CGFloat darkBodyAlpha =
+            0.088 +
+            (0.118 * bodyAuthority) +
+            (0.10 * self.baseTintAlpha);
+        self.neutralTintView.backgroundColor = UIColor.blackColor;
+        self.neutralTintView.alpha = MIN(0.245, MAX(0.072, darkBodyAlpha));
     }
+    else {
+        self.neutralTintView.backgroundColor = UIColor.whiteColor;
+        self.neutralTintView.alpha = MIN(0.190, tintAlpha);
+    }
+    self.neutralTintView.alpha *= MAX(0.0, MIN(1.0, self.materialBodyScale));
 
-    self.neutralTintView.backgroundColor = prefersDarkForeground ?
-        UIColor.blackColor : UIColor.whiteColor;
-    self.neutralTintView.alpha = MIN(self.suppressBackdrop ? 0.155 : 0.190,
-                                     tintAlpha + (prefersDarkForeground ? 0.010 : 0.0));
+    CGFloat materialOpticalScale = MAX(0.0, MIN(1.25, self.materialOpticalScale));
+    CGFloat brightOpticalScale = materialOpticalScale * materialSpecularScale;
+    CGFloat darkEdgeScale = materialOpticalScale * materialEdgeDarkScale;
 
-    CGFloat geometryScale = [self surfaceGeometryScale];
-    CGFloat opticalScale = self.suppressBackdrop ?
-        MIN(0.88, geometryScale * 0.86) :
-        MIN(1.00, geometryScale);
+    // V2.2 contract: Glass Highlight maps only to perimeter specular intensity.
+    // Geometry no longer attenuates compact CTA surfaces; Role scales preserve
+    // Main/Outer > Inset hierarchy without changing physical rail thickness.
+    CGFloat specularAlpha = MIN(0.30,
+        0.30 * opticalResponse * brightOpticalScale);
+    CGFloat specularBoostAlpha = MIN(0.60,
+        0.60 * opticalResponse * brightOpticalScale);
+    CGFloat specularDarkAlpha = MIN(0.12,
+        0.12 * opticalResponse * darkEdgeScale);
 
-    // Directional rail topology follows GlassFolders: the upper / leading rail
-    // carries the specular cue, the lower / trailing rail is a weaker return,
-    // and the side walls stay quiet. R6 widens the *luminance response*, not
-    // the physical line width, so the HighLight slider is obvious without
-    // bringing back the thick white-border look.
-    CGFloat upperRailAlpha = MIN(0.40,
-        (0.001 + (0.395 * opticalResponse)) * opticalScale);
-    CGFloat secondaryRailAlpha = MIN(0.120,
-        (0.001 + (0.116 * opticalResponse)) * opticalScale);
-    CGFloat shoulderAlpha = MIN(0.105,
-        (0.001 + (0.096 * opticalResponse)) * opticalScale);
-
-    // Broad illumination is intentionally independent of rail width. This is
-    // the visible "light catching the material" response that was missing in
-    // R6. It remains below labels/icons, so readability never gets washed out.
-    CGFloat washAlpha = self.suppressBackdrop ?
-        MIN(0.070, (0.002 + 0.072 * opticalResponse) * opticalScale) :
-        MIN(0.145, (0.002 + 0.148 * opticalResponse) * opticalScale);
-    self.surfaceHighlightLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:washAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.42].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:washAlpha * 0.08].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor
-    ];
-
-    self.shoulderGradientLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:shoulderAlpha * 0.72].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.18].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.42].CGColor
-    ];
     self.specularGradientLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:upperRailAlpha * 0.84].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.002 * opticalScale].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha * 0.46].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:secondaryRailAlpha].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.62].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.30].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularAlpha * 0.82].CGColor
     ];
 
-    CGFloat shoulderWidth = self.suppressBackdrop ?
-        (0.30 + (0.20 * geometryScale)) :
-        (0.30 + (0.44 * geometryScale));
-    CGFloat specularWidth = self.suppressBackdrop ?
-        (0.14 + (0.06 * geometryScale)) :
-        (0.15 + (0.13 * geometryScale));
-    self.shoulderMaskLayer.lineWidth = shoulderWidth;
-    self.specularMaskLayer.lineWidth = specularWidth;
+    self.specularBoostGradientLayer.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.22].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.14].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:specularBoostAlpha * 0.78].CGColor
+    ];
 
-    CGFloat contrastContourAlpha = self.suppressBackdrop ?
-        (0.075 + (0.060 * bodyAuthority) + (0.045 * opticalResponse)) :
-        ((0.024 + (0.045 * bodyAuthority) + (0.020 * opticalResponse)) * opticalScale);
-    self.contrastContourLayer.strokeColor = [UIColor colorWithWhite:0.0
-                                                            alpha:MIN(self.suppressBackdrop ? 0.18 : 0.09,
-                                                                      contrastContourAlpha)].CGColor;
-    self.contrastContourLayer.lineWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) : (0.22 + (0.05 * geometryScale));
+    // Back-facing edges stay almost transparent. The two small dark lobes
+    // reinforce material separation, while every corner fades fully to zero.
+    self.specularDarkGradientLayer.colors = @[
+        (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.12].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:specularDarkAlpha * 0.08].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor
+    ];
 
-    // Keep a hairline structural contour independent from the specular slider.
-    // This is the minimum depth cue that separates Glass from wallpaper when
-    // both blur and highlight are low. Highlight adds brightness, not thickness.
-    CGFloat structuralBorderAlpha = self.suppressBackdrop ?
-        (0.078 + (0.105 * opticalResponse)) :
-        ((0.024 + (0.040 * bodyAuthority) + (0.070 * opticalResponse)) * opticalScale);
-    self.layer.borderWidth = self.suppressBackdrop ?
-        (0.30 + (0.08 * geometryScale)) :
-        (0.15 + (0.07 * geometryScale));
+    // Apple-style hierarchy: a broader low-energy reflection region plus a
+    // narrower bright filament. The dark rail stays subordinate and never
+    // closes the perimeter into a black outline.
+    self.specularMaskLayer.lineWidth = 1.30;
+    self.specularBoostMaskLayer.lineWidth = 0.70;
+    self.specularDarkMaskLayer.lineWidth = 0.32;
+
+    // Keep one neutral structural hairline so Glass still has a material boundary
+    // at Highlight = 0. It depends on body/appearance only, never on Highlight.
+    CGFloat structuralBorderAlpha = darkGlassAppearance ?
+        (0.024 + (0.014 * bodyAuthority)) :
+        (0.015 + (0.011 * bodyAuthority));
+    self.layer.borderWidth = 0.25;
     self.layer.borderColor = [UIColor colorWithWhite:1.0
-                                             alpha:MIN(self.suppressBackdrop ? 0.20 : 0.14,
-                                                       structuralBorderAlpha)].CGColor;
+                                             alpha:MIN(0.035, structuralBorderAlpha)].CGColor;
 
 }
 
@@ -578,7 +585,6 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
 
     self.layer.cornerRadius = self.preferredCornerRadius;
     self.neutralTintView.frame = self.bounds;
-    self.surfaceHighlightLayer.frame = self.bounds;
     self.fallbackBlurView.frame = self.bounds;
 
     CGFloat shortDimension = MIN(CGRectGetWidth(self.bounds), CGRectGetHeight(self.bounds));
@@ -593,16 +599,17 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     UIBezierPath *rimPath = [UIBezierPath bezierPathWithRoundedRect:rimRect
                                                       cornerRadius:rimRadius];
 
-    self.contrastContourLayer.frame = self.bounds;
-    self.contrastContourLayer.path = rimPath.CGPath;
-
-    self.shoulderGradientLayer.frame = self.bounds;
-    self.shoulderMaskLayer.frame = self.bounds;
-    self.shoulderMaskLayer.path = rimPath.CGPath;
-
     self.specularGradientLayer.frame = self.bounds;
     self.specularMaskLayer.frame = self.bounds;
     self.specularMaskLayer.path = rimPath.CGPath;
+
+    self.specularBoostGradientLayer.frame = self.bounds;
+    self.specularBoostMaskLayer.frame = self.bounds;
+    self.specularBoostMaskLayer.path = rimPath.CGPath;
+
+    self.specularDarkGradientLayer.frame = self.bounds;
+    self.specularDarkMaskLayer.frame = self.bounds;
+    self.specularDarkMaskLayer.path = rimPath.CGPath;
 }
 
 - (void)didMoveToWindow
@@ -618,6 +625,92 @@ static id DOCustomGlassCreateCAFilter(NSString *type)
     [super traitCollectionDidChange:previousTraitCollection];
     if (previousTraitCollection.userInterfaceStyle != self.traitCollection.userInterfaceStyle)
         [self reloadMaterial];
+}
+
+@end
+
+// Main Glass is one material across home, Theme Settings, the restart shell,
+// and the compact jailbreak status bar. Geometry may differ, but body, backdrop,
+// and optical response must not drift into separate material families.
+static void DOCustomGlassApplyMainMaterialProfile(DOCustomLiquidGlassView *glassView)
+{
+    if (!glassView)
+        return;
+
+    glassView.materialScale = 0.90;
+    glassView.materialBodyScale = 0.92;
+    glassView.materialOpticalScale = 0.84;
+    glassView.materialBackdropScale = 0.92;
+    glassView.materialSpecularScale = 0.82;
+    glassView.materialEdgeDarkScale = 0.88;
+    glassView.suppressBackdrop = NO;
+}
+
+@interface DOCustomGlassSegmentedControl : UISegmentedControl
+@property(nonatomic, strong) CALayer *glassSelectionLayer;
+@end
+
+@implementation DOCustomGlassSegmentedControl
+
+- (instancetype)initWithItems:(NSArray *)items
+{
+    self = [super initWithItems:items];
+    if (self) {
+        _glassSelectionLayer = [CALayer layer];
+        _glassSelectionLayer.backgroundColor =
+            [UIColor colorWithWhite:1.0 alpha:0.11].CGColor;
+        _glassSelectionLayer.cornerRadius = 19.0;
+        _glassSelectionLayer.cornerCurve = kCACornerCurveContinuous;
+        [self.layer insertSublayer:_glassSelectionLayer atIndex:0];
+    }
+    return self;
+}
+
+- (void)setSelectedSegmentIndex:(NSInteger)selectedSegmentIndex
+{
+    [super setSelectedSegmentIndex:selectedSegmentIndex];
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+
+    NSInteger segmentCount = MAX(1, self.numberOfSegments);
+    NSInteger selectedIndex = self.selectedSegmentIndex;
+    BOOL hasSelection = selectedIndex != UISegmentedControlNoSegment &&
+        selectedIndex >= 0 && selectedIndex < segmentCount;
+    if (!hasSelection)
+        selectedIndex = 0;
+
+    CGFloat totalWidth = CGRectGetWidth(self.bounds);
+    CGFloat segmentWidth = totalWidth / (CGFloat)segmentCount;
+    CGRect selectionFrame = self.bounds;
+    selectionFrame.origin.x = segmentWidth * selectedIndex;
+    selectionFrame.size.width = (selectedIndex == segmentCount - 1)
+        ? MAX(0.0, totalWidth - selectionFrame.origin.x)
+        : segmentWidth;
+
+    CACornerMask maskedCorners = 0;
+    if (segmentCount == 1) {
+        maskedCorners = kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner |
+            kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
+    }
+    else if (selectedIndex == 0) {
+        maskedCorners = kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner;
+    }
+    else if (selectedIndex == segmentCount - 1) {
+        maskedCorners = kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
+    }
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.glassSelectionLayer.hidden = !hasSelection;
+    self.glassSelectionLayer.frame = selectionFrame;
+    self.glassSelectionLayer.cornerRadius = 19.0;
+    self.glassSelectionLayer.cornerCurve = kCACornerCurveContinuous;
+    self.glassSelectionLayer.maskedCorners = maskedCorners;
+    [CATransaction commit];
 }
 
 @end
@@ -639,12 +732,24 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     return button;
 }
 
+static UIImage *DOCustomGlassSolidImage(UIColor *color)
+{
+    CGRect rect = CGRectMake(0.0, 0.0, 1.0, 1.0);
+    UIGraphicsBeginImageContextWithOptions(rect.size, NO, 0.0);
+    [color setFill];
+    UIRectFill(rect);
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+
 @interface DOCustomGlassThemeSettingsViewController : UIViewController <PHPickerViewControllerDelegate>
 
 @property UIImageView *customGlassBackgroundImageView;
 @property DOCustomWallpaperBlurView *backgroundBlurView;
 @property DOCustomLiquidGlassView *previewGlassView;
 
+@property UISegmentedControl *glassAppearanceControl;
 @property UISlider *backgroundBlurSlider;
 @property UISlider *glassBlurSlider;
 @property UISlider *glassTransparencySlider;
@@ -696,7 +801,11 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
                                    action:(UIAction *)action
 {
     BOOL isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
-    DOCustomLiquidGlassView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.045];
+    DOCustomLiquidGlassView *row = [self themeGlassViewWithCornerRadius:22.0 tintAlpha:0.05];
+    // Exact Main Glass profile: Theme Settings rows must render the same
+    // material as the home cards rather than a nearby approximation.
+    DOCustomGlassApplyMainMaterialProfile(row);
+    [row reloadMaterial];
 
     UIImageSymbolConfiguration *symbolConfiguration =
         [UIImageSymbolConfiguration configurationWithPointSize:(isPad ? 21.0 : 19.0)
@@ -823,8 +932,8 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
 }
 
 - (UIView *)appearanceSegmentedRowWithTitle:(NSString *)title
-                                    subtitle:(NSString *)subtitle
-                                     control:(UISegmentedControl *)control
+                                   subtitle:(NSString *)subtitle
+                                    control:(UISegmentedControl *)control
 {
     UILabel *titleLabel = [[UILabel alloc] init];
     titleLabel.text = title;
@@ -836,18 +945,56 @@ static UIButton *DOCustomGlassBackButton(UIViewController *controller)
     subtitleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.52];
     subtitleLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightRegular];
 
-    UIStackView *titleStack =
-        [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, subtitleLabel]];
+    UIStackView *titleStack = [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, subtitleLabel]];
     titleStack.axis = UILayoutConstraintAxisVertical;
     titleStack.spacing = 2.0;
 
-    UIStackView *row =
-        [[UIStackView alloc] initWithArrangedSubviews:@[titleStack, control]];
+    DOCustomLiquidGlassView *inset = [self themeGlassViewWithCornerRadius:21.0 tintAlpha:0.0];
+    inset.materialScale = 0.70;
+    inset.materialBodyScale = 0.24;
+    inset.materialOpticalScale = 0.36;
+    inset.materialBackdropScale = 0.0;
+    inset.materialSpecularScale = 0.30;
+    inset.materialEdgeDarkScale = 0.34;
+    inset.suppressBackdrop = YES;
+    [inset reloadMaterial];
+
+    control.translatesAutoresizingMaskIntoConstraints = NO;
+    [inset.contentView addSubview:control];
+    [NSLayoutConstraint activateConstraints:@[
+        [control.leadingAnchor constraintEqualToAnchor:inset.contentView.leadingAnchor constant:2.0],
+        [control.trailingAnchor constraintEqualToAnchor:inset.contentView.trailingAnchor constant:-2.0],
+        [control.topAnchor constraintEqualToAnchor:inset.contentView.topAnchor constant:2.0],
+        [control.bottomAnchor constraintEqualToAnchor:inset.contentView.bottomAnchor constant:-2.0],
+        [inset.heightAnchor constraintEqualToConstant:42.0]
+    ]];
+
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[titleStack, inset]];
     row.axis = UILayoutConstraintAxisVertical;
     row.spacing = 7.0;
-
-    [control.heightAnchor constraintEqualToConstant:34.0].active = YES;
     return row;
+}
+
+static NSInteger DOCustomGlassPlaybackRateSegmentIndex(CGFloat rate)
+{
+    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
+    NSInteger bestIndex = 0;
+    CGFloat bestDistance = CGFLOAT_MAX;
+    for (NSInteger index = 0; index < 4; index++) {
+        CGFloat distance = fabs(rate - rates[index]);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = index;
+        }
+    }
+    return bestIndex;
+}
+
+static CGFloat DOCustomGlassPlaybackRateForSegmentIndex(NSInteger index)
+{
+    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
+    NSInteger clampedIndex = MIN(3, MAX(0, index));
+    return rates[clampedIndex];
 }
 
 static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
@@ -1070,6 +1217,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
             [weakSelf.navigationController customGlassRefreshSharedBackground];
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
+            [weakSelf syncAppearanceControlsFromDefaults];
             [weakSelf applyAppearancePreviewAndPersist:NO];
         });
     };
@@ -1176,6 +1324,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     // This page stays transparent above that persistent source.
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        DOCustomGlassAppearanceKey : DOCustomGlassAppearanceLight,
         DOCustomGlassBackgroundBlurKey : @0.10,
         DOCustomGlassBlurIntensityKey : @0.85,
         DOCustomGlassTransparencyKey : @0.70,
@@ -1257,11 +1406,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     UILabel *appearanceLabel = [self themeSectionLabelWithText:@"外观效果"];
     [contentStack addArrangedSubview:appearanceLabel];
 
-    // The control panel is the actual Liquid Glass renderer used by the home
-    // cards. Slider changes therefore preview the same material rather than an
-    // unrelated UIVisualEffectView approximation.
+    // The control panel is the actual Main Glass renderer used by the home
+    // cards. Slider changes therefore preview the same body, backdrop and
+    // directional optics instead of a deliberately quieter panel variant.
     self.previewGlassView = [self themeGlassViewWithCornerRadius:26.0 tintAlpha:0.05];
-    self.previewGlassView.materialScale = 0.92;
+    DOCustomGlassApplyMainMaterialProfile(self.previewGlassView);
     [self.previewGlassView reloadMaterial];
     [contentStack addArrangedSubview:self.previewGlassView];
     // This panel previously collapsed to zero height because the Glass content
@@ -1285,6 +1434,85 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
+    UILabel *liquidGlassLabel = [[UILabel alloc] init];
+    liquidGlassLabel.text = @"Liquid Glass";
+    liquidGlassLabel.textColor = UIColor.whiteColor;
+    liquidGlassLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    [controlsStack addArrangedSubview:liquidGlassLabel];
+
+    self.glassAppearanceControl = [[DOCustomGlassSegmentedControl alloc] initWithItems:@[@"Light Glass", @"Dark Glass"]];
+    self.glassAppearanceControl.translatesAutoresizingMaskIntoConstraints = NO;
+    // The segmented control is content inside an Inset Glass surface. Keep the
+    // native control itself optically quiet so it does not read as a second,
+    // unrelated grey platter pasted over the parent Glass panel.
+    self.glassAppearanceControl.selectedSegmentTintColor = UIColor.clearColor;
+    self.glassAppearanceControl.backgroundColor = UIColor.clearColor;
+
+    UIImage *normalSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *selectedSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *clearSegmentImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    [self.glassAppearanceControl setBackgroundImage:normalSegmentImage
+                                          forState:UIControlStateNormal
+                                        barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setBackgroundImage:selectedSegmentImage
+                                          forState:UIControlStateSelected
+                                        barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateNormal
+                               rightSegmentState:UIControlStateNormal
+                                      barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateSelected
+                               rightSegmentState:UIControlStateNormal
+                                      barMetrics:UIBarMetricsDefault];
+    [self.glassAppearanceControl setDividerImage:clearSegmentImage
+                             forLeftSegmentState:UIControlStateNormal
+                               rightSegmentState:UIControlStateSelected
+                                      barMetrics:UIBarMetricsDefault];
+
+    self.glassAppearanceControl.layer.cornerRadius = 19.0;
+    self.glassAppearanceControl.layer.cornerCurve = kCACornerCurveContinuous;
+    self.glassAppearanceControl.layer.masksToBounds = YES;
+    self.glassAppearanceControl.accessibilityLabel = @"Liquid Glass";
+    [self.glassAppearanceControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.68],
+        NSFontAttributeName : [UIFont systemFontOfSize:14.0 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+    [self.glassAppearanceControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName : UIColor.whiteColor,
+        NSFontAttributeName : [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold]
+    } forState:UIControlStateSelected];
+
+    NSString *appearance = [defaults stringForKey:DOCustomGlassAppearanceKey];
+    self.glassAppearanceControl.selectedSegmentIndex =
+        [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
+    [self.glassAppearanceControl addTarget:self
+                                    action:@selector(glassAppearanceChanged:)
+                          forControlEvents:UIControlEventValueChanged];
+
+    // Inset Glass role: a shallow local control surface inside the parent panel.
+    // It deliberately has no backdrop pass; the parent previewGlassView owns
+    // diffusion/transmission. Only a light body + quiet contour establish depth.
+    DOCustomLiquidGlassView *appearanceInset =
+        [self themeGlassViewWithCornerRadius:21.0 tintAlpha:0.0];
+    appearanceInset.materialScale = 0.70;
+    appearanceInset.materialBodyScale = 0.24;
+    appearanceInset.materialOpticalScale = 0.36;
+    appearanceInset.materialBackdropScale = 0.0;
+    appearanceInset.materialSpecularScale = 0.30;
+    appearanceInset.materialEdgeDarkScale = 0.34;
+    appearanceInset.suppressBackdrop = YES;
+    [appearanceInset reloadMaterial];
+    [appearanceInset.contentView addSubview:self.glassAppearanceControl];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.glassAppearanceControl.leadingAnchor constraintEqualToAnchor:appearanceInset.contentView.leadingAnchor constant:2.0],
+        [self.glassAppearanceControl.trailingAnchor constraintEqualToAnchor:appearanceInset.contentView.trailingAnchor constant:-2.0],
+        [self.glassAppearanceControl.topAnchor constraintEqualToAnchor:appearanceInset.contentView.topAnchor constant:2.0],
+        [self.glassAppearanceControl.bottomAnchor constraintEqualToAnchor:appearanceInset.contentView.bottomAnchor constant:-2.0]
+    ]];
+    [controlsStack addArrangedSubview:appearanceInset];
+    [appearanceInset.heightAnchor constraintEqualToConstant:44.0].active = YES;
+
     self.backgroundBlurSlider = [self appearanceSlider];
     self.backgroundBlurSlider.minimumValue = 0.0;
     self.backgroundBlurSlider.maximumValue = 1.0;
@@ -1295,45 +1523,56 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
                                                                    slider:self.backgroundBlurSlider
                                                                valueLabel:self.backgroundBlurValueLabel]];
 
-    self.wallpaperPlaybackRateControl =
-        [[UISegmentedControl alloc] initWithItems:@[@"0.50×", @"0.65×", @"0.80×", @"1.00×"]];
-    self.wallpaperPlaybackRateControl.selectedSegmentTintColor =
-        [UIColor colorWithWhite:1.0 alpha:0.14];
+    self.wallpaperPlaybackRateControl = [[DOCustomGlassSegmentedControl alloc]
+        initWithItems:@[@"0.50×", @"0.65×", @"0.80×", @"1.00×"]];
+    self.wallpaperPlaybackRateControl.selectedSegmentTintColor = UIColor.clearColor;
     self.wallpaperPlaybackRateControl.backgroundColor = UIColor.clearColor;
     self.wallpaperPlaybackRateControl.apportionsSegmentWidthsByContent = NO;
     self.wallpaperPlaybackRateControl.accessibilityLabel = @"动态壁纸速度";
 
+    UIImage *speedNormalImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *speedSelectedImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    UIImage *speedDividerImage = DOCustomGlassSolidImage(UIColor.clearColor);
+    [self.wallpaperPlaybackRateControl setBackgroundImage:speedNormalImage
+                                                 forState:UIControlStateNormal
+                                               barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setBackgroundImage:speedSelectedImage
+                                                 forState:UIControlStateSelected
+                                               barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setDividerImage:speedDividerImage
+                                   forLeftSegmentState:UIControlStateNormal
+                                     rightSegmentState:UIControlStateNormal
+                                            barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setDividerImage:speedDividerImage
+                                   forLeftSegmentState:UIControlStateSelected
+                                     rightSegmentState:UIControlStateNormal
+                                            barMetrics:UIBarMetricsDefault];
+    [self.wallpaperPlaybackRateControl setDividerImage:speedDividerImage
+                                   forLeftSegmentState:UIControlStateNormal
+                                     rightSegmentState:UIControlStateSelected
+                                            barMetrics:UIBarMetricsDefault];
     [self.wallpaperPlaybackRateControl setTitleTextAttributes:@{
-        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.66],
+        NSForegroundColorAttributeName : [UIColor colorWithWhite:1.0 alpha:0.68],
         NSFontAttributeName : [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium]
     } forState:UIControlStateNormal];
-
     [self.wallpaperPlaybackRateControl setTitleTextAttributes:@{
         NSForegroundColorAttributeName : UIColor.whiteColor,
         NSFontAttributeName : [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold]
     } forState:UIControlStateSelected];
+    [self.wallpaperPlaybackRateControl addTarget:self
+                                          action:@selector(wallpaperPlaybackRateChanged:)
+                                forControlEvents:UIControlEventValueChanged];
 
-    CGFloat persistedPlaybackRate =
-        [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
-            [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
-            DOCustomGlassWallpaperPlaybackRateDefault;
-
+    CGFloat persistedPlaybackRate = [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
+        [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
+        DOCustomGlassWallpaperPlaybackRateDefault;
     self.wallpaperPlaybackRateControl.selectedSegmentIndex =
         DOCustomGlassPlaybackRateSegmentIndex(persistedPlaybackRate);
-
-    [self.wallpaperPlaybackRateControl
-        addTarget:self
-           action:@selector(wallpaperPlaybackRateChanged:)
- forControlEvents:UIControlEventValueChanged];
-
     self.wallpaperPlaybackRateRow =
         [self appearanceSegmentedRowWithTitle:@"动态壁纸速度"
-                                    subtitle:@"视频 / Live Photo 的播放速度"
-                                     control:self.wallpaperPlaybackRateControl];
-
-    self.wallpaperPlaybackRateRow.hidden =
-        ![self.navigationController customGlassIsUsingVideoWallpaper];
-
+                                     subtitle:@"视频 / Live Photo 的播放速度"
+                                      control:self.wallpaperPlaybackRateControl];
+    self.wallpaperPlaybackRateRow.hidden = ![self.navigationController customGlassIsUsingVideoWallpaper];
     [controlsStack addArrangedSubview:self.wallpaperPlaybackRateRow];
 
     self.glassBlurSlider = [self appearanceSlider];
@@ -1391,6 +1630,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
+    if (self.glassAppearanceControl) {
+        NSString *appearance = [defaults stringForKey:DOCustomGlassAppearanceKey];
+        self.glassAppearanceControl.selectedSegmentIndex =
+            [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
+    }
     if (self.backgroundBlurSlider)
         self.backgroundBlurSlider.value = [defaults floatForKey:DOCustomGlassBackgroundBlurKey];
     if (self.glassBlurSlider)
@@ -1399,20 +1643,15 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         self.glassTransparencySlider.value = [defaults floatForKey:DOCustomGlassTransparencyKey];
     if (self.glassTintSlider)
         self.glassTintSlider.value = [defaults floatForKey:DOCustomGlassTintAlphaKey];
-
     if (self.wallpaperPlaybackRateControl) {
-        CGFloat playbackRate =
-            [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
-                [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
-                DOCustomGlassWallpaperPlaybackRateDefault;
-
+        CGFloat playbackRate = [defaults objectForKey:DOCustomGlassWallpaperPlaybackRateKey] ?
+            [defaults floatForKey:DOCustomGlassWallpaperPlaybackRateKey] :
+            DOCustomGlassWallpaperPlaybackRateDefault;
         self.wallpaperPlaybackRateControl.selectedSegmentIndex =
             DOCustomGlassPlaybackRateSegmentIndex(playbackRate);
     }
-
     if (self.wallpaperPlaybackRateRow)
-        self.wallpaperPlaybackRateRow.hidden =
-            ![self.navigationController customGlassIsUsingVideoWallpaper];
+        self.wallpaperPlaybackRateRow.hidden = ![self.navigationController customGlassIsUsingVideoWallpaper];
 }
 
 - (void)refreshThemePageFromPersistedState
@@ -1449,6 +1688,22 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     [super viewDidAppear:animated];
 }
 
+- (void)glassAppearanceChanged:(UISegmentedControl *)control
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *appearance = control.selectedSegmentIndex == 1 ?
+        DOCustomGlassAppearanceDark : DOCustomGlassAppearanceLight;
+
+    [defaults setObject:appearance forKey:DOCustomGlassAppearanceKey];
+    [defaults synchronize];
+
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:DOCustomGlassThemeDidChangeNotification object:nil];
+
+    [self refreshLiquidGlassInView:self.view];
+    DOCustomGlassApplyAdaptiveForeground(self.navigationController, self.view);
+}
+
 - (void)appearanceSliderChanged:(UISlider *)slider
 {
     [self applyAppearancePreviewAndPersist:YES];
@@ -1456,8 +1711,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 
 - (void)wallpaperPlaybackRateChanged:(UISegmentedControl *)control
 {
-    CGFloat playbackRate =
-        DOCustomGlassPlaybackRateForSegmentIndex(control.selectedSegmentIndex);
+    CGFloat playbackRate = DOCustomGlassPlaybackRateForSegmentIndex(control.selectedSegmentIndex);
     [self.navigationController customGlassSetWallpaperPlaybackRate:playbackRate];
 }
 
@@ -1499,16 +1753,17 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 
 - (void)restoreRecommendedAppearanceValues
 {
+    self.glassAppearanceControl.selectedSegmentIndex = 0;
     self.backgroundBlurSlider.value = 0.10;
     self.glassBlurSlider.value = 0.85;
     self.glassTransparencySlider.value = 0.70;
     self.glassTintSlider.value = 0.05;
-
     if (self.wallpaperPlaybackRateControl)
         self.wallpaperPlaybackRateControl.selectedSegmentIndex = 1;
 
-    [self.navigationController
-        customGlassSetWallpaperPlaybackRate:DOCustomGlassWallpaperPlaybackRateDefault];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:DOCustomGlassAppearanceLight forKey:DOCustomGlassAppearanceKey];
+    [self.navigationController customGlassSetWallpaperPlaybackRate:DOCustomGlassWallpaperPlaybackRateDefault];
 
     [self applyAppearancePreviewAndPersist:YES];
 }
@@ -2048,7 +2303,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 - (DOCustomLiquidGlassView *)customGlassCardWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action
 {
     DOCustomLiquidGlassView *card = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
-    card.materialScale = 0.86;
+    DOCustomGlassApplyMainMaterialProfile(card);
     [card reloadMaterial];
     UIButton *button = [self customGlassButtonWithTitle:title imageName:imageName action:action];
     [card.contentView addSubview:button];
@@ -2064,10 +2319,15 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 
 - (DOCustomLiquidGlassView *)customGlassRestartButtonWithTitle:(NSString *)title imageName:(NSString *)imageName action:(UIAction *)action enabled:(BOOL)enabled cornerRadius:(CGFloat)cornerRadius
 {
-    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.040];
-    // Small pills use a deliberately lighter optical recipe than folder-sized
-    // panels; the body still samples the wallpaper, but the edge stays hairline.
-    innerGlass.materialScale = 0.72;
+    DOCustomLiquidGlassView *innerGlass = [self customGlassViewWithCornerRadius:cornerRadius tintAlpha:0.0];
+    // V2.2 Inset Glass role.
+    innerGlass.materialScale = 0.70;
+    innerGlass.materialBodyScale = 0.24;
+    innerGlass.materialOpticalScale = 0.36;
+    innerGlass.materialBackdropScale = 0.0;
+    innerGlass.materialSpecularScale = 0.48;
+    innerGlass.materialEdgeDarkScale = 0.58;
+    innerGlass.suppressBackdrop = YES;
     [innerGlass reloadMaterial];
 
     // Keep all restart actions on one shared icon/text grid. On iPhone the
@@ -2208,6 +2468,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     if (avatarMaterial) {
         avatarMaterial.preferredCornerRadius = avatarSize / 2.0;
         avatarMaterial.materialScale = enabled ? 0.70 : 0.46;
+        avatarMaterial.materialBodyScale = enabled ? 0.68 : 0.34;
+        avatarMaterial.materialOpticalScale = enabled ? 0.82 : 0.52;
+        avatarMaterial.materialBackdropScale = enabled ? 0.78 : 0.34;
+        avatarMaterial.materialSpecularScale = enabled ? 1.00 : 0.54;
+        avatarMaterial.materialEdgeDarkScale = enabled ? 0.38 : 0.42;
         avatarMaterial.suppressBackdrop = NO;
         [avatarMaterial reloadMaterial];
     }
@@ -2547,6 +2812,11 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     avatarMaterial.translatesAutoresizingMaskIntoConstraints = NO;
     avatarMaterial.userInteractionEnabled = NO;
     avatarMaterial.materialScale = 0.46;
+    avatarMaterial.materialBodyScale = 0.34;
+    avatarMaterial.materialOpticalScale = 0.52;
+    avatarMaterial.materialBackdropScale = 0.34;
+    avatarMaterial.materialSpecularScale = 0.54;
+    avatarMaterial.materialEdgeDarkScale = 0.42;
     avatarMaterial.suppressBackdrop = NO;
     [avatarMaterial reloadMaterial];
     [avatarGlass addSubview:avatarMaterial];
@@ -2744,12 +3014,9 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     [themeCard.heightAnchor constraintEqualToConstant:themeCardHeight].active = YES;
     [self refreshSupporterState];
 
-    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.028];
-    // Visible grouping shell: keep a clear total frame around the three restart
-    // actions, but never apply a second backdrop blur. Its optical rail is
-    // intentionally lighter than the three inner pills.
-    restartContainer.materialScale = 1.10;
-    restartContainer.suppressBackdrop = YES;
+    DOCustomLiquidGlassView *restartContainer = [self customGlassViewWithCornerRadius:24 tintAlpha:0.05];
+    // Restart Outer is a real Main Glass surface.
+    DOCustomGlassApplyMainMaterialProfile(restartContainer);
     [restartContainer reloadMaterial];
     [rightColumn addArrangedSubview:restartContainer];
 
@@ -2851,15 +3118,21 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     }]];
     self.jailbreakBtn.enabled = !isJailbroken && isSupported;
 
-    // Preserve the original DOJailbreakButton color for expanded/progress mode.
-    // On the home screen, use the same blur/border language as the other cards
-    // but with a stronger tint (0.10 vs 0.05) to keep the jailbreak CTA visually
-    // more important without looking like a separate solid-blue material.
+    // DOJailbreakButton dims its entire view when disabled. Keep the V2.2
+    // material itself at full strength and dim only the button content.
+    CGFloat jailbreakContentAlpha = self.jailbreakBtn.enabled ? 1.0 : 0.70;
+    self.jailbreakBtn.alpha = 1.0;
+    self.jailbreakBtn.button.alpha = jailbreakContentAlpha;
+
+    // Glass V2.2 compact CTA uses the exact Main Glass material. When the
+    // jailbreak flow expands, the handler above hides this surface and restores
+    // DOJailbreakButton's original opaque progress treatment.
     jailbreakExpandedBackgroundColor = self.jailbreakBtn.backgroundColor;
-    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.075];
-    jailbreakEmphasisGlass.materialScale = 0.82;
-    [jailbreakEmphasisGlass reloadMaterial];
+    jailbreakEmphasisGlass = [self customGlassViewWithCornerRadius:14.0 tintAlpha:0.05];
     jailbreakEmphasisGlass.userInteractionEnabled = NO;
+    DOCustomGlassApplyMainMaterialProfile(jailbreakEmphasisGlass);
+    [jailbreakEmphasisGlass reloadMaterial];
+
     self.jailbreakBtn.backgroundColor = UIColor.clearColor;
     [self.jailbreakBtn insertSubview:jailbreakEmphasisGlass atIndex:0];
     [NSLayoutConstraint activateConstraints:@[
