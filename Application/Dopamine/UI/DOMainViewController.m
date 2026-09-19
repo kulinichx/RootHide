@@ -975,28 +975,6 @@ static UIImage *DOCustomGlassSolidImage(UIColor *color)
     return row;
 }
 
-static NSInteger DOCustomGlassPlaybackRateSegmentIndex(CGFloat rate)
-{
-    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
-    NSInteger bestIndex = 0;
-    CGFloat bestDistance = CGFLOAT_MAX;
-    for (NSInteger index = 0; index < 4; index++) {
-        CGFloat distance = fabs(rate - rates[index]);
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            bestIndex = index;
-        }
-    }
-    return bestIndex;
-}
-
-static CGFloat DOCustomGlassPlaybackRateForSegmentIndex(NSInteger index)
-{
-    static const CGFloat rates[] = {0.50, 0.65, 0.80, 1.00};
-    NSInteger clampedIndex = MIN(3, MAX(0, index));
-    return rates[clampedIndex];
-}
-
 static UIImage *DOCustomGlassCreateVideoPosterImage(NSURL *videoURL)
 {
     if (!videoURL.isFileURL)
