@@ -688,8 +688,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)customGlassInstallBackNavigation
 {
     static NSInteger const DOCustomGlassSettingsBackButtonTag = 0xC653;
-    if ([self.view viewWithTag:DOCustomGlassSettingsBackButtonTag])
+    UIView *existingBackButton = [self.view viewWithTag:DOCustomGlassSettingsBackButtonTag];
+    if (existingBackButton) {
+        [self.view bringSubviewToFront:existingBackButton];
         return;
+    }
 
     UIButton *backButton = [UIButton buttonWithType:UIButtonTypeSystem];
     backButton.tag = DOCustomGlassSettingsBackButtonTag;
@@ -775,16 +778,22 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+
+    // Back navigation is functional UI and must not depend on supporter state.
+    [self customGlassInstallBackNavigation];
     [self customGlassInstallPageAppearance];
 }
 
 - (void)viewWillAppear:(BOOL)arg1
 {
     [super viewWillAppear:arg1];
+
+    [self customGlassInstallBackNavigation];
     [self customGlassRefreshPageAppearance];
 
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf customGlassInstallBackNavigation];
         [weakSelf customGlassRefreshPageAppearance];
     });
 }
