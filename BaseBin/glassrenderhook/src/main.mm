@@ -3,6 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <dispatch/dispatch.h>
 #import <objc/message.h>
+#import <substrate.h>
 
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
@@ -19,11 +20,12 @@
 #include <stdlib.h>
 #include <math.h>
 
+extern "C" void *gRHGlassOriginalPrimary = nullptr;
+
 namespace {
 
 static constexpr const char *kCustomFilterType = "go.roothide.refraction";
 static constexpr size_t kGaussianRecordSlots = 22;
-static constexpr size_t kGaussianRecordSize = kGaussianRecordSlots * sizeof(void *);
 static constexpr uint32_t kRET = 0xD65F03C0u;
 static constexpr uint32_t kPACIBSP = 0xD503237Fu;
 
@@ -47,8 +49,11 @@ static bool gQuartzCoreReady = false;
 using CAInternAtomFn = uint32_t (*)(const char *);
 using AddFilterFn = void (*)(uint32_t, void *);
 using StopEncodersFn = void (*)(void *);
-using GlassCallbackFn = void (*)(void *, void *, id<MTLDevice>, void *, float,
-                                 void *, void *, void *, void *, void *);
+using Slot0CallbackFn = uintptr_t (*)(void *, void *);
+// iOS 16 secondary ABI, confirmed from Mango's 0x64e4 adapter:
+// x0..x3, s0, x4, s1, x5..x7, then one stack argument.
+using SecondaryCallbackFn = void (*)(void *, void *, id<MTLDevice>, void *, float,
+                                     void *, float, void *, void *, void *, void *);
 
 static void *gCAInternAtom = nullptr;
 static void *gAddFilter = nullptr;
@@ -57,9 +62,14 @@ static void **gFilterRegistrySlot = nullptr;
 static void *gStopEncoders = nullptr;
 static ptrdiff_t gCommandContextOffset = -1;
 static uint32_t gCustomAtom = 0;
+static void *gOriginalSlot0 = nullptr;
 static void *gOriginalSecondary = nullptr;
+static bool gSlot0HookInstalled = false;
+static bool gPrimaryHookInstalled = false;
+static bool gSecondaryHookInstalled = false;
 static bool gRegistered = false;
 static bool gRetryScheduled = false;
+static unsigned gRetryCount = 0;
 
 static os_unfair_lock gPipelineLock = OS_UNFAIR_LOCK_INIT;
 static __strong id<MTLDevice> gPipelineDevice = nil;
@@ -831,36 +841,78 @@ static bool RenderGlass(id<MTLDevice> device, void *renderContext, void *sourceW
     return true;
 }
 
+static bool IsCustomFilterContext(void *filterContext)
+{
+    if (!filterContext || !gCustomAtom) return false;
+    uint32_t activeAtom = *reinterpret_cast<uint32_t *>(
+        reinterpret_cast<uint8_t *>(filterContext) + 0x18);
+    return activeAtom == gCustomAtom;
+}
+
+static uintptr_t CallOriginalSlot0(void *x0, void *filterContext)
+{
+    Slot0CallbackFn original = reinterpret_cast<Slot0CallbackFn>(SignCode(gOriginalSlot0));
+    return original ? original(x0, filterContext) : 0;
+}
+
 static void CallOriginalSecondary(void *x0, void *filterContext, id<MTLDevice> device,
                                   void *renderContext, float scalar0, void *sourceWrapper,
-                                  void *x5, void *x6, void *x7, void *stackArgument)
+                                  float scalar1, void *x5, void *x6, void *x7,
+                                  void *stackArgument)
 {
-    GlassCallbackFn original = reinterpret_cast<GlassCallbackFn>(SignCode(gOriginalSecondary));
+    SecondaryCallbackFn original =
+        reinterpret_cast<SecondaryCallbackFn>(SignCode(gOriginalSecondary));
     if (original) {
         original(x0, filterContext, device, renderContext, scalar0,
-                 sourceWrapper, x5, x6, x7, stackArgument);
+                 sourceWrapper, scalar1, x5, x6, x7, stackArgument);
     }
 }
 
-extern "C" uintptr_t RHGlassRecordMarker(void)
+extern "C" uintptr_t RHGlassSlot0Hook(void *x0, void *filterContext)
 {
-    return 0;
+    // Mango 0x62b8: custom atom consumes this stage and returns zero;
+    // non-custom Gaussian traffic is forwarded to the original function.
+    if (IsCustomFilterContext(filterContext)) return 0;
+    return CallOriginalSlot0(x0, filterContext);
 }
 
-extern "C" void RHGlassRenderCallback(void *x0, void *filterContext, id<MTLDevice> device,
-                                      void *renderContext, float scalar0, void *sourceWrapper,
-                                      void *x5, void *x6, void *x7, void *stackArgument)
+extern "C" __attribute__((naked, noinline)) uintptr_t RHGlassPrimaryHook(void)
 {
-    if (!filterContext || !device || !renderContext || !sourceWrapper) {
-        CallOriginalSecondary(x0, filterContext, device, renderContext, scalar0,
-                              sourceWrapper, x5, x6, x7, stackArgument);
-        return;
-    }
+    // Mango 0x6348 is a pure tail-forwarder. Do not invent a C prototype for
+    // this private callback; preserve every incoming GPR/SIMD/stack argument.
+#if defined(__arm64e__)
+    __asm__ volatile(
+        "adrp x16, _gRHGlassOriginalPrimary@PAGE\n"
+        "ldr x16, [x16, _gRHGlassOriginalPrimary@PAGEOFF]\n"
+        "cbz x16, 1f\n"
+        "braaz x16\n"
+        "1:\n"
+        "mov x0, #0\n"
+        "ret\n"
+    );
+#else
+    __asm__ volatile(
+        "adrp x16, _gRHGlassOriginalPrimary@PAGE\n"
+        "ldr x16, [x16, _gRHGlassOriginalPrimary@PAGEOFF]\n"
+        "cbz x16, 1f\n"
+        "br x16\n"
+        "1:\n"
+        "mov x0, #0\n"
+        "ret\n"
+    );
+#endif
+}
 
-    uint32_t activeAtom = *reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(filterContext) + 0x18);
-    if (activeAtom != gCustomAtom) {
+static void RHGlassRenderCanonical(void *x0, void *filterContext, id<MTLDevice> device,
+                                   void *renderContext, float scalar0, void *sourceWrapper,
+                                   void *x5, void *x6, void *x7, void *stackArgument)
+{
+    if (!filterContext || !device || !renderContext || !sourceWrapper ||
+        !IsCustomFilterContext(filterContext)) {
+        // Mango's canonical 0x5718 fallback explicitly zeroes s1 before calling
+        // the saved iOS 16 secondary callback.
         CallOriginalSecondary(x0, filterContext, device, renderContext, scalar0,
-                              sourceWrapper, x5, x6, x7, stackArgument);
+                              sourceWrapper, 0.0f, x5, x6, x7, stackArgument);
         return;
     }
 
@@ -869,7 +921,63 @@ extern "C" void RHGlassRenderCallback(void *x0, void *filterContext, id<MTLDevic
     }
 
     CallOriginalSecondary(x0, filterContext, device, renderContext, scalar0,
-                          sourceWrapper, x5, x6, x7, stackArgument);
+                          sourceWrapper, 0.0f, x5, x6, x7, stackArgument);
+}
+
+extern "C" void RHGlassSecondaryAdapter(void *x0, void *filterContext, id<MTLDevice> device,
+                                         void *renderContext, float scalar0, void *sourceWrapper,
+                                         float scalar1, void *x5, void *x6, void *x7,
+                                         void *stackArgument)
+{
+    // iOS 16 Mango path (0x64e4): custom filters normalize to the canonical
+    // renderer; all ordinary Gaussian traffic retains the original s0/s1 ABI.
+    if (IsCustomFilterContext(filterContext)) {
+        RHGlassRenderCanonical(x0, filterContext, device, renderContext, scalar0,
+                               sourceWrapper, x5, x6, x7, stackArgument);
+        return;
+    }
+
+    CallOriginalSecondary(x0, filterContext, device, renderContext, scalar0,
+                          sourceWrapper, scalar1, x5, x6, x7, stackArgument);
+}
+
+static bool InstallGaussianHooks(void **gaussianRecord, int primarySlot, int secondarySlot)
+{
+    if (!gaussianRecord || primarySlot < 0 || secondarySlot < 0) return false;
+
+    if (!gSlot0HookInstalled) {
+        void *original = nullptr;
+        MSHookFunction(StripCode(gaussianRecord[0]),
+                       StripCode(reinterpret_cast<void *>(&RHGlassSlot0Hook)),
+                       &original);
+        gOriginalSlot0 = StripCode(original);
+        if (!gOriginalSlot0) return false;
+        gSlot0HookInstalled = true;
+    }
+
+    if (!gPrimaryHookInstalled) {
+        void *original = nullptr;
+        MSHookFunction(StripCode(gaussianRecord[primarySlot]),
+                       StripCode(reinterpret_cast<void *>(&RHGlassPrimaryHook)),
+                       &original);
+        if (!original) return false;
+        // The naked tail-forwarder uses BRAAZ on arm64e, so keep the trampoline
+        // signed with the zero discriminator just like Mango's 0x91ec helper.
+        gRHGlassOriginalPrimary = SignCode(original);
+        gPrimaryHookInstalled = true;
+    }
+
+    if (!gSecondaryHookInstalled) {
+        void *original = nullptr;
+        MSHookFunction(StripCode(gaussianRecord[secondarySlot]),
+                       StripCode(reinterpret_cast<void *>(&RHGlassSecondaryAdapter)),
+                       &original);
+        gOriginalSecondary = StripCode(original);
+        if (!gOriginalSecondary) return false;
+        gSecondaryHookInstalled = true;
+    }
+
+    return gSlot0HookInstalled && gPrimaryHookInstalled && gSecondaryHookInstalled;
 }
 
 static void ScheduleRegistrationRetry(void);
@@ -877,18 +985,28 @@ static void ScheduleRegistrationRetry(void);
 static void RegisterGlassFilter(void)
 {
     if (gRegistered) return;
-    if (!LoadQuartzCoreImage()) return;
+    if (!LoadQuartzCoreImage()) {
+        ScheduleRegistrationRetry();
+        return;
+    }
 
     if (!gCAInternAtom) gCAInternAtom = ResolveCAInternAtom();
-    if ((!gAddFilter || !gGaussianRecordSlot || !gFilterRegistrySlot) && !ResolveAddFilterInternals()) return;
+    if ((!gAddFilter || !gGaussianRecordSlot || !gFilterRegistrySlot) &&
+        !ResolveAddFilterInternals()) {
+        ScheduleRegistrationRetry();
+        return;
+    }
     if (!gStopEncoders) gStopEncoders = ResolveStopEncoders();
     if (gCommandContextOffset < 0) gCommandContextOffset = ResolveCommandContextOffset();
 
     if (!gCAInternAtom || !gAddFilter || !gGaussianRecordSlot || !gFilterRegistrySlot ||
         !gStopEncoders || gCommandContextOffset < 0x400 || gCommandContextOffset > 0x4000) {
+        ScheduleRegistrationRetry();
         return;
     }
 
+    // Mango waits 250 ms when the live QuartzCore registry pointer has not been
+    // populated yet. This is the important startup ordering case in backboardd.
     if (!*gFilterRegistrySlot) {
         ScheduleRegistrationRetry();
         return;
@@ -896,58 +1014,53 @@ static void RegisterGlassFilter(void)
 
     void *gaussianRecordRaw = *gGaussianRecordSlot;
     void **gaussianRecord = reinterpret_cast<void **>(StripData(gaussianRecordRaw));
-    if (!gaussianRecord) return;
+    if (!gaussianRecord) {
+        ScheduleRegistrationRetry();
+        return;
+    }
 
     int primarySlot = FindPrimaryCallbackSlot(gaussianRecord, kGaussianRecordSlots);
     int secondarySlot = FindSecondaryCallbackSlot(gaussianRecord, kGaussianRecordSlots);
     if (primarySlot < 0 || primarySlot >= static_cast<int>(kGaussianRecordSlots) ||
         secondarySlot < 0 || secondarySlot >= static_cast<int>(kGaussianRecordSlots) ||
         primarySlot == secondarySlot) {
+        ScheduleRegistrationRetry();
         return;
     }
-
-    // Mango's primary replacement is a pure tail-forwarder. Keeping the cloned
-    // Gaussian primary pointer unchanged is ABI-equivalent and avoids inventing
-    // a private prototype. Only the custom secondary renderer is replaced.
-    gOriginalSecondary = StripCode(gaussianRecord[secondarySlot]);
-    if (!gOriginalSecondary) return;
 
     CAInternAtomFn internAtom = reinterpret_cast<CAInternAtomFn>(SignCode(gCAInternAtom));
     AddFilterFn addFilter = reinterpret_cast<AddFilterFn>(SignCode(gAddFilter));
-    if (!internAtom || !addFilter) return;
+    if (!internAtom || !addFilter) {
+        ScheduleRegistrationRetry();
+        return;
+    }
 
     uint32_t customAtom = internAtom(kCustomFilterType);
     uint32_t gaussianAtom = internAtom("gaussianBlur");
-    if (!customAtom || !gaussianAtom || customAtom == gaussianAtom) return;
-
-    void **clonedRecord = reinterpret_cast<void **>(mmap(nullptr, kGaussianRecordSize,
-                                                         PROT_READ | PROT_WRITE,
-                                                         MAP_PRIVATE | MAP_ANON, -1, 0));
-    if (clonedRecord == MAP_FAILED) return;
-    memcpy(clonedRecord, gaussianRecord, kGaussianRecordSize);
-
-    clonedRecord[0] = StripCode(reinterpret_cast<void *>(&RHGlassRecordMarker));
-    clonedRecord[secondarySlot] = StripCode(reinterpret_cast<void *>(&RHGlassRenderCallback));
-
-    void **wrapper = reinterpret_cast<void **>(mmap(nullptr, 0x100,
-                                                    PROT_READ | PROT_WRITE,
-                                                    MAP_PRIVATE | MAP_ANON, -1, 0));
-    if (wrapper == MAP_FAILED) {
-        munmap(clonedRecord, kGaussianRecordSize);
+    if (!customAtom || !gaussianAtom || customAtom == gaussianAtom) {
+        ScheduleRegistrationRetry();
         return;
     }
-    memset(wrapper, 0, 0x100);
-    wrapper[0] = clonedRecord;
-
     gCustomAtom = customAtom;
-    addFilter(customAtom, wrapper);
+
+    // Mango Beta7 normally takes its hook path (the 0x143b9 mode byte is set
+    // to 1 at initialization): hook the three Gaussian callback functions in
+    // place, then register the custom atom against the existing Gaussian
+    // wrapper/record slot. Do not build a guessed private record clone here.
+    if (!InstallGaussianHooks(gaussianRecord, primarySlot, secondarySlot)) {
+        ScheduleRegistrationRetry();
+        return;
+    }
+
+    addFilter(customAtom, gGaussianRecordSlot);
     gRegistered = true;
 }
 
 static void ScheduleRegistrationRetry(void)
 {
-    if (gRegistered || gRetryScheduled) return;
+    if (gRegistered || gRetryScheduled || gRetryCount >= 12) return;
     gRetryScheduled = true;
+    gRetryCount++;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
                    dispatch_get_main_queue(), ^{
         gRetryScheduled = false;
