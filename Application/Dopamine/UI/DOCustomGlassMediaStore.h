@@ -227,10 +227,16 @@ static inline BOOL DOCustomGlassMediaStoreSaveImage(UIImage *image,
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults setObject:newFilename forKey:defaultsKey];
-    BOOL synchronized = [defaults synchronize];
+
+    // NSUserDefaults updates the process-visible value immediately.
+    // Keep synchronize as best-effort persistence only; its return value must
+    // not invalidate media that was already written and verified successfully.
+    [defaults synchronize];
 
     NSString *committedFilename = [defaults stringForKey:defaultsKey];
-    if (!synchronized || ![committedFilename isEqualToString:newFilename]) {
+    if (![committedFilename isEqualToString:newFilename]) {
+        NSLog(@"[CustomGlass][MediaStore] defaults commit mismatch key=%@ expected=%@ actual=%@",
+              defaultsKey, newFilename, committedFilename);
         [[NSFileManager defaultManager] removeItemAtURL:newURL error:nil];
         return NO;
     }
@@ -361,9 +367,14 @@ static inline BOOL DOCustomGlassMediaStoreSaveWallpaperVideo(NSURL *sourceURL,
     }
 
     [defaults setObject:newVideoFilename forKey:DOCustomGlassMediaStoreWallpaperVideoFilenameKey];
-    BOOL synchronized = [defaults synchronize];
+
+    // Same rule as still images: synchronize is best-effort only.
+    [defaults synchronize];
+
     NSString *committedFilename = [defaults stringForKey:DOCustomGlassMediaStoreWallpaperVideoFilenameKey];
-    if (!synchronized || ![committedFilename isEqualToString:newVideoFilename]) {
+    if (![committedFilename isEqualToString:newVideoFilename]) {
+        NSLog(@"[CustomGlass][MediaStore] video defaults commit mismatch expected=%@ actual=%@",
+              newVideoFilename, committedFilename);
         [[NSFileManager defaultManager] removeItemAtURL:newVideoURL error:nil];
         [defaults removeObjectForKey:DOCustomGlassMediaStoreWallpaperVideoFilenameKey];
         [defaults synchronize];
