@@ -1414,6 +1414,188 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     });
 }
 
+- (void)showSupporterHardwareIdentityProbe
+{
+    NSDictionary<NSString *, id> *probe =
+        DORHSupporterHardwareIdentityProbe();
+
+    BOOL available =
+        [probe[@"available"] boolValue];
+
+    NSString *probeMessage = nil;
+
+    if (available) {
+        probeMessage =
+            [NSString stringWithFormat:
+                @"Status\nPASS\n\n"
+                 "Protocol\n%@\n\n"
+                 "Hardware ID\n%@\n\n"
+                 "Raw hardware data is not displayed or persisted.",
+                 probe[@"algorithm"] ?: @"rh-hw-v1",
+                 probe[@"hardware_id"] ?: @""];
+    }
+    else {
+        probeMessage =
+            @"Status\nFAIL\n\n"
+             "UniqueChipID is unavailable or invalid.\n\n"
+             "No IDFV or Device Code fallback was used.";
+    }
+
+    [self
+        showSupporterLicenseResultWithTitle:
+            (available
+                ? @"Hardware Identity Probe"
+                : @"Hardware Identity Unavailable")
+                                 message:probeMessage];
+}
+
+- (void)showSupporterDeviceKeyProbe
+{
+    NSDictionary<NSString *, id> *probe =
+        DORHSupporterDeviceKeyProbe();
+
+    BOOL available =
+        [probe[@"available"] boolValue];
+
+    NSString *probeMessage = nil;
+
+    if (available) {
+        NSString *keyState =
+            [probe[@"created"] boolValue]
+                ? @"Created now"
+                : @"Reused existing key";
+
+        probeMessage =
+            [NSString stringWithFormat:
+                @"Storage\n%@\n\n"
+                 "Fingerprint\n%@\n\n"
+                 "Key State\n%@\n\n"
+                 "Signature Self-Test\nPASS\n\n"
+                 "Private key is not displayed or exported.",
+                 probe[@"storage"] ?: @"Secure Enclave",
+                 probe[@"fingerprint"] ?: @"",
+                 keyState];
+    }
+    else {
+        probeMessage =
+            [NSString stringWithFormat:
+                @"Secure Enclave Device Key unavailable.\n\n"
+                 "Stage\n%@\n\n"
+                 "Error Code\n%@\n\n"
+                 "No software Keychain fallback was used.",
+                 probe[@"stage"] ?: @"unknown",
+                 probe[@"error_code"] ?: @(-1)];
+    }
+
+    [self
+        showSupporterLicenseResultWithTitle:
+            (available
+                ? @"Device Key Probe"
+                : @"Device Key Unavailable")
+                                 message:probeMessage];
+}
+
+- (void)showSupporterAdvancedDiagnostics
+{
+    UIAlertController *advanced =
+        [UIAlertController alertControllerWithTitle:@"Advanced Diagnostics"
+                                            message:nil
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    __weak typeof(self) weakSelf = self;
+
+    [advanced addAction:
+        [UIAlertAction actionWithTitle:@"Run Device Diagnostics"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSDictionary<NSString *, id> *hardwareProbe =
+            DORHSupporterHardwareIdentityProbe();
+        NSDictionary<NSString *, id> *keyProbe =
+            DORHSupporterDeviceKeyProbe();
+
+        BOOL hardwareAvailable =
+            [hardwareProbe[@"available"] boolValue];
+        BOOL keyAvailable =
+            [keyProbe[@"available"] boolValue];
+
+        NSMutableString *report =
+            [NSMutableString stringWithString:
+                @"DopamineRH Device Diagnostics\n"
+                 "Version: 1\n\n"];
+
+        if (hardwareAvailable) {
+            [report appendFormat:
+                @"Hardware Identity: PASS\n"
+                 "Protocol: %@\n"
+                 "Hardware ID: %@\n\n",
+                 hardwareProbe[@"algorithm"] ?: @"rh-hw-v1",
+                 hardwareProbe[@"hardware_id"] ?: @""];
+        }
+        else {
+            [report appendString:
+                @"Hardware Identity: FAIL\n"
+                 "Failure: UniqueChipID unavailable or invalid\n\n"];
+        }
+
+        if (keyAvailable) {
+            NSString *keyState =
+                [keyProbe[@"created"] boolValue]
+                    ? @"Created now"
+                    : @"Reused existing key";
+
+            [report appendFormat:
+                @"Device Key: PASS\n"
+                 "Storage: %@\n"
+                 "Key Fingerprint: %@\n"
+                 "Key State: %@\n"
+                 "Signature Self-Test: PASS",
+                 keyProbe[@"storage"] ?: @"Secure Enclave",
+                 keyProbe[@"fingerprint"] ?: @"",
+                 keyState];
+        }
+        else {
+            [report appendFormat:
+                @"Device Key: FAIL\n"
+                 "Failure: %@ (Error %@)",
+                 keyProbe[@"stage"] ?: @"unknown",
+                 keyProbe[@"error_code"] ?: @(-1)];
+        }
+
+        UIPasteboard.generalPasteboard.string = report;
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:@"Diagnostics Ready"
+                                         message:
+                @"Diagnostic information was copied to the clipboard.\n\n"
+                 "Paste and send it to support."];
+    }]];
+
+    [advanced addAction:
+        [UIAlertAction actionWithTitle:@"Hardware Identity Probe"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+        [weakSelf showSupporterHardwareIdentityProbe];
+    }]];
+
+    [advanced addAction:
+        [UIAlertAction actionWithTitle:@"Device Key Probe"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+        [weakSelf showSupporterDeviceKeyProbe];
+    }]];
+
+    [advanced addAction:
+        [UIAlertAction actionWithTitle:@"Cancel"
+                                 style:UIAlertActionStyleCancel
+                               handler:nil]];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [weakSelf presentViewController:advanced animated:YES completion:nil];
+    });
+}
+
 - (void)showSupporterLicenseChangeWithTitle:(NSString *)title message:(NSString *)message
 {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
@@ -1448,108 +1630,21 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
+    __weak typeof(self) weakSelf = self;
+
     UIAlertAction *copyDeviceCodeAction =
-        [UIAlertAction actionWithTitle:@"Copy Device Code"
+        [UIAlertAction actionWithTitle:@"1. Copy Device Code"
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
         UIPasteboard.generalPasteboard.string = deviceCode;
+        [weakSelf showSupporterLicenseResultWithTitle:@"Device Code Copied"
+                                             message:@"Device Code has been copied."];
     }];
     copyDeviceCodeAction.enabled = deviceCode.length > 0;
     [alert addAction:copyDeviceCodeAction];
 
-    __weak typeof(self) weakSelf = self;
-
     [alert addAction:
-        [UIAlertAction actionWithTitle:@"Hardware Probe"
-                                 style:UIAlertActionStyleDefault
-                               handler:^(__kindof UIAlertAction * _Nonnull action) {
-
-        NSDictionary<NSString *, id> *probe =
-            DORHSupporterHardwareIdentityProbe();
-
-        BOOL available =
-            [probe[@"available"] boolValue];
-
-        NSString *probeMessage = nil;
-
-        if (available) {
-            probeMessage =
-                [NSString stringWithFormat:
-                    @"Algorithm\n%@\n\n"
-                     "Hardware ID\n%@\n\n"
-                     "Hardware identity is available.\n"
-                     "Raw hardware data is not displayed or persisted.",
-                     probe[@"algorithm"] ?: @"rh-hw-v1",
-                     probe[@"hardware_id"] ?: @""];
-        }
-        else {
-            probeMessage =
-                @"UniqueChipID is unavailable or invalid.\n\n"
-                 "Hardware Identity unavailable.\n\n"
-                 "No IDFV or Device Code fallback was used.";
-        }
-
-        [weakSelf
-            showSupporterLicenseResultWithTitle:
-                (available
-                    ? @"Hardware Identity Probe"
-                    : @"Hardware Identity Unavailable")
-                                     message:probeMessage];
-    }]];
-
-    [alert addAction:
-        [UIAlertAction actionWithTitle:@"Device Key Probe"
-                                 style:UIAlertActionStyleDefault
-                               handler:^(__kindof UIAlertAction * _Nonnull action) {
-
-        NSDictionary<NSString *, id> *probe =
-            DORHSupporterDeviceKeyProbe();
-
-        BOOL available =
-            [probe[@"available"] boolValue];
-
-        NSString *probeMessage = nil;
-
-        if (available) {
-            NSString *keyState =
-                [probe[@"created"] boolValue]
-                    ? @"Created now"
-                    : @"Reused existing key";
-
-            probeMessage =
-                [NSString stringWithFormat:
-                    @"Algorithm\n%@\n\n"
-                     "Storage\n%@\n\n"
-                     "Fingerprint\n%@\n\n"
-                     "Key state\n%@\n\n"
-                     "Signature self-test\nPASS\n\n"
-                     "Private key is not displayed or exported.",
-                     probe[@"algorithm"] ?: @"p256",
-                     probe[@"storage"] ?: @"Secure Enclave",
-                     probe[@"fingerprint"] ?: @"",
-                     keyState];
-        }
-        else {
-            probeMessage =
-                [NSString stringWithFormat:
-                    @"Secure Enclave Device Key unavailable.\n\n"
-                     "Stage\n%@\n\n"
-                     "Error Code\n%@\n\n"
-                     "No software Keychain fallback was used.",
-                     probe[@"stage"] ?: @"unknown",
-                     probe[@"error_code"] ?: @(-1)];
-        }
-
-        [weakSelf
-            showSupporterLicenseResultWithTitle:
-                (available
-                    ? @"Device Key Probe"
-                    : @"Device Key Unavailable")
-                                     message:probeMessage];
-    }]];
-
-    [alert addAction:
-        [UIAlertAction actionWithTitle:@"Create Device Proof"
+        [UIAlertAction actionWithTitle:@"2. Bind This Device"
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
 
@@ -1598,12 +1693,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         [weakSelf
             showSupporterLicenseResultWithTitle:@"Device Proof Ready"
                                          message:
-                @"RHP1 was generated and copied to the clipboard.\n\n"
-                 "Return to the issuer and choose Verify Clipboard RHP1.\n\n"
-                 "The existing RH1 Supporter License was not changed."];
+                @"Device proof has been copied.\n\n"
+                 "Paste and send it to the issuer for verification."];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Paste License"
+    [alert addAction:[UIAlertAction actionWithTitle:@"3. Paste License"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__kindof UIAlertAction * _Nonnull action) {
         NSString *licenseCode = UIPasteboard.generalPasteboard.string ?: @"";
@@ -1616,6 +1710,13 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             [weakSelf showSupporterLicenseResultWithTitle:@"Invalid License"
                                                   message:error.localizedDescription ?: @"Unable to verify supporter license"];
         }
+    }]];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Advanced Diagnostics"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+        [weakSelf showSupporterAdvancedDiagnostics];
     }]];
 
     if (supporterID.length > 0) {
