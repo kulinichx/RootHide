@@ -676,106 +676,31 @@ DORHSupporterDeviceKeyProbe(void)
             length);
     }
 
-    NSData *selfTestMessage =
-        [@"DopamineRH-DeviceKey-Probe-v1"
-            dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *selfTestFailureStage = nil;
+    NSInteger selfTestFailureCode = 0;
 
-    CFErrorRef signError = NULL;
-
-    CFDataRef signature =
-        SecKeyCreateSignature(
+    if (!DORHSupporterDeviceKeySignatureSelfTest(
             privateKey,
-            kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
-            (__bridge CFDataRef)selfTestMessage,
-            &signError);
-
-    if (!signature) {
-        NSInteger code =
-            signError
-                ? (NSInteger)CFErrorGetCode(signError)
-                : -1;
-
-        if (signError)
-            CFRelease(signError);
-
-        CFRelease(publicDataRef);
-        CFRelease(publicKey);
-        CFRelease(privateKey);
-
-        return DORHSupporterDeviceKeyProbeFailure(
-            @"sign",
-            code);
-    }
-
-    if (signError)
-        CFRelease(signError);
-
-    CFErrorRef verifyError = NULL;
-
-    BOOL signatureValid =
-        SecKeyVerifySignature(
             publicKey,
-            kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
-            (__bridge CFDataRef)selfTestMessage,
-            signature,
-            &verifyError);
-
-    CFRelease(signature);
-
-    if (!signatureValid) {
-        NSInteger code =
-            verifyError
-                ? (NSInteger)CFErrorGetCode(verifyError)
-                : -1;
-
-        if (verifyError)
-            CFRelease(verifyError);
-
+            &selfTestFailureStage,
+            &selfTestFailureCode)) {
         CFRelease(publicDataRef);
         CFRelease(publicKey);
         CFRelease(privateKey);
 
         return DORHSupporterDeviceKeyProbeFailure(
-            @"verify-self-test",
-            code);
+            selfTestFailureStage,
+            selfTestFailureCode);
     }
 
-    if (verifyError)
-        CFRelease(verifyError);
-
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
-
-    CC_SHA256(publicData.bytes,
-              (CC_LONG)publicData.length,
-              digest);
-
-    NSMutableString *fullHash =
-        [NSMutableString stringWithCapacity:64];
-
-    for (NSUInteger i = 0;
-         i < CC_SHA256_DIGEST_LENGTH;
-         i++) {
-        [fullHash appendFormat:@"%02X", digest[i]];
-    }
-
-    NSString *shortHex =
-        [fullHash substringToIndex:32];
-
-    NSMutableArray<NSString *> *groups =
-        [NSMutableArray arrayWithCapacity:8];
-
-    for (NSUInteger i = 0;
-         i < shortHex.length;
-         i += 4) {
-        [groups addObject:
-            [shortHex substringWithRange:
-                NSMakeRange(i, 4)]];
-    }
+    NSDictionary<NSString *, NSString *> *fingerprintInfo =
+        DORHSupporterDeviceKeyFingerprint(publicData);
 
     NSString *fingerprint =
-        [NSString stringWithFormat:
-            @"K1-%@",
-            [groups componentsJoinedByString:@"-"]];
+        fingerprintInfo[@"fingerprint"];
+
+    NSString *fullHash =
+        fingerprintInfo[@"key_fingerprint"];
 
     CFRelease(publicDataRef);
     CFRelease(publicKey);
