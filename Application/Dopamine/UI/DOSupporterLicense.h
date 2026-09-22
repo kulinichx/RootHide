@@ -156,6 +156,9 @@ DORHSupporterHardwareIdentityProbe(void)
 static NSString * const DORHSupporterDeviceKeyTag =
     @"com.dopaminerh.supporter.devicekey.v1";
 
+static NSString * const DORHSupporterDeviceKeyAccessGroup =
+    @"com.dopaminerh.supporter.devicekey";
+
 static inline NSDictionary<NSString *, id> *
 DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
 {
@@ -191,6 +194,8 @@ DORHSupporterDeviceKeyProbe(void)
             (__bridge id)kSecAttrKeyClassPrivate,
         (__bridge id)kSecAttrApplicationTag :
             tagData,
+        (__bridge id)kSecAttrAccessGroup :
+            DORHSupporterDeviceKeyAccessGroup,
         (__bridge id)kSecReturnRef :
             @YES
     };
@@ -244,6 +249,8 @@ DORHSupporterDeviceKeyProbe(void)
                 @YES,
             (__bridge id)kSecAttrApplicationTag :
                 tagData,
+            (__bridge id)kSecAttrAccessGroup :
+                DORHSupporterDeviceKeyAccessGroup,
             (__bridge id)kSecAttrAccessControl :
                 (__bridge id)accessControl
         };
