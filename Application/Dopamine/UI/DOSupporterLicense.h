@@ -325,6 +325,149 @@ DORHSupporterDeviceKeyFingerprint(NSData *publicData)
     };
 }
 
+static inline NSData *
+DORHSupporterSignWithDeviceKey(SecKeyRef privateKey,
+                               NSData *message,
+                               NSInteger *failureCode)
+{
+    if (failureCode)
+        *failureCode = 0;
+
+    if (!privateKey || !message) {
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    CFErrorRef signError = NULL;
+
+    CFDataRef signatureRef =
+        SecKeyCreateSignature(
+            privateKey,
+            kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+            (__bridge CFDataRef)message,
+            &signError);
+
+    if (!signatureRef) {
+        NSInteger code =
+            signError
+                ? (NSInteger)CFErrorGetCode(signError)
+                : -1;
+
+        if (signError)
+            CFRelease(signError);
+
+        if (failureCode)
+            *failureCode = code;
+
+        return nil;
+    }
+
+    if (signError)
+        CFRelease(signError);
+
+    return CFBridgingRelease(signatureRef);
+}
+
+static inline BOOL
+DORHSupporterVerifyDeviceKeySignature(SecKeyRef publicKey,
+                                      NSData *message,
+                                      NSData *signature,
+                                      NSInteger *failureCode)
+{
+    if (failureCode)
+        *failureCode = 0;
+
+    if (!publicKey || !message || !signature) {
+        if (failureCode)
+            *failureCode = -1;
+
+        return NO;
+    }
+
+    CFErrorRef verifyError = NULL;
+
+    BOOL valid =
+        SecKeyVerifySignature(
+            publicKey,
+            kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+            (__bridge CFDataRef)message,
+            (__bridge CFDataRef)signature,
+            &verifyError);
+
+    if (!valid) {
+        NSInteger code =
+            verifyError
+                ? (NSInteger)CFErrorGetCode(verifyError)
+                : -1;
+
+        if (verifyError)
+            CFRelease(verifyError);
+
+        if (failureCode)
+            *failureCode = code;
+
+        return NO;
+    }
+
+    if (verifyError)
+        CFRelease(verifyError);
+
+    return YES;
+}
+
+static inline BOOL
+DORHSupporterDeviceKeySignatureSelfTest(SecKeyRef privateKey,
+                                        SecKeyRef publicKey,
+                                        NSString **failureStage,
+                                        NSInteger *failureCode)
+{
+    if (failureStage)
+        *failureStage = nil;
+
+    if (failureCode)
+        *failureCode = 0;
+
+    NSData *message =
+        [@"DopamineRH-DeviceKey-Probe-v1"
+            dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSInteger code = 0;
+
+    NSData *signature =
+        DORHSupporterSignWithDeviceKey(
+            privateKey,
+            message,
+            &code);
+
+    if (!signature) {
+        if (failureStage)
+            *failureStage = @"sign";
+
+        if (failureCode)
+            *failureCode = code;
+
+        return NO;
+    }
+
+    if (!DORHSupporterVerifyDeviceKeySignature(
+            publicKey,
+            message,
+            signature,
+            &code)) {
+        if (failureStage)
+            *failureStage = @"verify-self-test";
+
+        if (failureCode)
+            *failureCode = code;
+
+        return NO;
+    }
+
+    return YES;
+}
+
 static inline NSDictionary<NSString *, id> *
 DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
 {
