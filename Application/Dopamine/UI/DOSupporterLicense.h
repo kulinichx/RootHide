@@ -159,6 +159,44 @@ static NSString * const DORHSupporterDeviceKeyTag =
 static NSString * const DORHSupporterDeviceKeyAccessGroup =
     @"com.dopaminerh.supporter.devicekey";
 
+static inline BOOL
+DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(SecKeyRef privateKey)
+{
+    if (!privateKey)
+        return NO;
+
+    CFDictionaryRef attributesRef =
+        SecKeyCopyAttributes(privateKey);
+
+    if (!attributesRef)
+        return NO;
+
+    NSDictionary *attributes =
+        (__bridge NSDictionary *)attributesRef;
+
+    id keyType =
+        attributes[(__bridge id)kSecAttrKeyType];
+
+    id keyClass =
+        attributes[(__bridge id)kSecAttrKeyClass];
+
+    NSNumber *keySize =
+        attributes[(__bridge id)kSecAttrKeySizeInBits];
+
+    id tokenID =
+        attributes[(__bridge id)kSecAttrTokenID];
+
+    BOOL valid =
+        [keyType isEqual:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom] &&
+        [keyClass isEqual:(__bridge id)kSecAttrKeyClassPrivate] &&
+        [keySize unsignedIntegerValue] == 256 &&
+        [tokenID isEqual:(__bridge id)kSecAttrTokenIDSecureEnclave];
+
+    CFRelease(attributesRef);
+
+    return valid;
+}
+
 static inline NSDictionary<NSString *, id> *
 DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
 {
@@ -301,6 +339,14 @@ DORHSupporterDeviceKeyProbe(void)
         return DORHSupporterDeviceKeyProbeFailure(
             @"lookup",
             (NSInteger)lookupStatus);
+    }
+
+    if (!DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(privateKey)) {
+        CFRelease(privateKey);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"secure-enclave-key-validation",
+            -2);
     }
 
     SecKeyRef publicKey =
