@@ -148,6 +148,329 @@ DORHSupporterHardwareIdentityProbe(void)
     };
 }
 
+//
+// Phase 2A Device Key feasibility probe.
+//
+// Fixed logical key tag. This tag must not change with App versions.
+//
+static NSString * const DORHSupporterDeviceKeyTag =
+    @"com.dopaminerh.supporter.devicekey.v1";
+
+static inline NSDictionary<NSString *, id> *
+DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
+{
+    return @{
+        @"available" : @NO,
+        @"algorithm" : @"p256",
+        @"storage" : @"Secure Enclave",
+        @"tag" : DORHSupporterDeviceKeyTag,
+        @"fingerprint" : @"",
+        @"key_fingerprint" : @"",
+        @"created" : @NO,
+        @"signature_self_test" : @NO,
+        @"stage" : stage ?: @"unknown",
+        @"error_code" : @(errorCode)
+    };
+}
+
+static inline NSDictionary<NSString *, id> *
+DORHSupporterDeviceKeyProbe(void)
+{
+    NSData *tagData =
+        [DORHSupporterDeviceKeyTag dataUsingEncoding:NSUTF8StringEncoding];
+
+    if (tagData.length == 0)
+        return DORHSupporterDeviceKeyProbeFailure(@"tag", -1);
+
+    NSDictionary *query = @{
+        (__bridge id)kSecClass :
+            (__bridge id)kSecClassKey,
+        (__bridge id)kSecAttrKeyType :
+            (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrKeyClass :
+            (__bridge id)kSecAttrKeyClassPrivate,
+        (__bridge id)kSecAttrApplicationTag :
+            tagData,
+        (__bridge id)kSecReturnRef :
+            @YES
+    };
+
+    CFTypeRef existingItem = NULL;
+
+    OSStatus lookupStatus =
+        SecItemCopyMatching((__bridge CFDictionaryRef)query,
+                            &existingItem);
+
+    SecKeyRef privateKey = NULL;
+    BOOL created = NO;
+
+    if (lookupStatus == errSecSuccess) {
+        if (!existingItem)
+            return DORHSupporterDeviceKeyProbeFailure(
+                @"lookup-empty",
+                -1);
+
+        privateKey = (SecKeyRef)existingItem;
+    }
+    else if (lookupStatus == errSecItemNotFound) {
+        CFErrorRef accessError = NULL;
+
+        SecAccessControlRef accessControl =
+            SecAccessControlCreateWithFlags(
+                kCFAllocatorDefault,
+                kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                kSecAccessControlPrivateKeyUsage,
+                &accessError);
+
+        if (!accessControl) {
+            NSInteger code =
+                accessError
+                    ? (NSInteger)CFErrorGetCode(accessError)
+                    : -1;
+
+            if (accessError)
+                CFRelease(accessError);
+
+            return DORHSupporterDeviceKeyProbeFailure(
+                @"access-control",
+                code);
+        }
+
+        if (accessError)
+            CFRelease(accessError);
+
+        NSDictionary *privateAttributes = @{
+            (__bridge id)kSecAttrIsPermanent :
+                @YES,
+            (__bridge id)kSecAttrApplicationTag :
+                tagData,
+            (__bridge id)kSecAttrAccessControl :
+                (__bridge id)accessControl
+        };
+
+        NSDictionary *attributes = @{
+            (__bridge id)kSecAttrKeyType :
+                (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+            (__bridge id)kSecAttrKeySizeInBits :
+                @256,
+            (__bridge id)kSecAttrTokenID :
+                (__bridge id)kSecAttrTokenIDSecureEnclave,
+            (__bridge id)kSecPrivateKeyAttrs :
+                privateAttributes
+        };
+
+        CFErrorRef createError = NULL;
+
+        privateKey =
+            SecKeyCreateRandomKey(
+                (__bridge CFDictionaryRef)attributes,
+                &createError);
+
+        CFRelease(accessControl);
+
+        if (!privateKey) {
+            NSInteger code =
+                createError
+                    ? (NSInteger)CFErrorGetCode(createError)
+                    : -1;
+
+            if (createError)
+                CFRelease(createError);
+
+            return DORHSupporterDeviceKeyProbeFailure(
+                @"create-key",
+                code);
+        }
+
+        if (createError)
+            CFRelease(createError);
+
+        created = YES;
+    }
+    else {
+        if (existingItem)
+            CFRelease(existingItem);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"lookup",
+            (NSInteger)lookupStatus);
+    }
+
+    SecKeyRef publicKey =
+        SecKeyCopyPublicKey(privateKey);
+
+    if (!publicKey) {
+        CFRelease(privateKey);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"copy-public-key",
+            -1);
+    }
+
+    CFErrorRef exportError = NULL;
+
+    CFDataRef publicDataRef =
+        SecKeyCopyExternalRepresentation(
+            publicKey,
+            &exportError);
+
+    if (!publicDataRef) {
+        NSInteger code =
+            exportError
+                ? (NSInteger)CFErrorGetCode(exportError)
+                : -1;
+
+        if (exportError)
+            CFRelease(exportError);
+
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"export-public-key",
+            code);
+    }
+
+    if (exportError)
+        CFRelease(exportError);
+
+    NSData *publicData =
+        (__bridge NSData *)publicDataRef;
+
+    // P-256 ANSI X9.63 uncompressed public key:
+    // 0x04 || X(32 bytes) || Y(32 bytes)
+    if (publicData.length != 65) {
+        NSInteger length =
+            (NSInteger)publicData.length;
+
+        CFRelease(publicDataRef);
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"public-key-format",
+            length);
+    }
+
+    NSData *selfTestMessage =
+        [@"DopamineRH-DeviceKey-Probe-v1"
+            dataUsingEncoding:NSUTF8StringEncoding];
+
+    CFErrorRef signError = NULL;
+
+    CFDataRef signature =
+        SecKeyCreateSignature(
+            privateKey,
+            kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+            (__bridge CFDataRef)selfTestMessage,
+            &signError);
+
+    if (!signature) {
+        NSInteger code =
+            signError
+                ? (NSInteger)CFErrorGetCode(signError)
+                : -1;
+
+        if (signError)
+            CFRelease(signError);
+
+        CFRelease(publicDataRef);
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"sign",
+            code);
+    }
+
+    if (signError)
+        CFRelease(signError);
+
+    CFErrorRef verifyError = NULL;
+
+    BOOL signatureValid =
+        SecKeyVerifySignature(
+            publicKey,
+            kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+            (__bridge CFDataRef)selfTestMessage,
+            signature,
+            &verifyError);
+
+    CFRelease(signature);
+
+    if (!signatureValid) {
+        NSInteger code =
+            verifyError
+                ? (NSInteger)CFErrorGetCode(verifyError)
+                : -1;
+
+        if (verifyError)
+            CFRelease(verifyError);
+
+        CFRelease(publicDataRef);
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        return DORHSupporterDeviceKeyProbeFailure(
+            @"verify-self-test",
+            code);
+    }
+
+    if (verifyError)
+        CFRelease(verifyError);
+
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
+
+    CC_SHA256(publicData.bytes,
+              (CC_LONG)publicData.length,
+              digest);
+
+    NSMutableString *fullHash =
+        [NSMutableString stringWithCapacity:64];
+
+    for (NSUInteger i = 0;
+         i < CC_SHA256_DIGEST_LENGTH;
+         i++) {
+        [fullHash appendFormat:@"%02X", digest[i]];
+    }
+
+    NSString *shortHex =
+        [fullHash substringToIndex:32];
+
+    NSMutableArray<NSString *> *groups =
+        [NSMutableArray arrayWithCapacity:8];
+
+    for (NSUInteger i = 0;
+         i < shortHex.length;
+         i += 4) {
+        [groups addObject:
+            [shortHex substringWithRange:
+                NSMakeRange(i, 4)]];
+    }
+
+    NSString *fingerprint =
+        [NSString stringWithFormat:
+            @"K1-%@",
+            [groups componentsJoinedByString:@"-"]];
+
+    CFRelease(publicDataRef);
+    CFRelease(publicKey);
+    CFRelease(privateKey);
+
+    return @{
+        @"available" : @YES,
+        @"algorithm" : @"p256",
+        @"storage" : @"Secure Enclave",
+        @"tag" : DORHSupporterDeviceKeyTag,
+        @"fingerprint" : fingerprint,
+        @"key_fingerprint" : fullHash,
+        @"created" : @(created),
+        @"signature_self_test" : @YES,
+        @"stage" : @"ready",
+        @"error_code" : @0
+    };
+}
+
 static inline NSString *DORHSupporterBase64URLToBase64(NSString *value)
 {
     NSString *base64 = [[value stringByReplacingOccurrencesOfString:@"-" withString:@"+"]

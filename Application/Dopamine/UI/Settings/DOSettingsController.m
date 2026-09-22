@@ -1466,6 +1466,57 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                      message:probeMessage];
     }]];
 
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Device Key Probe"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSDictionary<NSString *, id> *probe =
+            DORHSupporterDeviceKeyProbe();
+
+        BOOL available =
+            [probe[@"available"] boolValue];
+
+        NSString *probeMessage = nil;
+
+        if (available) {
+            NSString *keyState =
+                [probe[@"created"] boolValue]
+                    ? @"Created now"
+                    : @"Reused existing key";
+
+            probeMessage =
+                [NSString stringWithFormat:
+                    @"Algorithm\n%@\n\n"
+                     "Storage\n%@\n\n"
+                     "Fingerprint\n%@\n\n"
+                     "Key state\n%@\n\n"
+                     "Signature self-test\nPASS\n\n"
+                     "Private key is not displayed or exported.",
+                     probe[@"algorithm"] ?: @"p256",
+                     probe[@"storage"] ?: @"Secure Enclave",
+                     probe[@"fingerprint"] ?: @"",
+                     keyState];
+        }
+        else {
+            probeMessage =
+                [NSString stringWithFormat:
+                    @"Secure Enclave Device Key unavailable.\n\n"
+                     "Stage\n%@\n\n"
+                     "Error Code\n%@\n\n"
+                     "No software Keychain fallback was used.",
+                     probe[@"stage"] ?: @"unknown",
+                     probe[@"error_code"] ?: @(-1)];
+        }
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:
+                (available
+                    ? @"Device Key Probe"
+                    : @"Device Key Unavailable")
+                                     message:probeMessage];
+    }]];
+
     [alert addAction:[UIAlertAction actionWithTitle:@"Paste License"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__kindof UIAlertAction * _Nonnull action) {
