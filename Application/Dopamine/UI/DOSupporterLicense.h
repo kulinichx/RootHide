@@ -198,7 +198,7 @@ DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(SecKeyRef privateKey)
 }
 
 static inline NSData *
-DORHSupporterCopyDevicePublicKeyData(SecKeyRef privateKey,
+DORHSupporterCopyDevicePublicKeyData(SecKeyRef publicKey,
                                      NSString **failureStage,
                                      NSInteger *failureCode)
 {
@@ -208,22 +208,9 @@ DORHSupporterCopyDevicePublicKeyData(SecKeyRef privateKey,
     if (failureCode)
         *failureCode = 0;
 
-    if (!privateKey) {
-        if (failureStage)
-            *failureStage = @"copy-public-key";
-
-        if (failureCode)
-            *failureCode = -1;
-
-        return nil;
-    }
-
-    SecKeyRef publicKey =
-        SecKeyCopyPublicKey(privateKey);
-
     if (!publicKey) {
         if (failureStage)
-            *failureStage = @"copy-public-key";
+            *failureStage = @"export-public-key";
 
         if (failureCode)
             *failureCode = -1;
@@ -237,8 +224,6 @@ DORHSupporterCopyDevicePublicKeyData(SecKeyRef privateKey,
         SecKeyCopyExternalRepresentation(
             publicKey,
             &exportError);
-
-    CFRelease(publicKey);
 
     if (!publicDataRef) {
         NSInteger code =
@@ -631,49 +616,22 @@ DORHSupporterDeviceKeyProbe(void)
             -1);
     }
 
-    CFErrorRef exportError = NULL;
-
-    CFDataRef publicDataRef =
-        SecKeyCopyExternalRepresentation(
-            publicKey,
-            &exportError);
-
-    if (!publicDataRef) {
-        NSInteger code =
-            exportError
-                ? (NSInteger)CFErrorGetCode(exportError)
-                : -1;
-
-        if (exportError)
-            CFRelease(exportError);
-
-        CFRelease(publicKey);
-        CFRelease(privateKey);
-
-        return DORHSupporterDeviceKeyProbeFailure(
-            @"export-public-key",
-            code);
-    }
-
-    if (exportError)
-        CFRelease(exportError);
+    NSString *publicDataFailureStage = nil;
+    NSInteger publicDataFailureCode = 0;
 
     NSData *publicData =
-        (__bridge NSData *)publicDataRef;
+        DORHSupporterCopyDevicePublicKeyData(
+            publicKey,
+            &publicDataFailureStage,
+            &publicDataFailureCode);
 
-    // P-256 ANSI X9.63 uncompressed public key:
-    // 0x04 || X(32 bytes) || Y(32 bytes)
-    if (publicData.length != 65) {
-        NSInteger length =
-            (NSInteger)publicData.length;
-
-        CFRelease(publicDataRef);
+    if (!publicData) {
         CFRelease(publicKey);
         CFRelease(privateKey);
 
         return DORHSupporterDeviceKeyProbeFailure(
-            @"public-key-format",
-            length);
+            publicDataFailureStage,
+            publicDataFailureCode);
     }
 
     NSString *selfTestFailureStage = nil;
@@ -684,7 +642,6 @@ DORHSupporterDeviceKeyProbe(void)
             publicKey,
             &selfTestFailureStage,
             &selfTestFailureCode)) {
-        CFRelease(publicDataRef);
         CFRelease(publicKey);
         CFRelease(privateKey);
 
@@ -702,7 +659,6 @@ DORHSupporterDeviceKeyProbe(void)
     NSString *fullHash =
         fingerprintInfo[@"key_fingerprint"];
 
-    CFRelease(publicDataRef);
     CFRelease(publicKey);
     CFRelease(privateKey);
 
