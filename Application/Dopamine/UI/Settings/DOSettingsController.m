@@ -1517,6 +1517,61 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                      message:probeMessage];
     }]];
 
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Create Device Proof"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSString *challengeText = UIPasteboard.generalPasteboard.string ?: @"";
+        NSData *challengeData =
+            [challengeText dataUsingEncoding:NSUTF8StringEncoding];
+
+        NSString *failureStage = nil;
+        NSInteger failureCode = 0;
+
+        NSData *proofData =
+            DORHSupporterCreateRHP1Proof(
+                challengeData,
+                &failureStage,
+                &failureCode);
+
+        if (!proofData) {
+            NSString *proofError =
+                [NSString stringWithFormat:
+                    @"Unable to create RHP1 device proof.\n\n"
+                     "Stage\n%@\n\n"
+                     "Error Code\n%ld\n\n"
+                     "Copy a fresh RHC1 challenge from the issuer and try again.",
+                     failureStage ?: @"unknown",
+                     (long)failureCode];
+
+            [weakSelf
+                showSupporterLicenseResultWithTitle:@"Device Proof Failed"
+                                             message:proofError];
+            return;
+        }
+
+        NSString *proofText =
+            [[NSString alloc] initWithData:proofData
+                                  encoding:NSUTF8StringEncoding];
+
+        if (proofText.length == 0) {
+            [weakSelf
+                showSupporterLicenseResultWithTitle:@"Device Proof Failed"
+                                             message:@"RHP1 proof encoding failed."];
+            return;
+        }
+
+        UIPasteboard.generalPasteboard.string = proofText;
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:@"Device Proof Ready"
+                                         message:
+                @"RHP1 was generated and copied to the clipboard.\n\n"
+                 "Return to the issuer and choose Verify Clipboard RHP1.\n\n"
+                 "The existing RH1 Supporter License was not changed."];
+    }]];
+
     [alert addAction:[UIAlertAction actionWithTitle:@"Paste License"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__kindof UIAlertAction * _Nonnull action) {

@@ -736,6 +736,572 @@ DORHSupporterDeviceKeyProbe(void)
     };
 }
 
+//
+// Phase 3A Device Proof protocol: RHC1 / RHP1 v1.
+//
+// RHC1 is a server-generated, single-use challenge. The client treats the
+// exact canonical RHC1 bytes as immutable protocol input. RHP1 binds that
+// exact challenge to rh-hw-v1, the Device Key public-key fingerprint, and a
+// possession proof produced by the existing Secure Enclave private key.
+//
+// This layer deliberately does not define RH2 entitlement semantics.
+//
+static NSString * const DORHSupporterRHC1Audience =
+    @"com.dopaminerh.supporter.device-proof";
+
+static NSString * const DORHSupporterRHP1SignatureAlgorithm =
+    @"ecdsa-p256-sha256-x962";
+
+static NSString * const DORHSupporterRHP1SigningDomain =
+    @"DopamineRH-RHP1-Sign-v1";
+
+static const NSUInteger DORHSupporterRHC1MaximumWireBytes = 1024;
+static const NSUInteger DORHSupporterRHP1MaximumWireBytes = 4096;
+static const long long DORHSupporterRHC1MaximumLifetimeSeconds = 900;
+
+static inline NSString *
+DORHSupporterSHA256UpperHex(NSData *data)
+{
+    if (!data)
+        return nil;
+
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
+
+    CC_SHA256(data.bytes,
+              (CC_LONG)data.length,
+              digest);
+
+    NSMutableString *hex =
+        [NSMutableString stringWithCapacity:64];
+
+    for (NSUInteger i = 0;
+         i < CC_SHA256_DIGEST_LENGTH;
+         i++) {
+        [hex appendFormat:@"%02X", digest[i]];
+    }
+
+    return hex;
+}
+
+static inline BOOL
+DORHSupporterIsUppercaseHexString(NSString *value,
+                                  NSUInteger expectedLength)
+{
+    if (![value isKindOfClass:NSString.class] ||
+        value.length != expectedLength)
+        return NO;
+
+    static NSCharacterSet *invalidCharacters = nil;
+    static dispatch_once_t onceToken;
+
+    dispatch_once(&onceToken, ^{
+        invalidCharacters =
+            [[NSCharacterSet characterSetWithCharactersInString:
+                @"0123456789ABCDEF"] invertedSet];
+    });
+
+    return
+        [value rangeOfCharacterFromSet:invalidCharacters].location ==
+        NSNotFound;
+}
+
+static inline NSString *
+DORHSupporterEncodeBase64URL(NSData *data)
+{
+    if (!data)
+        return nil;
+
+    NSString *value =
+        [data base64EncodedStringWithOptions:0];
+
+    value =
+        [[value stringByReplacingOccurrencesOfString:@"+"
+                                          withString:@"-"]
+            stringByReplacingOccurrencesOfString:@"/"
+                                       withString:@"_"];
+
+    while ([value hasSuffix:@"="])
+        value = [value substringToIndex:value.length - 1];
+
+    return value;
+}
+
+static inline NSDictionary<NSString *, id> *
+DORHSupporterParseRHC1Challenge(NSData *challengeData,
+                                NSString **failureStage,
+                                NSInteger *failureCode)
+{
+    if (failureStage)
+        *failureStage = nil;
+
+    if (failureCode)
+        *failureCode = 0;
+
+    if (!challengeData || challengeData.length == 0) {
+        if (failureStage)
+            *failureStage = @"rhc1-empty";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    if (challengeData.length > DORHSupporterRHC1MaximumWireBytes) {
+        if (failureStage)
+            *failureStage = @"rhc1-size";
+
+        if (failureCode)
+            *failureCode = (NSInteger)challengeData.length;
+
+        return nil;
+    }
+
+    NSString *wire =
+        [[NSString alloc] initWithData:challengeData
+                              encoding:NSUTF8StringEncoding];
+
+    if (!wire) {
+        if (failureStage)
+            *failureStage = @"rhc1-utf8";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSError *jsonError = nil;
+    id object =
+        [NSJSONSerialization JSONObjectWithData:challengeData
+                                        options:0
+                                          error:&jsonError];
+
+    if (![object isKindOfClass:NSDictionary.class]) {
+        if (failureStage)
+            *failureStage = @"rhc1-json";
+
+        if (failureCode)
+            *failureCode = jsonError ? jsonError.code : -1;
+
+        return nil;
+    }
+
+    NSDictionary<NSString *, id> *info = object;
+
+    if (info.count != 7) {
+        if (failureStage)
+            *failureStage = @"rhc1-fields";
+
+        if (failureCode)
+            *failureCode = (NSInteger)info.count;
+
+        return nil;
+    }
+
+    NSString *type = info[@"type"];
+    NSNumber *version = info[@"version"];
+    NSString *challengeID = info[@"challenge_id"];
+    NSString *nonce = info[@"nonce"];
+    NSNumber *issuedAtNumber = info[@"issued_at"];
+    NSNumber *expiresAtNumber = info[@"expires_at"];
+    NSString *audience = info[@"audience"];
+
+    if (![type isKindOfClass:NSString.class] ||
+        ![type isEqualToString:@"RHC1"] ||
+        ![version isKindOfClass:NSNumber.class] ||
+        CFGetTypeID((__bridge CFTypeRef)version) == CFBooleanGetTypeID() ||
+        version.longLongValue != 1 ||
+        !DORHSupporterIsUppercaseHexString(challengeID, 32) ||
+        !DORHSupporterIsUppercaseHexString(nonce, 64) ||
+        ![issuedAtNumber isKindOfClass:NSNumber.class] ||
+        CFGetTypeID((__bridge CFTypeRef)issuedAtNumber) == CFBooleanGetTypeID() ||
+        ![expiresAtNumber isKindOfClass:NSNumber.class] ||
+        CFGetTypeID((__bridge CFTypeRef)expiresAtNumber) == CFBooleanGetTypeID() ||
+        ![audience isKindOfClass:NSString.class] ||
+        ![audience isEqualToString:DORHSupporterRHC1Audience]) {
+        if (failureStage)
+            *failureStage = @"rhc1-values";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    long long issuedAt = issuedAtNumber.longLongValue;
+    long long expiresAt = expiresAtNumber.longLongValue;
+
+    if (issuedAt < 0 ||
+        expiresAt <= issuedAt ||
+        expiresAt - issuedAt > DORHSupporterRHC1MaximumLifetimeSeconds) {
+        if (failureStage)
+            *failureStage = @"rhc1-time";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSString *canonical =
+        [NSString stringWithFormat:
+            @"{\"type\":\"RHC1\",\"version\":1,\"challenge_id\":\"%@\",\"nonce\":\"%@\",\"issued_at\":%lld,\"expires_at\":%lld,\"audience\":\"%@\"}",
+            challengeID,
+            nonce,
+            issuedAt,
+            expiresAt,
+            DORHSupporterRHC1Audience];
+
+    NSData *canonicalData =
+        [canonical dataUsingEncoding:NSUTF8StringEncoding];
+
+    // Requiring byte-for-byte equality rejects alternate field order,
+    // whitespace, duplicate keys, unknown keys, alternate number encodings,
+    // BOMs, and other serializer-dependent representations.
+    if (![challengeData isEqualToData:canonicalData]) {
+        if (failureStage)
+            *failureStage = @"rhc1-canonical";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSString *challengeHash =
+        DORHSupporterSHA256UpperHex(challengeData);
+
+    if (challengeHash.length != 64) {
+        if (failureStage)
+            *failureStage = @"rhc1-hash";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    return @{
+        @"type" : @"RHC1",
+        @"version" : @1,
+        @"challenge_id" : challengeID,
+        @"nonce" : nonce,
+        @"issued_at" : @(issuedAt),
+        @"expires_at" : @(expiresAt),
+        @"audience" : DORHSupporterRHC1Audience,
+        @"challenge_hash" : challengeHash,
+        @"canonical_data" : challengeData
+    };
+}
+
+static inline NSData *
+DORHSupporterCreateRHP1Proof(NSData *challengeData,
+                             NSString **failureStage,
+                             NSInteger *failureCode)
+{
+    if (failureStage)
+        *failureStage = nil;
+
+    if (failureCode)
+        *failureCode = 0;
+
+    NSString *stage = nil;
+    NSInteger code = 0;
+
+    NSDictionary<NSString *, id> *challenge =
+        DORHSupporterParseRHC1Challenge(
+            challengeData,
+            &stage,
+            &code);
+
+    if (!challenge) {
+        if (failureStage)
+            *failureStage = stage ?: @"rhc1";
+
+        if (failureCode)
+            *failureCode = code;
+
+        return nil;
+    }
+
+    NSDictionary<NSString *, id> *hardware =
+        DORHSupporterHardwareIdentityProbe();
+
+    NSString *hardwareProtocol = hardware[@"algorithm"];
+    NSString *hardwareHash = hardware[@"hardware_hash"];
+
+    if (![hardware[@"available"] boolValue] ||
+        ![hardwareProtocol isEqualToString:@"rh-hw-v1"] ||
+        !DORHSupporterIsUppercaseHexString(hardwareHash, 64)) {
+        if (failureStage)
+            *failureStage = @"hardware-identity";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    BOOL created = NO;
+    NSString *privateKeyFailureStage = nil;
+    NSInteger privateKeyFailureCode = 0;
+
+    SecKeyRef privateKey =
+        DORHSupporterCopyOrCreateDevicePrivateKey(
+            &created,
+            &privateKeyFailureStage,
+            &privateKeyFailureCode);
+
+    if (!privateKey) {
+        if (failureStage)
+            *failureStage = privateKeyFailureStage ?: @"device-key";
+
+        if (failureCode)
+            *failureCode = privateKeyFailureCode;
+
+        return nil;
+    }
+
+    if (!DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(privateKey)) {
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"secure-enclave-key-validation";
+
+        if (failureCode)
+            *failureCode = -2;
+
+        return nil;
+    }
+
+    SecKeyRef publicKey =
+        SecKeyCopyPublicKey(privateKey);
+
+    if (!publicKey) {
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"copy-public-key";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSString *publicDataFailureStage = nil;
+    NSInteger publicDataFailureCode = 0;
+
+    NSData *publicData =
+        DORHSupporterCopyDevicePublicKeyData(
+            publicKey,
+            &publicDataFailureStage,
+            &publicDataFailureCode);
+
+    if (!publicData) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = publicDataFailureStage ?: @"public-key";
+
+        if (failureCode)
+            *failureCode = publicDataFailureCode;
+
+        return nil;
+    }
+
+    const uint8_t *publicBytes = publicData.bytes;
+
+    if (publicData.length != 65 ||
+        !publicBytes ||
+        publicBytes[0] != 0x04) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"public-key-format";
+
+        if (failureCode)
+            *failureCode = (NSInteger)publicData.length;
+
+        return nil;
+    }
+
+    NSDictionary<NSString *, NSString *> *fingerprintInfo =
+        DORHSupporterDeviceKeyFingerprint(publicData);
+
+    NSString *keyFingerprint =
+        fingerprintInfo[@"key_fingerprint"];
+
+    if (!DORHSupporterIsUppercaseHexString(keyFingerprint, 64)) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"key-fingerprint";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSString *publicKeyBase64URL =
+        DORHSupporterEncodeBase64URL(publicData);
+
+    if (publicKeyBase64URL.length == 0 ||
+        [publicKeyBase64URL containsString:@"="]) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"public-key-encoding";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSString *challengeID = challenge[@"challenge_id"];
+    NSString *challengeHash = challenge[@"challenge_hash"];
+
+    NSString *unsignedWire =
+        [NSString stringWithFormat:
+            @"{\"type\":\"RHP1\",\"version\":1,\"challenge_id\":\"%@\",\"challenge_hash\":\"%@\",\"hardware_protocol\":\"rh-hw-v1\",\"hardware_hash\":\"%@\",\"key_fingerprint\":\"%@\",\"public_key\":\"%@\",\"signature_algorithm\":\"%@\"}",
+            challengeID,
+            challengeHash,
+            hardwareHash,
+            keyFingerprint,
+            publicKeyBase64URL,
+            DORHSupporterRHP1SignatureAlgorithm];
+
+    NSData *unsignedData =
+        [unsignedWire dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSData *domainData =
+        [DORHSupporterRHP1SigningDomain
+            dataUsingEncoding:NSASCIIStringEncoding];
+
+    if (!unsignedData || !domainData) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"proof-canonical";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSMutableData *signedMessage =
+        [NSMutableData dataWithCapacity:
+            domainData.length + 1 + unsignedData.length];
+
+    [signedMessage appendData:domainData];
+
+    const uint8_t separator = 0;
+    [signedMessage appendBytes:&separator length:1];
+    [signedMessage appendData:unsignedData];
+
+    NSInteger signFailureCode = 0;
+    NSData *signature =
+        DORHSupporterSignWithDeviceKey(
+            privateKey,
+            signedMessage,
+            &signFailureCode);
+
+    if (!signature) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"proof-sign";
+
+        if (failureCode)
+            *failureCode = signFailureCode;
+
+        return nil;
+    }
+
+    // Verify the freshly generated proof locally before returning it. This is
+    // not a server trust decision; it catches unexpected signing/key failures
+    // while both retained key references are still available.
+    NSInteger verifyFailureCode = 0;
+    BOOL localSignatureValid =
+        DORHSupporterVerifyDeviceKeySignature(
+            publicKey,
+            signedMessage,
+            signature,
+            &verifyFailureCode);
+
+    if (!localSignatureValid) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"proof-self-verify";
+
+        if (failureCode)
+            *failureCode = verifyFailureCode;
+
+        return nil;
+    }
+
+    NSString *signatureBase64URL =
+        DORHSupporterEncodeBase64URL(signature);
+
+    if (signatureBase64URL.length == 0 ||
+        [signatureBase64URL containsString:@"="]) {
+        CFRelease(publicKey);
+        CFRelease(privateKey);
+
+        if (failureStage)
+            *failureStage = @"signature-encoding";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    NSString *proofWire =
+        [NSString stringWithFormat:
+            @"{\"type\":\"RHP1\",\"version\":1,\"challenge_id\":\"%@\",\"challenge_hash\":\"%@\",\"hardware_protocol\":\"rh-hw-v1\",\"hardware_hash\":\"%@\",\"key_fingerprint\":\"%@\",\"public_key\":\"%@\",\"signature_algorithm\":\"%@\",\"signature\":\"%@\"}",
+            challengeID,
+            challengeHash,
+            hardwareHash,
+            keyFingerprint,
+            publicKeyBase64URL,
+            DORHSupporterRHP1SignatureAlgorithm,
+            signatureBase64URL];
+
+    NSData *proofData =
+        [proofWire dataUsingEncoding:NSUTF8StringEncoding];
+
+    CFRelease(publicKey);
+    CFRelease(privateKey);
+
+    if (!proofData ||
+        proofData.length > DORHSupporterRHP1MaximumWireBytes) {
+        if (failureStage)
+            *failureStage = @"proof-size";
+
+        if (failureCode)
+            *failureCode = proofData ? (NSInteger)proofData.length : -1;
+
+        return nil;
+    }
+
+    (void)created;
+
+    return proofData;
+}
+
 static inline NSString *DORHSupporterBase64URLToBase64(NSString *value)
 {
     NSString *base64 = [[value stringByReplacingOccurrencesOfString:@"-" withString:@"+"]
