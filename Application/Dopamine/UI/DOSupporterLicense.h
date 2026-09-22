@@ -197,6 +197,134 @@ DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(SecKeyRef privateKey)
     return valid;
 }
 
+static inline NSData *
+DORHSupporterCopyDevicePublicKeyData(SecKeyRef privateKey,
+                                     NSString **failureStage,
+                                     NSInteger *failureCode)
+{
+    if (failureStage)
+        *failureStage = nil;
+
+    if (failureCode)
+        *failureCode = 0;
+
+    if (!privateKey) {
+        if (failureStage)
+            *failureStage = @"copy-public-key";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    SecKeyRef publicKey =
+        SecKeyCopyPublicKey(privateKey);
+
+    if (!publicKey) {
+        if (failureStage)
+            *failureStage = @"copy-public-key";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return nil;
+    }
+
+    CFErrorRef exportError = NULL;
+
+    CFDataRef publicDataRef =
+        SecKeyCopyExternalRepresentation(
+            publicKey,
+            &exportError);
+
+    CFRelease(publicKey);
+
+    if (!publicDataRef) {
+        NSInteger code =
+            exportError
+                ? (NSInteger)CFErrorGetCode(exportError)
+                : -1;
+
+        if (exportError)
+            CFRelease(exportError);
+
+        if (failureStage)
+            *failureStage = @"export-public-key";
+
+        if (failureCode)
+            *failureCode = code;
+
+        return nil;
+    }
+
+    if (exportError)
+        CFRelease(exportError);
+
+    NSData *publicData =
+        CFBridgingRelease(publicDataRef);
+
+    // P-256 ANSI X9.63 uncompressed public key:
+    // 0x04 || X(32 bytes) || Y(32 bytes)
+    if (publicData.length != 65) {
+        if (failureStage)
+            *failureStage = @"public-key-format";
+
+        if (failureCode)
+            *failureCode = (NSInteger)publicData.length;
+
+        return nil;
+    }
+
+    return publicData;
+}
+
+static inline NSDictionary<NSString *, NSString *> *
+DORHSupporterDeviceKeyFingerprint(NSData *publicData)
+{
+    if (publicData.length != 65)
+        return nil;
+
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
+
+    CC_SHA256(publicData.bytes,
+              (CC_LONG)publicData.length,
+              digest);
+
+    NSMutableString *fullHash =
+        [NSMutableString stringWithCapacity:64];
+
+    for (NSUInteger i = 0;
+         i < CC_SHA256_DIGEST_LENGTH;
+         i++) {
+        [fullHash appendFormat:@"%02X", digest[i]];
+    }
+
+    NSString *shortHex =
+        [fullHash substringToIndex:32];
+
+    NSMutableArray<NSString *> *groups =
+        [NSMutableArray arrayWithCapacity:8];
+
+    for (NSUInteger i = 0;
+         i < shortHex.length;
+         i += 4) {
+        [groups addObject:
+            [shortHex substringWithRange:
+                NSMakeRange(i, 4)]];
+    }
+
+    NSString *fingerprint =
+        [NSString stringWithFormat:
+            @"K1-%@",
+            [groups componentsJoinedByString:@"-"]];
+
+    return @{
+        @"fingerprint" : fingerprint,
+        @"key_fingerprint" : fullHash
+    };
+}
+
 static inline NSDictionary<NSString *, id> *
 DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
 {
