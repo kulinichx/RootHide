@@ -641,128 +641,20 @@ DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
 static inline NSDictionary<NSString *, id> *
 DORHSupporterDeviceKeyProbe(void)
 {
-    NSData *tagData =
-        [DORHSupporterDeviceKeyTag dataUsingEncoding:NSUTF8StringEncoding];
-
-    if (tagData.length == 0)
-        return DORHSupporterDeviceKeyProbeFailure(@"tag", -1);
-
-    NSDictionary *query = @{
-        (__bridge id)kSecClass :
-            (__bridge id)kSecClassKey,
-        (__bridge id)kSecAttrKeyType :
-            (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
-        (__bridge id)kSecAttrKeyClass :
-            (__bridge id)kSecAttrKeyClassPrivate,
-        (__bridge id)kSecAttrApplicationTag :
-            tagData,
-        (__bridge id)kSecAttrAccessGroup :
-            DORHSupporterDeviceKeyAccessGroup,
-        (__bridge id)kSecReturnRef :
-            @YES
-    };
-
-    CFTypeRef existingItem = NULL;
-
-    OSStatus lookupStatus =
-        SecItemCopyMatching((__bridge CFDictionaryRef)query,
-                            &existingItem);
-
-    SecKeyRef privateKey = NULL;
     BOOL created = NO;
+    NSString *privateKeyFailureStage = nil;
+    NSInteger privateKeyFailureCode = 0;
 
-    if (lookupStatus == errSecSuccess) {
-        if (!existingItem)
-            return DORHSupporterDeviceKeyProbeFailure(
-                @"lookup-empty",
-                -1);
+    SecKeyRef privateKey =
+        DORHSupporterCopyOrCreateDevicePrivateKey(
+            &created,
+            &privateKeyFailureStage,
+            &privateKeyFailureCode);
 
-        privateKey = (SecKeyRef)existingItem;
-    }
-    else if (lookupStatus == errSecItemNotFound) {
-        CFErrorRef accessError = NULL;
-
-        SecAccessControlRef accessControl =
-            SecAccessControlCreateWithFlags(
-                kCFAllocatorDefault,
-                kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-                kSecAccessControlPrivateKeyUsage,
-                &accessError);
-
-        if (!accessControl) {
-            NSInteger code =
-                accessError
-                    ? (NSInteger)CFErrorGetCode(accessError)
-                    : -1;
-
-            if (accessError)
-                CFRelease(accessError);
-
-            return DORHSupporterDeviceKeyProbeFailure(
-                @"access-control",
-                code);
-        }
-
-        if (accessError)
-            CFRelease(accessError);
-
-        NSDictionary *privateAttributes = @{
-            (__bridge id)kSecAttrIsPermanent :
-                @YES,
-            (__bridge id)kSecAttrApplicationTag :
-                tagData,
-            (__bridge id)kSecAttrAccessGroup :
-                DORHSupporterDeviceKeyAccessGroup,
-            (__bridge id)kSecAttrAccessControl :
-                (__bridge id)accessControl
-        };
-
-        NSDictionary *attributes = @{
-            (__bridge id)kSecAttrKeyType :
-                (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
-            (__bridge id)kSecAttrKeySizeInBits :
-                @256,
-            (__bridge id)kSecAttrTokenID :
-                (__bridge id)kSecAttrTokenIDSecureEnclave,
-            (__bridge id)kSecPrivateKeyAttrs :
-                privateAttributes
-        };
-
-        CFErrorRef createError = NULL;
-
-        privateKey =
-            SecKeyCreateRandomKey(
-                (__bridge CFDictionaryRef)attributes,
-                &createError);
-
-        CFRelease(accessControl);
-
-        if (!privateKey) {
-            NSInteger code =
-                createError
-                    ? (NSInteger)CFErrorGetCode(createError)
-                    : -1;
-
-            if (createError)
-                CFRelease(createError);
-
-            return DORHSupporterDeviceKeyProbeFailure(
-                @"create-key",
-                code);
-        }
-
-        if (createError)
-            CFRelease(createError);
-
-        created = YES;
-    }
-    else {
-        if (existingItem)
-            CFRelease(existingItem);
-
+    if (!privateKey) {
         return DORHSupporterDeviceKeyProbeFailure(
-            @"lookup",
-            (NSInteger)lookupStatus);
+            privateKeyFailureStage,
+            privateKeyFailureCode);
     }
 
     if (!DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(privateKey)) {
