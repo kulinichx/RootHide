@@ -1458,6 +1458,151 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     [alert addAction:copyDeviceCodeAction];
 
     __weak typeof(self) weakSelf = self;
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Hardware Probe"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSDictionary<NSString *, id> *probe =
+            DORHSupporterHardwareIdentityProbe();
+
+        BOOL available =
+            [probe[@"available"] boolValue];
+
+        NSString *probeMessage = nil;
+
+        if (available) {
+            probeMessage =
+                [NSString stringWithFormat:
+                    @"Algorithm\n%@\n\n"
+                     "Hardware ID\n%@\n\n"
+                     "Hardware identity is available.\n"
+                     "Raw hardware data is not displayed or persisted.",
+                     probe[@"algorithm"] ?: @"rh-hw-v1",
+                     probe[@"hardware_id"] ?: @""];
+        }
+        else {
+            probeMessage =
+                @"UniqueChipID is unavailable or invalid.\n\n"
+                 "Hardware Identity unavailable.\n\n"
+                 "No IDFV or Device Code fallback was used.";
+        }
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:
+                (available
+                    ? @"Hardware Identity Probe"
+                    : @"Hardware Identity Unavailable")
+                                     message:probeMessage];
+    }]];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Device Key Probe"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSDictionary<NSString *, id> *probe =
+            DORHSupporterDeviceKeyProbe();
+
+        BOOL available =
+            [probe[@"available"] boolValue];
+
+        NSString *probeMessage = nil;
+
+        if (available) {
+            NSString *keyState =
+                [probe[@"created"] boolValue]
+                    ? @"Created now"
+                    : @"Reused existing key";
+
+            probeMessage =
+                [NSString stringWithFormat:
+                    @"Algorithm\n%@\n\n"
+                     "Storage\n%@\n\n"
+                     "Fingerprint\n%@\n\n"
+                     "Key state\n%@\n\n"
+                     "Signature self-test\nPASS\n\n"
+                     "Private key is not displayed or exported.",
+                     probe[@"algorithm"] ?: @"p256",
+                     probe[@"storage"] ?: @"Secure Enclave",
+                     probe[@"fingerprint"] ?: @"",
+                     keyState];
+        }
+        else {
+            probeMessage =
+                [NSString stringWithFormat:
+                    @"Secure Enclave Device Key unavailable.\n\n"
+                     "Stage\n%@\n\n"
+                     "Error Code\n%@\n\n"
+                     "No software Keychain fallback was used.",
+                     probe[@"stage"] ?: @"unknown",
+                     probe[@"error_code"] ?: @(-1)];
+        }
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:
+                (available
+                    ? @"Device Key Probe"
+                    : @"Device Key Unavailable")
+                                     message:probeMessage];
+    }]];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Create Device Proof"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSString *challengeText = UIPasteboard.generalPasteboard.string ?: @"";
+        NSData *challengeData =
+            [challengeText dataUsingEncoding:NSUTF8StringEncoding];
+
+        NSString *failureStage = nil;
+        NSInteger failureCode = 0;
+
+        NSData *proofData =
+            DORHSupporterCreateRHP1Proof(
+                challengeData,
+                &failureStage,
+                &failureCode);
+
+        if (!proofData) {
+            NSString *proofError =
+                [NSString stringWithFormat:
+                    @"Unable to create RHP1 device proof.\n\n"
+                     "Stage\n%@\n\n"
+                     "Error Code\n%ld\n\n"
+                     "Copy a fresh RHC1 challenge from the issuer and try again.",
+                     failureStage ?: @"unknown",
+                     (long)failureCode];
+
+            [weakSelf
+                showSupporterLicenseResultWithTitle:@"Device Proof Failed"
+                                             message:proofError];
+            return;
+        }
+
+        NSString *proofText =
+            [[NSString alloc] initWithData:proofData
+                                  encoding:NSUTF8StringEncoding];
+
+        if (proofText.length == 0) {
+            [weakSelf
+                showSupporterLicenseResultWithTitle:@"Device Proof Failed"
+                                             message:@"RHP1 proof encoding failed."];
+            return;
+        }
+
+        UIPasteboard.generalPasteboard.string = proofText;
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:@"Device Proof Ready"
+                                         message:
+                @"RHP1 was generated and copied to the clipboard.\n\n"
+                 "Return to the issuer and choose Verify Clipboard RHP1.\n\n"
+                 "The existing RH1 Supporter License was not changed."];
+    }]];
+
     [alert addAction:[UIAlertAction actionWithTitle:@"Paste License"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__kindof UIAlertAction * _Nonnull action) {
