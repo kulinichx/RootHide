@@ -1434,7 +1434,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
 
         NSDictionary<NSString *, id> *probe =
-            DORHSupporterUniqueChipIDProbe();
+            DORHSupporterHardwareIdentityProbe();
 
         BOOL available =
             [probe[@"available"] boolValue];
@@ -1444,26 +1444,25 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         if (available) {
             probeMessage =
                 [NSString stringWithFormat:
-                    @"MobileGestalt key\n%@\n\n"
-                     "Returned type\n%@\n\n"
-                     "Raw value\n%@\n\n"
-                     "This is a Phase 1 probe only.\n"
-                     "Nothing has been persisted or used for licensing.",
-                     probe[@"key"] ?: @"UniqueChipID",
-                     probe[@"type"] ?: @"Unknown",
-                     probe[@"value"] ?: @""];
+                    @"Algorithm\n%@\n\n"
+                     "Hardware ID\n%@\n\n"
+                     "Full SHA-256\n%@\n\n"
+                     "The raw hardware value is not displayed or persisted.",
+                     probe[@"algorithm"] ?: @"rh-hw-v1-candidate",
+                     probe[@"hardware_id"] ?: @"",
+                     probe[@"hardware_hash"] ?: @""];
         }
         else {
             probeMessage =
-                @"MGCopyAnswer(\"UniqueChipID\") returned no value.\n\n"
-                 "Hardware Identity unavailable through this probe.\n\n"
+                @"UniqueChipID is unavailable or invalid.\n\n"
+                 "Hardware Identity unavailable.\n\n"
                  "No IDFV or Device Code fallback was used.";
         }
 
         [weakSelf
             showSupporterLicenseResultWithTitle:
                 (available
-                    ? @"Hardware Probe"
+                    ? @"Hardware Identity Probe"
                     : @"Hardware Identity Unavailable")
                                      message:probeMessage];
     }]];

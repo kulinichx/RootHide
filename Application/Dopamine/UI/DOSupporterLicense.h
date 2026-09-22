@@ -41,19 +41,20 @@ static inline NSError *DORHSupporterLicenseError(NSInteger code, NSString *descr
 }
 
 //
-// Phase 1 hardware-identity feasibility probe.
+// Phase 1 hardware-identity candidate.
 //
-// This deliberately does NOT:
-// - modify the legacy Device Code
-// - persist the result
-// - derive rh-hw-v1
-// - provide an IDFV fallback
+// UniqueChipID is used only in memory. The raw value is not persisted,
+// displayed, logged, or used as a replacement for the legacy Device Code.
 //
-// It only checks whether this DopamineRH process can read
-// MobileGestalt UniqueChipID on the real device.
+// Candidate protocol:
+//   canonical ECID = 16-digit uppercase hexadecimal
+//   SHA256("DopamineRH-HW-v1|" + canonical ECID)
+//
+// The resulting hash is still a Phase 1 candidate until cross-build
+// stability testing is complete.
 //
 static inline NSDictionary<NSString *, id> *
-DORHSupporterUniqueChipIDProbe(void)
+DORHSupporterHardwareIdentityProbe(void)
 {
     CFPropertyListRef rawAnswer =
         MGCopyAnswer(CFSTR("UniqueChipID"));
@@ -61,27 +62,89 @@ DORHSupporterUniqueChipIDProbe(void)
     if (!rawAnswer) {
         return @{
             @"available" : @NO,
-            @"key" : @"UniqueChipID",
-            @"type" : @"nil",
-            @"value" : @""
+            @"algorithm" : @"rh-hw-v1-candidate",
+            @"hardware_id" : @"",
+            @"hardware_hash" : @""
         };
     }
 
     id answer = (__bridge id)rawAnswer;
 
-    NSString *typeName =
-        NSStringFromClass([answer class]) ?: @"Unknown";
+    if (![answer isKindOfClass:NSNumber.class]) {
+        CFRelease(rawAnswer);
 
-    NSString *valueText =
-        [[answer description] copy] ?: @"";
+        return @{
+            @"available" : @NO,
+            @"algorithm" : @"rh-hw-v1-candidate",
+            @"hardware_id" : @"",
+            @"hardware_hash" : @""
+        };
+    }
+
+    unsigned long long ecid =
+        [(NSNumber *)answer unsignedLongLongValue];
 
     CFRelease(rawAnswer);
 
+    if (ecid == 0) {
+        return @{
+            @"available" : @NO,
+            @"algorithm" : @"rh-hw-v1-candidate",
+            @"hardware_id" : @"",
+            @"hardware_hash" : @""
+        };
+    }
+
+    NSString *canonicalECID =
+        [NSString stringWithFormat:@"%016llX", ecid];
+
+    NSString *seed =
+        [NSString stringWithFormat:
+            @"DopamineRH-HW-v1|%@",
+            canonicalECID];
+
+    NSData *seedData =
+        [seed dataUsingEncoding:NSUTF8StringEncoding];
+
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
+
+    CC_SHA256(seedData.bytes,
+              (CC_LONG)seedData.length,
+              digest);
+
+    NSMutableString *fullHash =
+        [NSMutableString stringWithCapacity:64];
+
+    for (NSUInteger i = 0;
+         i < CC_SHA256_DIGEST_LENGTH;
+         i++) {
+        [fullHash appendFormat:@"%02X", digest[i]];
+    }
+
+    NSString *shortHex =
+        [fullHash substringToIndex:32];
+
+    NSMutableArray<NSString *> *groups =
+        [NSMutableArray arrayWithCapacity:8];
+
+    for (NSUInteger i = 0;
+         i < shortHex.length;
+         i += 4) {
+        [groups addObject:
+            [shortHex substringWithRange:
+                NSMakeRange(i, 4)]];
+    }
+
+    NSString *hardwareID =
+        [NSString stringWithFormat:
+            @"D2-%@",
+            [groups componentsJoinedByString:@"-"]];
+
     return @{
         @"available" : @YES,
-        @"key" : @"UniqueChipID",
-        @"type" : typeName,
-        @"value" : valueText
+        @"algorithm" : @"rh-hw-v1-candidate",
+        @"hardware_id" : hardwareID,
+        @"hardware_hash" : fullHash
     };
 }
 
