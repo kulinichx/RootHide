@@ -453,6 +453,174 @@ DORHSupporterDeviceKeySignatureSelfTest(SecKeyRef privateKey,
     return YES;
 }
 
+static inline SecKeyRef
+DORHSupporterCopyOrCreateDevicePrivateKey(BOOL *created,
+                                          NSString **failureStage,
+                                          NSInteger *failureCode)
+{
+    if (created)
+        *created = NO;
+
+    if (failureStage)
+        *failureStage = nil;
+
+    if (failureCode)
+        *failureCode = 0;
+
+    NSData *tagData =
+        [DORHSupporterDeviceKeyTag dataUsingEncoding:NSUTF8StringEncoding];
+
+    if (tagData.length == 0) {
+        if (failureStage)
+            *failureStage = @"tag";
+
+        if (failureCode)
+            *failureCode = -1;
+
+        return NULL;
+    }
+
+    NSDictionary *query = @{
+        (__bridge id)kSecClass :
+            (__bridge id)kSecClassKey,
+        (__bridge id)kSecAttrKeyType :
+            (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrKeyClass :
+            (__bridge id)kSecAttrKeyClassPrivate,
+        (__bridge id)kSecAttrApplicationTag :
+            tagData,
+        (__bridge id)kSecAttrAccessGroup :
+            DORHSupporterDeviceKeyAccessGroup,
+        (__bridge id)kSecReturnRef :
+            @YES
+    };
+
+    CFTypeRef existingItem = NULL;
+
+    OSStatus lookupStatus =
+        SecItemCopyMatching(
+            (__bridge CFDictionaryRef)query,
+            &existingItem);
+
+    if (lookupStatus == errSecSuccess) {
+        if (!existingItem) {
+            if (failureStage)
+                *failureStage = @"lookup-empty";
+
+            if (failureCode)
+                *failureCode = -1;
+
+            return NULL;
+        }
+
+        // SecItemCopyMatching returned a retained reference.
+        // The caller owns it and must CFRelease().
+        return (SecKeyRef)existingItem;
+    }
+
+    if (lookupStatus != errSecItemNotFound) {
+        if (existingItem)
+            CFRelease(existingItem);
+
+        if (failureStage)
+            *failureStage = @"lookup";
+
+        if (failureCode)
+            *failureCode = (NSInteger)lookupStatus;
+
+        return NULL;
+    }
+
+    CFErrorRef accessError = NULL;
+
+    SecAccessControlRef accessControl =
+        SecAccessControlCreateWithFlags(
+            kCFAllocatorDefault,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAccessControlPrivateKeyUsage,
+            &accessError);
+
+    if (!accessControl) {
+        NSInteger code =
+            accessError
+                ? (NSInteger)CFErrorGetCode(accessError)
+                : -1;
+
+        if (accessError)
+            CFRelease(accessError);
+
+        if (failureStage)
+            *failureStage = @"access-control";
+
+        if (failureCode)
+            *failureCode = code;
+
+        return NULL;
+    }
+
+    if (accessError)
+        CFRelease(accessError);
+
+    NSDictionary *privateAttributes = @{
+        (__bridge id)kSecAttrIsPermanent :
+            @YES,
+        (__bridge id)kSecAttrApplicationTag :
+            tagData,
+        (__bridge id)kSecAttrAccessGroup :
+            DORHSupporterDeviceKeyAccessGroup,
+        (__bridge id)kSecAttrAccessControl :
+            (__bridge id)accessControl
+    };
+
+    NSDictionary *attributes = @{
+        (__bridge id)kSecAttrKeyType :
+            (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrKeySizeInBits :
+            @256,
+        (__bridge id)kSecAttrTokenID :
+            (__bridge id)kSecAttrTokenIDSecureEnclave,
+        (__bridge id)kSecPrivateKeyAttrs :
+            privateAttributes
+    };
+
+    CFErrorRef createError = NULL;
+
+    SecKeyRef privateKey =
+        SecKeyCreateRandomKey(
+            (__bridge CFDictionaryRef)attributes,
+            &createError);
+
+    CFRelease(accessControl);
+
+    if (!privateKey) {
+        NSInteger code =
+            createError
+                ? (NSInteger)CFErrorGetCode(createError)
+                : -1;
+
+        if (createError)
+            CFRelease(createError);
+
+        if (failureStage)
+            *failureStage = @"create-key";
+
+        if (failureCode)
+            *failureCode = code;
+
+        return NULL;
+    }
+
+    if (createError)
+        CFRelease(createError);
+
+    if (created)
+        *created = YES;
+
+    // SecKeyCreateRandomKey follows the Create Rule.
+    // The caller owns the returned key and must CFRelease().
+    return privateKey;
+}
+
 static inline NSDictionary<NSString *, id> *
 DORHSupporterDeviceKeyProbeFailure(NSString *stage, NSInteger errorCode)
 {
