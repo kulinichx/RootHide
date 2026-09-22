@@ -150,3 +150,49 @@
 "System_Uptime_Prefix" = "uptime:";
 "System_Uptime_Less_Than_Minute" = "uptime: less than 1 minute";
 "Settings_Disable_Update" = "Disable Update";
+
+// Supporter License / Device Proof
+"Supporter_Title" = "Supporter License";
+"Supporter_Status_Verified" = "Verified";
+"Supporter_Status_Not_Activated" = "Not Activated";
+"Supporter_Status_Message_Format" = "%@\n\nDevice Code\n%@";
+"Supporter_Unavailable" = "Unavailable";
+"Supporter_OK" = "OK";
+"Supporter_Apply_Now" = "Apply Now";
+
+"Supporter_Copy_Device_Code" = "1. Copy Device Code";
+"Supporter_Bind_This_Device" = "2. Bind This Device";
+"Supporter_Paste_License" = "3. Paste License";
+"Supporter_Advanced_Diagnostics" = "Advanced Diagnostics";
+"Supporter_Remove_License" = "Remove License";
+
+"Supporter_Run_Diagnostics" = "Run Device Diagnostics";
+"Supporter_Hardware_Identity_Probe" = "Hardware Identity Probe";
+"Supporter_Hardware_Identity_Unavailable" = "Hardware Identity Unavailable";
+"Supporter_Hardware_Probe_Pass_Format" = "Status\nPASS\n\nProtocol\n%@\n\nHardware ID\n%@\n\nRaw hardware data is not displayed or persisted.";
+"Supporter_Hardware_Probe_Fail" = "Status\nFAIL\n\nUniqueChipID is unavailable or invalid.\n\nNo IDFV or Device Code fallback was used.";
+
+"Supporter_Device_Key_Probe" = "Device Key Probe";
+"Supporter_Device_Key_Unavailable" = "Device Key Unavailable";
+"Supporter_Key_State_Created" = "Created now";
+"Supporter_Key_State_Reused" = "Reused existing key";
+"Supporter_Device_Key_Probe_Pass_Format" = "Storage\n%@\n\nFingerprint\n%@\n\nKey State\n%@\n\nSignature Self-Test\nPASS\n\nPrivate key is not displayed or exported.";
+"Supporter_Device_Key_Probe_Fail_Format" = "Secure Enclave Device Key unavailable.\n\nStage\n%@\n\nError Code\n%@\n\nNo software Keychain fallback was used.";
+
+"Supporter_Device_Code_Copied" = "Device Code Copied";
+"Supporter_Device_Code_Copied_Message" = "Paste and send it directly to the developer.";
+"Supporter_Device_Proof_Ready" = "Device Proof Ready";
+"Supporter_Device_Proof_Ready_Message" = "Paste and send it directly to the developer for verification.";
+"Supporter_Diagnostics_Copied" = "Diagnostics Copied";
+"Supporter_Diagnostics_Copied_Message" = "Paste and send it directly to the developer.";
+
+"Supporter_Device_Proof_Failed" = "Device Proof Failed";
+"Supporter_Device_Proof_Failed_Format" = "Unable to create RHP1 device proof.\n\nStage\n%@\n\nError Code\n%ld\n\nCopy a fresh RHC1 challenge from the issuer and try again.";
+"Supporter_Device_Proof_Encoding_Failed" = "RHP1 proof encoding failed.";
+
+"Supporter_Activated" = "Supporter Activated";
+"Supporter_Activated_Message" = "Your supporter license has been saved. Apply the Supporter interface now.";
+"Supporter_Invalid_License" = "Invalid License";
+"Supporter_Invalid_License_Fallback" = "Unable to verify supporter license";
+"Supporter_Removed" = "Supporter Removed";
+"Supporter_Removed_Message" = "Your supporter license has been removed. Restore the standard interface now.";

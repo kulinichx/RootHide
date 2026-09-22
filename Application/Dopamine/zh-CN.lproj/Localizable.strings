@@ -147,3 +147,49 @@
 "System_Uptime_Prefix" = "已运行";
 "System_Uptime_Less_Than_Minute" = "已运行 不到 1 分钟";
 "Settings_Disable_Update" = "禁用更新检测";
+
+// Supporter License / Device Proof
+"Supporter_Title" = "支持者授权";
+"Supporter_Status_Verified" = "已验证";
+"Supporter_Status_Not_Activated" = "未激活";
+"Supporter_Status_Message_Format" = "%@\n\n设备码\n%@";
+"Supporter_Unavailable" = "不可用";
+"Supporter_OK" = "确定";
+"Supporter_Apply_Now" = "立即应用";
+
+"Supporter_Copy_Device_Code" = "1. 复制设备码";
+"Supporter_Bind_This_Device" = "2. 绑定此设备";
+"Supporter_Paste_License" = "3. 粘贴授权码";
+"Supporter_Advanced_Diagnostics" = "高级诊断";
+"Supporter_Remove_License" = "移除授权";
+
+"Supporter_Run_Diagnostics" = "运行设备诊断";
+"Supporter_Hardware_Identity_Probe" = "硬件身份检测";
+"Supporter_Hardware_Identity_Unavailable" = "硬件身份不可用";
+"Supporter_Hardware_Probe_Pass_Format" = "状态\n通过\n\n协议\n%@\n\n硬件 ID\n%@\n\n不会显示或保存原始硬件数据。";
+"Supporter_Hardware_Probe_Fail" = "状态\n失败\n\n无法获取有效的 UniqueChipID。\n\n未使用 IDFV 或设备码作为备用。";
+
+"Supporter_Device_Key_Probe" = "设备密钥检测";
+"Supporter_Device_Key_Unavailable" = "设备密钥不可用";
+"Supporter_Key_State_Created" = "刚刚创建";
+"Supporter_Key_State_Reused" = "已复用现有密钥";
+"Supporter_Device_Key_Probe_Pass_Format" = "存储位置\n%@\n\n密钥指纹\n%@\n\n密钥状态\n%@\n\n签名自检\n通过\n\n私钥不会显示或导出。";
+"Supporter_Device_Key_Probe_Fail_Format" = "Secure Enclave 设备密钥不可用。\n\n阶段\n%@\n\n错误代码\n%@\n\n未使用软件密钥备用方案。";
+
+"Supporter_Device_Code_Copied" = "设备码已复制";
+"Supporter_Device_Code_Copied_Message" = "直接粘贴发送给开发者";
+"Supporter_Device_Proof_Ready" = "设备证明已生成";
+"Supporter_Device_Proof_Ready_Message" = "直接粘贴发送给开发者验证";
+"Supporter_Diagnostics_Copied" = "诊断信息已复制";
+"Supporter_Diagnostics_Copied_Message" = "直接粘贴发送给开发者";
+
+"Supporter_Device_Proof_Failed" = "设备证明生成失败";
+"Supporter_Device_Proof_Failed_Format" = "无法生成 RHP1 设备证明。\n\n阶段\n%@\n\n错误代码\n%ld\n\n请从签发器复制新的 RHC1 后重试。";
+"Supporter_Device_Proof_Encoding_Failed" = "RHP1 证明编码失败。";
+
+"Supporter_Activated" = "支持者授权已启用";
+"Supporter_Activated_Message" = "授权已保存，可立即应用支持者界面。";
+"Supporter_Invalid_License" = "授权码无效";
+"Supporter_Invalid_License_Fallback" = "无法验证支持者授权";
+"Supporter_Removed" = "支持者授权已移除";
+"Supporter_Removed_Message" = "授权已移除，可恢复标准界面。";

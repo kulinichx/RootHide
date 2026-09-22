@@ -1027,7 +1027,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             [specifiers addObject:jetsamSpecifier];
 
             PSSpecifier *supporterLicenseSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-            [supporterLicenseSpecifier setProperty:@"Supporter License" forKey:@"title"];
+            [supporterLicenseSpecifier setProperty:DOLocalizedString(@"Supporter_Title") forKey:@"title"];
             [supporterLicenseSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
             [supporterLicenseSpecifier setProperty:buttonHeight forKey:@"height"];
             [supporterLicenseSpecifier setProperty:@"checkmark.seal" forKey:@"image"];
@@ -1404,7 +1404,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_OK")
                                              style:UIAlertActionStyleDefault
                                            handler:nil]];
 
@@ -1427,25 +1427,20 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     if (available) {
         probeMessage =
             [NSString stringWithFormat:
-                @"Status\nPASS\n\n"
-                 "Protocol\n%@\n\n"
-                 "Hardware ID\n%@\n\n"
-                 "Raw hardware data is not displayed or persisted.",
+                DOLocalizedString(@"Supporter_Hardware_Probe_Pass_Format"),
                  probe[@"algorithm"] ?: @"rh-hw-v1",
                  probe[@"hardware_id"] ?: @""];
     }
     else {
         probeMessage =
-            @"Status\nFAIL\n\n"
-             "UniqueChipID is unavailable or invalid.\n\n"
-             "No IDFV or Device Code fallback was used.";
+            DOLocalizedString(@"Supporter_Hardware_Probe_Fail");
     }
 
     [self
         showSupporterLicenseResultWithTitle:
             (available
-                ? @"Hardware Identity Probe"
-                : @"Hardware Identity Unavailable")
+                ? DOLocalizedString(@"Supporter_Hardware_Identity_Probe")
+                : DOLocalizedString(@"Supporter_Hardware_Identity_Unavailable"))
                                  message:probeMessage];
 }
 
@@ -1462,16 +1457,12 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     if (available) {
         NSString *keyState =
             [probe[@"created"] boolValue]
-                ? @"Created now"
-                : @"Reused existing key";
+                ? DOLocalizedString(@"Supporter_Key_State_Created")
+                : DOLocalizedString(@"Supporter_Key_State_Reused");
 
         probeMessage =
             [NSString stringWithFormat:
-                @"Storage\n%@\n\n"
-                 "Fingerprint\n%@\n\n"
-                 "Key State\n%@\n\n"
-                 "Signature Self-Test\nPASS\n\n"
-                 "Private key is not displayed or exported.",
+                DOLocalizedString(@"Supporter_Device_Key_Probe_Pass_Format"),
                  probe[@"storage"] ?: @"Secure Enclave",
                  probe[@"fingerprint"] ?: @"",
                  keyState];
@@ -1479,10 +1470,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     else {
         probeMessage =
             [NSString stringWithFormat:
-                @"Secure Enclave Device Key unavailable.\n\n"
-                 "Stage\n%@\n\n"
-                 "Error Code\n%@\n\n"
-                 "No software Keychain fallback was used.",
+                DOLocalizedString(@"Supporter_Device_Key_Probe_Fail_Format"),
                  probe[@"stage"] ?: @"unknown",
                  probe[@"error_code"] ?: @(-1)];
     }
@@ -1490,22 +1478,22 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     [self
         showSupporterLicenseResultWithTitle:
             (available
-                ? @"Device Key Probe"
-                : @"Device Key Unavailable")
+                ? DOLocalizedString(@"Supporter_Device_Key_Probe")
+                : DOLocalizedString(@"Supporter_Device_Key_Unavailable"))
                                  message:probeMessage];
 }
 
 - (void)showSupporterAdvancedDiagnostics
 {
     UIAlertController *advanced =
-        [UIAlertController alertControllerWithTitle:@"Advanced Diagnostics"
+        [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Supporter_Advanced_Diagnostics")
                                             message:nil
                                      preferredStyle:UIAlertControllerStyleAlert];
 
     __weak typeof(self) weakSelf = self;
 
     [advanced addAction:
-        [UIAlertAction actionWithTitle:@"Run Device Diagnostics"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Run_Diagnostics")
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
 
@@ -1565,28 +1553,26 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         UIPasteboard.generalPasteboard.string = report;
 
         [weakSelf
-            showSupporterLicenseResultWithTitle:@"Diagnostics Ready"
-                                         message:
-                @"Diagnostic information was copied to the clipboard.\n\n"
-                 "Paste and send it to support."];
+            showSupporterLicenseResultWithTitle:DOLocalizedString(@"Supporter_Diagnostics_Copied")
+                                         message:DOLocalizedString(@"Supporter_Diagnostics_Copied_Message")];
     }]];
 
     [advanced addAction:
-        [UIAlertAction actionWithTitle:@"Hardware Identity Probe"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Hardware_Identity_Probe")
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
         [weakSelf showSupporterHardwareIdentityProbe];
     }]];
 
     [advanced addAction:
-        [UIAlertAction actionWithTitle:@"Device Key Probe"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Device_Key_Probe")
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
         [weakSelf showSupporterDeviceKeyProbe];
     }]];
 
     [advanced addAction:
-        [UIAlertAction actionWithTitle:@"Cancel"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel")
                                  style:UIAlertActionStyleCancel
                                handler:nil]];
 
@@ -1602,7 +1588,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Apply Now"
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Apply_Now")
                                              style:UIAlertActionStyleDefault
                                            handler:^(__kindof UIAlertAction * _Nonnull action) {
         [DOSceneDelegate relaunch];
@@ -1619,32 +1605,35 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     NSDictionary<NSString *, id> *info = DORHSupporterCurrentLicenseInfo();
     NSString *supporterID = [info[@"sid"] isKindOfClass:NSString.class] ? info[@"sid"] : nil;
     NSString *status = supporterID.length > 0
-        ? @"Verified"
-        : @"Not Activated";
+        ? DOLocalizedString(@"Supporter_Status_Verified")
+        : DOLocalizedString(@"Supporter_Status_Not_Activated");
     NSString *deviceCode = DORHSupporterDeviceCode();
-    NSString *message = [NSString stringWithFormat:@"%@\n\nDevice Code\n%@",
-                         status,
-                         deviceCode.length > 0 ? deviceCode : @"Unavailable"];
+    NSString *message =
+        [NSString stringWithFormat:DOLocalizedString(@"Supporter_Status_Message_Format"),
+                                   status,
+                                   deviceCode.length > 0
+                                       ? deviceCode
+                                       : DOLocalizedString(@"Supporter_Unavailable")];
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Supporter License"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Supporter_Title")
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
     __weak typeof(self) weakSelf = self;
 
     UIAlertAction *copyDeviceCodeAction =
-        [UIAlertAction actionWithTitle:@"1. Copy Device Code"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Copy_Device_Code")
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
         UIPasteboard.generalPasteboard.string = deviceCode;
-        [weakSelf showSupporterLicenseResultWithTitle:@"Device Code Copied"
-                                             message:@"Device Code has been copied."];
+        [weakSelf showSupporterLicenseResultWithTitle:DOLocalizedString(@"Supporter_Device_Code_Copied")
+                                             message:DOLocalizedString(@"Supporter_Device_Code_Copied_Message")];
     }];
     copyDeviceCodeAction.enabled = deviceCode.length > 0;
     [alert addAction:copyDeviceCodeAction];
 
     [alert addAction:
-        [UIAlertAction actionWithTitle:@"2. Bind This Device"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Bind_This_Device")
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
 
@@ -1664,15 +1653,12 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         if (!proofData) {
             NSString *proofError =
                 [NSString stringWithFormat:
-                    @"Unable to create RHP1 device proof.\n\n"
-                     "Stage\n%@\n\n"
-                     "Error Code\n%ld\n\n"
-                     "Copy a fresh RHC1 challenge from the issuer and try again.",
+                    DOLocalizedString(@"Supporter_Device_Proof_Failed_Format"),
                      failureStage ?: @"unknown",
                      (long)failureCode];
 
             [weakSelf
-                showSupporterLicenseResultWithTitle:@"Device Proof Failed"
+                showSupporterLicenseResultWithTitle:DOLocalizedString(@"Supporter_Device_Proof_Failed")
                                              message:proofError];
             return;
         }
@@ -1683,53 +1669,51 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
         if (proofText.length == 0) {
             [weakSelf
-                showSupporterLicenseResultWithTitle:@"Device Proof Failed"
-                                             message:@"RHP1 proof encoding failed."];
+                showSupporterLicenseResultWithTitle:DOLocalizedString(@"Supporter_Device_Proof_Failed")
+                                             message:DOLocalizedString(@"Supporter_Device_Proof_Encoding_Failed")];
             return;
         }
 
         UIPasteboard.generalPasteboard.string = proofText;
 
         [weakSelf
-            showSupporterLicenseResultWithTitle:@"Device Proof Ready"
-                                         message:
-                @"Device proof has been copied.\n\n"
-                 "Paste and send it to the issuer for verification."];
+            showSupporterLicenseResultWithTitle:DOLocalizedString(@"Supporter_Device_Proof_Ready")
+                                         message:DOLocalizedString(@"Supporter_Device_Proof_Ready_Message")];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"3. Paste License"
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Paste_License")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__kindof UIAlertAction * _Nonnull action) {
         NSString *licenseCode = UIPasteboard.generalPasteboard.string ?: @"";
         NSError *error = nil;
         if (DORHSupporterStoreLicenseCode(licenseCode, &error)) {
-            [weakSelf showSupporterLicenseChangeWithTitle:@"Supporter Activated"
-                                                  message:@"Your supporter license has been saved. Apply the Supporter interface now."];
+            [weakSelf showSupporterLicenseChangeWithTitle:DOLocalizedString(@"Supporter_Activated")
+                                                  message:DOLocalizedString(@"Supporter_Activated_Message")];
         }
         else {
-            [weakSelf showSupporterLicenseResultWithTitle:@"Invalid License"
-                                                  message:error.localizedDescription ?: @"Unable to verify supporter license"];
+            [weakSelf showSupporterLicenseResultWithTitle:DOLocalizedString(@"Supporter_Invalid_License")
+                                                  message:error.localizedDescription ?: DOLocalizedString(@"Supporter_Invalid_License_Fallback")];
         }
     }]];
 
     [alert addAction:
-        [UIAlertAction actionWithTitle:@"Advanced Diagnostics"
+        [UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Advanced_Diagnostics")
                                  style:UIAlertActionStyleDefault
                                handler:^(__kindof UIAlertAction * _Nonnull action) {
         [weakSelf showSupporterAdvancedDiagnostics];
     }]];
 
     if (supporterID.length > 0) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Remove License"
+        [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Supporter_Remove_License")
                                                   style:UIAlertActionStyleDestructive
                                                 handler:^(__kindof UIAlertAction * _Nonnull action) {
             DORHSupporterRemoveLicense();
-            [weakSelf showSupporterLicenseChangeWithTitle:@"Supporter Removed"
-                                                  message:@"Your supporter license has been removed. Restore the standard interface now."];
+            [weakSelf showSupporterLicenseChangeWithTitle:DOLocalizedString(@"Supporter_Removed")
+                                                  message:DOLocalizedString(@"Supporter_Removed_Message")];
         }]];
     }
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
