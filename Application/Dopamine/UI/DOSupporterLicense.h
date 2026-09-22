@@ -41,17 +41,17 @@ static inline NSError *DORHSupporterLicenseError(NSInteger code, NSString *descr
 }
 
 //
-// Phase 1 hardware-identity candidate.
+// Hardware Identity: rh-hw-v1.
 //
 // UniqueChipID is used only in memory. The raw value is not persisted,
 // displayed, logged, or used as a replacement for the legacy Device Code.
 //
-// Candidate protocol:
+// Frozen protocol:
 //   canonical ECID = 16-digit uppercase hexadecimal
 //   SHA256("DopamineRH-HW-v1|" + canonical ECID)
 //
-// The resulting hash is still a Phase 1 candidate until cross-build
-// stability testing is complete.
+// The protocol is independent of App version, Bundle ID, IDFV,
+// installation path, and iOS version.
 //
 static inline NSDictionary<NSString *, id> *
 DORHSupporterHardwareIdentityProbe(void)
@@ -62,7 +62,7 @@ DORHSupporterHardwareIdentityProbe(void)
     if (!rawAnswer) {
         return @{
             @"available" : @NO,
-            @"algorithm" : @"rh-hw-v1-candidate",
+            @"algorithm" : @"rh-hw-v1",
             @"hardware_id" : @"",
             @"hardware_hash" : @""
         };
@@ -75,7 +75,7 @@ DORHSupporterHardwareIdentityProbe(void)
 
         return @{
             @"available" : @NO,
-            @"algorithm" : @"rh-hw-v1-candidate",
+            @"algorithm" : @"rh-hw-v1",
             @"hardware_id" : @"",
             @"hardware_hash" : @""
         };
@@ -89,7 +89,7 @@ DORHSupporterHardwareIdentityProbe(void)
     if (ecid == 0) {
         return @{
             @"available" : @NO,
-            @"algorithm" : @"rh-hw-v1-candidate",
+            @"algorithm" : @"rh-hw-v1",
             @"hardware_id" : @"",
             @"hardware_hash" : @""
         };
@@ -142,7 +142,7 @@ DORHSupporterHardwareIdentityProbe(void)
 
     return @{
         @"available" : @YES,
-        @"algorithm" : @"rh-hw-v1-candidate",
+        @"algorithm" : @"rh-hw-v1",
         @"hardware_id" : hardwareID,
         @"hardware_hash" : fullHash
     };

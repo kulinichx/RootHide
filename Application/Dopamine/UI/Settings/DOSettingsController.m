@@ -1446,11 +1446,10 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                 [NSString stringWithFormat:
                     @"Algorithm\n%@\n\n"
                      "Hardware ID\n%@\n\n"
-                     "Full SHA-256\n%@\n\n"
-                     "The raw hardware value is not displayed or persisted.",
-                     probe[@"algorithm"] ?: @"rh-hw-v1-candidate",
-                     probe[@"hardware_id"] ?: @"",
-                     probe[@"hardware_hash"] ?: @""];
+                     "Hardware identity is available.\n"
+                     "Raw hardware data is not displayed or persisted.",
+                     probe[@"algorithm"] ?: @"rh-hw-v1",
+                     probe[@"hardware_id"] ?: @""];
         }
         else {
             probeMessage =
