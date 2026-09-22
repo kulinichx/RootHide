@@ -10,6 +10,8 @@
 @import Security;
 #import <CommonCrypto/CommonDigest.h>
 
+CFPropertyListRef MGCopyAnswer(CFStringRef property);
+
 static NSString * const DORHSupporterLicenseDefaultsKey = @"DORHSupporter.LicenseCode";
 static NSString * const DORHSupporterLicenseDidChangeNotification = @"DORHSupporter.LicenseDidChange";
 static NSString * const DORHSupporterLicenseErrorDomain = @"DORHSupporterLicense";
@@ -36,6 +38,51 @@ static inline NSError *DORHSupporterLicenseError(NSInteger code, NSString *descr
     return [NSError errorWithDomain:DORHSupporterLicenseErrorDomain
                                code:code
                            userInfo:@{NSLocalizedDescriptionKey : description ?: @"Invalid supporter license"}];
+}
+
+//
+// Phase 1 hardware-identity feasibility probe.
+//
+// This deliberately does NOT:
+// - modify the legacy Device Code
+// - persist the result
+// - derive rh-hw-v1
+// - provide an IDFV fallback
+//
+// It only checks whether this DopamineRH process can read
+// MobileGestalt UniqueChipID on the real device.
+//
+static inline NSDictionary<NSString *, id> *
+DORHSupporterUniqueChipIDProbe(void)
+{
+    CFPropertyListRef rawAnswer =
+        MGCopyAnswer(CFSTR("UniqueChipID"));
+
+    if (!rawAnswer) {
+        return @{
+            @"available" : @NO,
+            @"key" : @"UniqueChipID",
+            @"type" : @"nil",
+            @"value" : @""
+        };
+    }
+
+    id answer = (__bridge id)rawAnswer;
+
+    NSString *typeName =
+        NSStringFromClass([answer class]) ?: @"Unknown";
+
+    NSString *valueText =
+        [[answer description] copy] ?: @"";
+
+    CFRelease(rawAnswer);
+
+    return @{
+        @"available" : @YES,
+        @"key" : @"UniqueChipID",
+        @"type" : typeName,
+        @"value" : valueText
+    };
 }
 
 static inline NSString *DORHSupporterBase64URLToBase64(NSString *value)

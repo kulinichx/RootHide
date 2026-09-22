@@ -1427,6 +1427,47 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     [alert addAction:copyDeviceCodeAction];
 
     __weak typeof(self) weakSelf = self;
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"Hardware Probe"
+                                 style:UIAlertActionStyleDefault
+                               handler:^(__kindof UIAlertAction * _Nonnull action) {
+
+        NSDictionary<NSString *, id> *probe =
+            DORHSupporterUniqueChipIDProbe();
+
+        BOOL available =
+            [probe[@"available"] boolValue];
+
+        NSString *probeMessage = nil;
+
+        if (available) {
+            probeMessage =
+                [NSString stringWithFormat:
+                    @"MobileGestalt key\n%@\n\n"
+                     "Returned type\n%@\n\n"
+                     "Raw value\n%@\n\n"
+                     "This is a Phase 1 probe only.\n"
+                     "Nothing has been persisted or used for licensing.",
+                     probe[@"key"] ?: @"UniqueChipID",
+                     probe[@"type"] ?: @"Unknown",
+                     probe[@"value"] ?: @""];
+        }
+        else {
+            probeMessage =
+                @"MGCopyAnswer(\"UniqueChipID\") returned no value.\n\n"
+                 "Hardware Identity unavailable through this probe.\n\n"
+                 "No IDFV or Device Code fallback was used.";
+        }
+
+        [weakSelf
+            showSupporterLicenseResultWithTitle:
+                (available
+                    ? @"Hardware Probe"
+                    : @"Hardware Identity Unavailable")
+                                     message:probeMessage];
+    }]];
+
     [alert addAction:[UIAlertAction actionWithTitle:@"Paste License"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__kindof UIAlertAction * _Nonnull action) {
