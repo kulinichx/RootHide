@@ -170,8 +170,8 @@ static id DOCustomGlassNavigationCreateCAFilter(NSString *type)
 @end
 
 // Static-photo wallpaper blur stays image-based to avoid the cold-launch
-// CABackdrop attachment race. Video wallpaper uses its own persistent live
-// backdrop layer because the pixels must continue changing underneath it.
+// CABackdrop attachment race. Video wallpaper intentionally bypasses the
+// full-screen wallpaper-blur pass to avoid continuous per-frame composition.
 static UIImage *DOCustomGlassNavigationCreateBlurredImage(UIImage *image, CGFloat blurIntensity)
 {
     if (!image || !image.CGImage)
@@ -349,8 +349,8 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     [self setNavigationBarHidden:YES];
 
     // setupBackground already resolved the user-media path (or immutable
-    // theme fallback) before the first image view was created. Apply only the
-    // persisted Custom Glass wallpaper blur here.
+    // theme fallback) before the first image view was created. Static wallpaper
+    // uses the persisted blur value; video wallpaper intentionally bypasses it.
     if (DORHSupporterIsVerified()) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         CGFloat initialBlur = [defaults objectForKey:DOCustomGlassNavigationBackgroundBlurKey] ?
@@ -490,11 +490,12 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     NSUInteger generation = ++self.customGlassBackgroundBlurGeneration;
 
     if (self.customGlassUsingVideoWallpaper) {
-        self.customGlassVideoWallpaperBlurView.blurIntensity = clamped;
+        // Video wallpaper is already dynamic content. Keep the saved wallpaper
+        // blur preference for static images, but never run a full-screen live
+        // CABackdrop blur over continuously decoded video frames.
+        self.customGlassVideoWallpaperBlurView.blurIntensity = 0.0;
+        self.customGlassVideoWallpaperBlurView.hidden = YES;
         [UIView performWithoutAnimation:^{
-            // The still poster stays unprocessed underneath AVPlayer. The live
-            // CABackdrop blur covers both, preventing a double-blurred launch
-            // frame while matching the persisted wallpaper-blur control.
             self.backgroundImageView.image = sourceImage;
         }];
         return;
@@ -629,7 +630,8 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     if (self.customGlassUsingVideoWallpaper &&
         [self.customGlassWallpaperVideoURL.path isEqualToString:videoURL.path]) {
         self.customGlassVideoWallpaperView.hidden = NO;
-        self.customGlassVideoWallpaperBlurView.hidden = NO;
+        self.customGlassVideoWallpaperBlurView.blurIntensity = 0.0;
+        self.customGlassVideoWallpaperBlurView.hidden = YES;
         [self customGlassResumeVideoWallpaperPlayback];
         return;
     }
@@ -640,6 +642,8 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     AVPlayerItem *templateItem = [AVPlayerItem playerItemWithAsset:asset];
     AVQueuePlayer *player = [AVQueuePlayer queuePlayerWithItems:@[]];
     player.muted = YES;
+    // Decorative wallpaper playback must never keep the display awake.
+    player.preventsDisplaySleepDuringVideoPlayback = NO;
     player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
 
     AVPlayerLooper *looper = [AVPlayerLooper playerLooperWithPlayer:player
@@ -650,7 +654,8 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     self.customGlassUsingVideoWallpaper = YES;
     self.customGlassVideoWallpaperView.player = player;
     self.customGlassVideoWallpaperView.hidden = NO;
-    self.customGlassVideoWallpaperBlurView.hidden = NO;
+    self.customGlassVideoWallpaperBlurView.blurIntensity = 0.0;
+    self.customGlassVideoWallpaperBlurView.hidden = YES;
 
     [self customGlassResumeVideoWallpaperPlayback];
 }
