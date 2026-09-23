@@ -299,6 +299,8 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 @property (nonatomic, strong) AVPlayerLooper *customGlassWallpaperLooper;
 @property (nonatomic, strong) NSURL *customGlassWallpaperVideoURL;
 @property (nonatomic, assign) BOOL customGlassUsingVideoWallpaper;
+@property (nonatomic, assign) BOOL customGlassWallpaperViewVisible;
+@property (nonatomic, assign) BOOL customGlassWallpaperPlaybackRetired;
 @property (nonatomic, strong) UIView *customGlassWallpaperScrimView;
 @property (nonatomic, strong) CAGradientLayer *customGlassWallpaperScrimLayer;
 @property (nonatomic, strong) UIImage *customGlassWallpaperScrimSourceImage;
@@ -346,6 +348,16 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
                                              selector:@selector(customGlassHandleApplicationDidBecomeActive:)
                                                  name:UIApplicationDidBecomeActiveNotification
                                                object:nil];
+    // Scene activation can follow viewDidAppear or the application notification.
+    // Filter these notifications to our own window scene in the handlers below.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(customGlassHandleApplicationWillResignActive:)
+                                                 name:UISceneWillDeactivateNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(customGlassHandleApplicationDidBecomeActive:)
+                                                 name:UISceneDidActivateNotification
+                                               object:nil];
     [self setNavigationBarHidden:YES];
 
     // setupBackground already resolved the user-media path (or immutable
@@ -363,6 +375,20 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     [self pushViewController:(self.mainView = [[DOMainViewController alloc] init]) animated:NO];
     [self setDelegate:self];
     [self setOverrideUserInterfaceStyle:UIUserInterfaceStyleDark];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    self.customGlassWallpaperViewVisible = YES;
+    [self customGlassResumeVideoWallpaperPlayback];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    self.customGlassWallpaperViewVisible = NO;
+    [self.customGlassWallpaperPlayer pause];
 }
 
 - (void)setupBackground
@@ -467,8 +493,9 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     if (videoURL)
         [self customGlassActivateVideoWallpaperWithURL:videoURL];
 
+    __weak typeof(self) weakSelf = self;
     self.backAction = [[DOModalBackAction alloc] initWithAction:^{
-        [self popViewControllerAnimated:YES];
+        [weakSelf popViewControllerAnimated:YES];
     }];
     self.backAction.translatesAutoresizingMaskIntoConstraints = NO;
     self.backAction.hidden = YES;
@@ -598,8 +625,25 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 {
     if (!self.customGlassUsingVideoWallpaper || !self.customGlassWallpaperPlayer)
         return;
-    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive)
+
+    UIWindow *window = self.viewIfLoaded.window;
+    UIWindowScene *windowScene = window.windowScene;
+    id<UIWindowSceneDelegate> sceneDelegate = (id<UIWindowSceneDelegate>)windowScene.delegate;
+    BOOL ownsCurrentWindow = [sceneDelegate respondsToSelector:@selector(window)] &&
+        sceneDelegate.window == window;
+
+    // A retained old controller can still receive activation notifications.
+    // Being attached to some window is not enough: it must be the scene's
+    // current root, visible, and active before decorative video can resume.
+    if (self.customGlassWallpaperPlaybackRetired ||
+        !self.customGlassWallpaperViewVisible ||
+        !window || window.hidden || window.rootViewController != self ||
+        !ownsCurrentWindow ||
+        windowScene.activationState != UISceneActivationStateForegroundActive ||
+        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        [self.customGlassWallpaperPlayer pause];
         return;
+    }
 
     CGFloat rate = [self customGlassWallpaperPlaybackRate];
     [self.customGlassWallpaperPlayer playImmediatelyAtRate:rate];
@@ -622,6 +666,10 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 
 - (void)customGlassActivateVideoWallpaperWithURL:(NSURL *)videoURL
 {
+    // Late media-import callbacks must not recreate a retired window's player.
+    if (self.customGlassWallpaperPlaybackRetired)
+        return;
+
     if (!videoURL.isFileURL) {
         [self customGlassDeactivateVideoWallpaper];
         return;
@@ -663,6 +711,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
 - (void)customGlassDeactivateVideoWallpaper
 {
     [self.customGlassWallpaperPlayer pause];
+    [self.customGlassWallpaperLooper disableLooping];
     self.customGlassVideoWallpaperView.player = nil;
     self.customGlassWallpaperLooper = nil;
     [self.customGlassWallpaperPlayer removeAllItems];
@@ -674,15 +723,33 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     self.customGlassVideoWallpaperBlurView.blurIntensity = 0.0;
 }
 
+- (void)customGlassPrepareForWindowReplacement
+{
+    if (self.customGlassWallpaperPlaybackRetired)
+        return;
+
+    self.customGlassWallpaperPlaybackRetired = YES;
+    self.customGlassWallpaperViewVisible = NO;
+    ++self.customGlassBackgroundBlurGeneration;
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self customGlassDeactivateVideoWallpaper];
+}
+
 - (void)customGlassHandleApplicationWillResignActive:(NSNotification *)notification
 {
-    (void)notification;
+    if ([notification.name isEqualToString:UISceneWillDeactivateNotification] &&
+        notification.object != self.viewIfLoaded.window.windowScene)
+        return;
+
     [self.customGlassWallpaperPlayer pause];
 }
 
 - (void)customGlassHandleApplicationDidBecomeActive:(NSNotification *)notification
 {
-    (void)notification;
+    if ([notification.name isEqualToString:UISceneDidActivateNotification] &&
+        notification.object != self.viewIfLoaded.window.windowScene)
+        return;
+
     [self customGlassResumeVideoWallpaperPlayback];
 }
 

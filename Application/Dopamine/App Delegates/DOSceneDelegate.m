@@ -17,34 +17,55 @@
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)connectionOptions {
     UIWindow *window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     window.rootViewController = [[DONavigationController alloc] init];
-    [window makeKeyAndVisible];
     self.window = window;
+    [window makeKeyAndVisible];
 }
 
 + (void)relaunch
 {
     UIWindowScene *windowScene = (UIWindowScene *)[[[UIApplication sharedApplication] connectedScenes] anyObject];
     DOSceneDelegate *instance = (DOSceneDelegate *)windowScene.delegate;
+    UIWindow *oldWindow = instance.window;
+    if (!oldWindow)
+        return;
 
     [UIView animateWithDuration:0.3 animations:^{
-        instance.window.alpha = 0;
+        oldWindow.alpha = 0;
     } completion:^(BOOL finished) {
-        UIWindow *window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)instance.window.windowScene];
+        // Ignore a stale completion after another relaunch or scene disconnect.
+        if (instance.window != oldWindow)
+            return;
+
+        if ([oldWindow.rootViewController isKindOfClass:DONavigationController.class]) {
+            [(DONavigationController *)oldWindow.rootViewController customGlassPrepareForWindowReplacement];
+        }
+
+        UIWindow *window = [[UIWindow alloc] initWithWindowScene:windowScene];
         window.rootViewController = [[DONavigationController alloc] init];
-        [window makeKeyAndVisible];
+        window.alpha = 0;
         instance.window = window;
-        instance.window.alpha = 0;
+        [window makeKeyAndVisible];
+
+        oldWindow.hidden = YES;
+        oldWindow.rootViewController = nil;
+
         [UIView animateWithDuration:0.3 animations:^{
-            instance.window.alpha = 1;
+            window.alpha = 1;
         }];
     }];
 }
 
 - (void)sceneDidDisconnect:(UIScene *)scene {
-    // Called as the scene is being released by the system.
-    // This occurs shortly after the scene enters the background, or when its session is discarded.
-    // Release any resources associated with this scene that can be re-created the next time the scene connects.
-    // The scene may re-connect later, as its session was not necessarily discarded (see `application:didDiscardSceneSessions` instead).
+    UIWindow *window = self.window;
+    if (window.windowScene != scene)
+        return;
+
+    if ([window.rootViewController isKindOfClass:DONavigationController.class]) {
+        [(DONavigationController *)window.rootViewController customGlassPrepareForWindowReplacement];
+    }
+    window.hidden = YES;
+    window.rootViewController = nil;
+    self.window = nil;
 }
 
 
