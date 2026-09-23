@@ -490,11 +490,12 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     NSUInteger generation = ++self.customGlassBackgroundBlurGeneration;
 
     if (self.customGlassUsingVideoWallpaper) {
-        self.customGlassVideoWallpaperBlurView.blurIntensity = clamped;
+        self.customGlassVideoWallpaperBlurView.blurIntensity = 0.0;
+        self.customGlassVideoWallpaperBlurView.hidden = YES;
         [UIView performWithoutAnimation:^{
-            // The still poster stays unprocessed underneath AVPlayer. The live
-            // CABackdrop blur covers both, preventing a double-blurred launch
-            // frame while matching the persisted wallpaper-blur control.
+            // Video wallpaper bypasses the full-screen live backdrop blur to
+            // avoid continuously recompositing every decoded frame. Keep the
+            // still poster unprocessed underneath AVPlayer as well.
             self.backgroundImageView.image = sourceImage;
         }];
         return;
@@ -636,7 +637,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     if (self.customGlassUsingVideoWallpaper &&
         [self.customGlassWallpaperVideoURL.path isEqualToString:videoURL.path]) {
         self.customGlassVideoWallpaperView.hidden = NO;
-        self.customGlassVideoWallpaperBlurView.hidden = NO;
+        self.customGlassVideoWallpaperBlurView.hidden = YES;
         [self customGlassResumeVideoWallpaperPlayback];
         return;
     }
@@ -648,6 +649,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     AVQueuePlayer *player = [AVQueuePlayer queuePlayerWithItems:@[]];
     player.muted = YES;
     player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
+    player.preventsDisplaySleepDuringVideoPlayback = NO;
 
     AVPlayerLooper *looper = [AVPlayerLooper playerLooperWithPlayer:player
                                                        templateItem:templateItem];
@@ -657,7 +659,7 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     self.customGlassUsingVideoWallpaper = YES;
     self.customGlassVideoWallpaperView.player = player;
     self.customGlassVideoWallpaperView.hidden = NO;
-    self.customGlassVideoWallpaperBlurView.hidden = NO;
+    self.customGlassVideoWallpaperBlurView.hidden = YES;
 
     [self customGlassResumeVideoWallpaperPlayback];
 }
