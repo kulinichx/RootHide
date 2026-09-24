@@ -749,7 +749,7 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
     pid_t pidval = 0;
     if (!pidp) pidp = &pidval;
     int ret = posix_spawn(pidp, path, fap, attrp, argv, envp);
-    pid_t pid = *pidp;
+    pid_t pid = (ret == 0) ? *pidp : 0;
 
     JBLogDebug("spawn ret=%d pid=%d", ret, pid);
 

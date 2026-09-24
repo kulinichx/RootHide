@@ -297,7 +297,7 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 	pid_t pidval = 0;
 	if (!pidp) pidp = &pidval;
 	int ret = __posix_spawn_orig(pidp, path, desc, argv, envc);
-	pid_t pid = *pidp;
+	pid_t pid = (ret == 0) ? *pidp : 0;
 
 	envbuf_free(envc);
 
