@@ -6,6 +6,7 @@ DOPAMINE_VERSION ?= 3.0.7
 all: Dopamine.ipa
 
 Dopamine.ipa: build/Build/Products/Debug-iphoneos/Dopamine.app
+	python3 ../.github/scripts/check_package_managers.py --app build/Build/Products/Debug-iphoneos/Dopamine.app
 	@echo Ad-Hoc signing Dopamine
 	xattr -rc build/Build/Products/Debug-iphoneos/Dopamine.app
 	codesign --force --deep --sign - --timestamp=none build/Build/Products/Debug-iphoneos/Dopamine.app
@@ -28,7 +29,14 @@ endif
 	touch build/Build/Products/Debug-iphoneos/Dopamine.app/Dopamine.roothide
 	mkdir -p build/Build/Products/Debug-iphoneos/Dopamine.app/Base.lproj
 	cp -a Dopamine/Prebuilt/Base.lproj/LaunchScreen.storyboardc build/Build/Products/Debug-iphoneos/Dopamine.app/Base.lproj/
-	cp -a Dopamine/Resources/*.deb build/Build/Products/Debug-iphoneos/Dopamine.app/
+	@set -e; for package in Dopamine/Resources/*.deb; do \
+		[ -f "$$package" ] || continue; \
+		case "$${package##*/}" in zebra.deb) continue ;; esac; \
+		cp -a "$$package" build/Build/Products/Debug-iphoneos/Dopamine.app/; \
+	done
+	# Remove resources left by an incremental build of an older revision.
+	rm -f build/Build/Products/Debug-iphoneos/Dopamine.app/zebra.deb build/Build/Products/Debug-iphoneos/Dopamine.app/LICENSE_Zebra.md
+	python3 ../.github/scripts/check_package_managers.py --app build/Build/Products/Debug-iphoneos/Dopamine.app
 	for framework in ClearSword DarkSword Titan momentarius; do \
 		rm -rf build/Build/Products/Debug-iphoneos/Dopamine.app/Frameworks/$$framework.framework; \
 		cp -a Dopamine/Prebuilt/Frameworks/$$framework.framework build/Build/Products/Debug-iphoneos/Dopamine.app/Frameworks/; \

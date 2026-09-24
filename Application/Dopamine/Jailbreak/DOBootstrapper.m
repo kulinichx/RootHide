@@ -953,18 +953,6 @@ Components:\n\
 // Components: main\n\
 // "
 
-#define ZEBRA_SOURCES "\
-# Zebra Sources List\n\
-deb https://getzbra.com/repo/ ./\n\
-deb https://repo.chariz.com/ ./\n\
-deb https://yourepo.com/ ./\n\
-deb https://havoc.app/ ./\n\
-deb https://roothide.github.io/ ./\n\
-deb https://roothide.github.io/procursus iphoneos-arm64e/%d main\n\
-deb https://github.com/roothide/roothide.github.io/releases/download/%d/ ./\n\
-\n\
-"
-
 int getCFMajorVersion(void)
 {
     if(@available(iOS 16.0, *)) {
@@ -987,8 +975,6 @@ int getCFMajorVersion(void)
 
 -(int) buildPackageSources:(void (^)(NSError *))completion
 {
-    NSFileManager* fm = NSFileManager.defaultManager;
-    
     ASSERT([[NSString stringWithFormat:@(DEFAULT_SOURCES), getCFMajorVersion(), getCFMajorVersion()] writeToFile:jbrootPrefix(@"/etc/apt/sources.list.d/default.sources") atomically:YES encoding:NSUTF8StringEncoding error:nil]);
     
     // //Users in some regions seem to be unable to access github.io
@@ -996,14 +982,8 @@ int getCFMajorVersion(void)
     //     ASSERT([[NSString stringWithFormat:@(ALT_SOURCES), getCFMajorVersion()] writeToFile:jbrootPrefix(@"/etc/apt/sources.list.d/sileo.sources") atomically:YES encoding:NSUTF8StringEncoding error:nil]);
     // }
     
-    if(![fm fileExistsAtPath:jbrootPrefix(@"/var/mobile/Library/Application Support/xyz.willy.Zebra")])
-    {
-        NSDictionary* attr = @{NSFilePosixPermissions:@(0755), NSFileOwnerAccountID:@(501), NSFileGroupOwnerAccountID:@(501)};
-        ASSERT([fm createDirectoryAtPath:jbrootPrefix(@"/var/mobile/Library/Application Support/xyz.willy.Zebra") withIntermediateDirectories:YES attributes:attr error:nil]);
-    }
-    
-    ASSERT([[NSString stringWithFormat:@(ZEBRA_SOURCES), getCFMajorVersion(), getCFMajorVersion()] writeToFile:jbrootPrefix(@"/var/mobile/Library/Application Support/xyz.willy.Zebra/sources.list") atomically:YES encoding:NSUTF8StringEncoding error:nil]);
-    
+    // This distribution bundles Sileo only. Do not create or overwrite a
+    // manually installed Zebra's private sources or application data.
     return 0;
 }
 
@@ -1370,7 +1350,6 @@ int getCFMajorVersion(void)
         if (r != 0) return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install roothideManager: %d\n", r]}];
 
         //Remove the shits triggered by uicache before first jailbreak is fully activated.
-        [NSFileManager.defaultManager removeItemAtPath:@"/var/mobile/Library/SplashBoard/Snapshots/xyz.willy.Zebra" error:nil];
         [NSFileManager.defaultManager removeItemAtPath:@"/var/mobile/Library/SplashBoard/Snapshots/com.roothide.manager" error:nil];
         [NSFileManager.defaultManager removeItemAtPath:@"/var/mobile/Library/SplashBoard/Snapshots/org.coolstar.SileoStore" error:nil];
     }

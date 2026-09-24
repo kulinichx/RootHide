@@ -74,7 +74,7 @@
         tooltip.textColor = [UIColor colorWithWhite:1.0 alpha:0.5];
         tooltip.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
         tooltip.textAlignment = NSTextAlignmentCenter;
-        tooltip.numberOfLines = 3;
+        tooltip.numberOfLines = 0;
         tooltip.translatesAutoresizingMaskIntoConstraints = NO;
 
         [self addSubview:tooltip];
@@ -82,7 +82,7 @@
         [NSLayoutConstraint activateConstraints:@[
             [tooltip.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
             [tooltip.topAnchor constraintEqualToAnchor:switchStack.bottomAnchor constant:15],
-            [tooltip.widthAnchor constraintEqualToAnchor:switchStack.widthAnchor multiplier:1.25]
+            [tooltip.widthAnchor constraintEqualToAnchor:self.widthAnchor multiplier:0.85]
         ]];
         
         self.continueAction = [DOActionMenuButton buttonWithAction:[UIAction actionWithTitle:DOLocalizedString(@"Continue") image:[UIImage systemImageNamed:@"arrow.right" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] identifier:@"continue" handler:^(__kindof UIAction * _Nonnull action) {
