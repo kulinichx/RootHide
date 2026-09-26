@@ -63,6 +63,53 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     JBErrorCodeFailedDuplicateApps           = -14,
 };
 
+// System processes that must stay injectable in Whitelist Mode.
+// /usr/libexec/dasd: targeted by background-prewarm tweaks such as
+// cn.zqbb.stopautolaunchapps (Hello 3Q). Matching is strstr(path, key).
+static NSArray<NSString *> *rc9RequiredSystemWhitelistItems(void)
+{
+    return @[
+        @"/usr/libexec/dasd",
+    ];
+}
+
+static void rc9MigrateSystemWhitelist(NSString *systemInjectPath, NSDictionary *fileAttributes)
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *markerPath = [[systemInjectPath stringByDeletingLastPathComponent]
+        stringByAppendingPathComponent:@".rc9-system-whitelist-migration-v1"];
+
+    if ([fileManager fileExistsAtPath:markerPath]) return;
+    if (![fileManager fileExistsAtPath:systemInjectPath]) return;
+
+    NSDictionary *current = [NSDictionary dictionaryWithContentsOfFile:systemInjectPath];
+    if (![current isKindOfClass:[NSDictionary class]]) {
+        // Unreadable/corrupt plist: do not overwrite user data, retry next jailbreak.
+        return;
+    }
+
+    NSMutableDictionary *merged = [current mutableCopy];
+    BOOL changed = NO;
+    for (NSString *item in rc9RequiredSystemWhitelistItems()) {
+        if (merged[item] == nil) {
+            merged[item] = @YES;
+            changed = YES;
+        }
+    }
+
+    BOOL ok = YES;
+    if (changed) {
+        ok = [merged writeToFile:systemInjectPath atomically:YES];
+        if (ok) {
+            [fileManager setAttributes:fileAttributes ofItemAtPath:systemInjectPath error:nil];
+        }
+    }
+
+    if (ok) {
+        [fileManager createFileAtPath:markerPath contents:nil attributes:fileAttributes];
+    }
+}
+
 static void initializeRootHideWhitelistDefaults(void)
 {
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -108,6 +155,7 @@ static void initializeRootHideWhitelistDefaults(void)
             @"/mobileassetd",
             @"/MobileGestaltHelper",
             @"/useractivityd",
+            @"/usr/libexec/dasd",
         ];
 
         for (NSString *item in defaultItems) {
@@ -147,6 +195,12 @@ static void initializeRootHideWhitelistDefaults(void)
                                  error:nil];
         }
     }
+
+    // RC9 whitelist migration: existing installs keep their old
+    // cn.zqbb.inject.system.plist, so newly required system entries are merged
+    // once. Keys the user already has (including explicit NO) are never changed,
+    // and after the one-time marker exists a user-deleted key is not re-added.
+    rc9MigrateSystemWhitelist(systemInjectPath, fileAttributes);
 
     // Do not create cn.zqbb.inject.plist here.
     // Its existence switches the backend into Whitelist Mode.
