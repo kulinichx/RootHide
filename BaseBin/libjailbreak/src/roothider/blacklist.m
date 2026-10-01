@@ -60,11 +60,28 @@ static bool isBuiltinAppIdentifier(const char* identifier)
     return false;
 }
 
+static bool roothide_isTweakInjectionEnabled(void)
+{
+    // Gate lives in RootHideConfig.plist under key "tweakInjectionEnabled".
+    // Missing key = enabled (default YES), explicit NO = disable tweak injection.
+    NSString *configFilePath = JBROOT_PATH(@"/var/mobile/Library/RootHide/RootHideConfig.plist");
+    NSDictionary *roothideConfig = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
+    if (!roothideConfig) return true;
+    id val = roothideConfig[@"tweakInjectionEnabled"];
+    if (!val) return true;
+    if (![val isKindOfClass:[NSNumber class]]) return true;
+    return [val boolValue];
+}
+
 bool isBlacklistedApp(const char* identifier)
 {
     if(!identifier) return false;
 
     if(isBuiltinAppIdentifier(identifier)) return false;
+
+    // Global gate: when explicitly disabled, treat all user apps as blacklisted
+    // (no tweak injection), mirroring Relaxin 0.5.4 tweakInjectionEnabled.
+    if(!roothide_isTweakInjectionEnabled()) return true;
 
     NSString* configFilePath = JBROOT_PATH(@"/var/mobile/Library/RootHide/RootHideConfig.plist");
     NSDictionary* roothideConfig = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
