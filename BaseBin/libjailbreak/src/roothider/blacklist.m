@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <unistd.h>
 
 #include "../libjailbreak.h"
 #include "common.h"
@@ -62,6 +63,9 @@ static bool isBuiltinAppIdentifier(const char* identifier)
 
 static bool roothide_isTweakInjectionEnabled(void)
 {
+    // Unified gate: 1) Dopamine safe_mode (.safe_mode file) 2) Relaxin plist key.
+    // Either disabled => no tweak injection. Default YES if both absent.
+    if (access(JBROOT_PATH("/basebin/.safe_mode"), F_OK) == 0) return false;
     // Gate lives in RootHideConfig.plist under key "tweakInjectionEnabled".
     // Missing key = enabled (default YES), explicit NO = disable tweak injection.
     NSString *configFilePath = JBROOT_PATH(@"/var/mobile/Library/RootHide/RootHideConfig.plist");
