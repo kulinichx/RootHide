@@ -1,5 +1,6 @@
 #include <xpc/xpc.h>
 #include <stdbool.h>
+#include <unistd.h>
 
 #include "RCInjectPolicyCache.h"
 #include "../libjailbreak.h"
@@ -9,6 +10,9 @@ static RCInjectPolicyCache gatePolicyCache = RC_INJECT_POLICY_CACHE_INIT;
 
 static bool roothide_isTweakInjectionEnabled(void)
 {
+    // Unified gate: 1) Dopamine safe_mode (.safe_mode file) 2) Relaxin plist key.
+    // Either disabled => no tweak injection. Default YES if both absent.
+    if (access(JBROOT_PATH("/basebin/.safe_mode"), F_OK) == 0) return false;
     // Gate lives in RootHideConfig.plist under key "tweakInjectionEnabled".
     // Missing or invalid entry = enabled (default YES), matching Relaxin 0.5.4 behavior.
     static const char *gatePath = NULL;
