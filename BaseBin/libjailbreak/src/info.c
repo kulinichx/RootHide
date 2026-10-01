@@ -1,4 +1,5 @@
 #include "info.h"
+// iOS17 standalone (f9b15a2 base) - darwin 23.x (17.0-17.6) verified against XNU 23 + Relaxin 23A341/23A355
 #include "kernel.h"
 #include "machine_info.h"
 #include "primitives.h"
