@@ -35,6 +35,11 @@
 #import "spawn.h"
 #import "clock_alarm.h"
 #import <IOSurface/IOSurfaceRef.h>
+#import <sys/sysctl.h>
+#import <unistd.h>
+
+// roothide: kernel exploit fallback chain + hang self-healing
+static NSString *gCurrentKernelExploitIdentifier = nil;
 int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr, mach_port_t portarray[], uint32_t count);
 
 #define kCFPreferencesNoContainer CFSTR("kCFPreferencesNoContainer")
@@ -265,12 +270,53 @@ sets[idx] = NULL;
     return nil;
 }
 
+- (NSString *)_exploitAttemptMarkerPath:(NSString *)identifier
+{
+    static NSString *markerDir = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        markerDir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"roothide_exploit_attempts"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:markerDir withIntermediateDirectories:YES attributes:nil error:nil];
+    });
+    NSString *safeName = [[identifier componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\:"]] componentsJoinedByString:@"_"];
+    return [markerDir stringByAppendingPathComponent:safeName];
+}
+
+- (long long)_currentBootSeconds
+{
+    struct timeval boottime = {};
+    size_t len = sizeof(boottime);
+    if (sysctlbyname("kern.boottime", &boottime, &len, NULL, 0) != 0) return 0;
+    return (long long)boottime.tv_sec;
+}
+
+- (void)_writeExploitAttemptMarker:(NSString *)identifier
+{
+    NSString *content = [NSString stringWithFormat:@"%lld", [self _currentBootSeconds]];
+    [content writeToFile:[self _exploitAttemptMarkerPath:identifier] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+- (void)_removeExploitAttemptMarker:(NSString *)identifier
+{
+    [[NSFileManager defaultManager] removeItemAtPath:[self _exploitAttemptMarkerPath:identifier] error:nil];
+}
+
+- (BOOL)_exploitHasValidAttemptMarker:(NSString *)identifier
+{
+    NSString *content = [NSString stringWithContentsOfFile:[self _exploitAttemptMarkerPath:identifier] encoding:NSUTF8StringEncoding error:nil];
+    if (content.length == 0) return NO;
+    long long boot = [content longLongValue];
+    long long now = [self _currentBootSeconds];
+    return (boot != 0) && (now != 0) && (boot == now);
+}
+
 - (NSError *)doExploitation
 {
-    DOExploit *kernelExploit = [DOExploitManager sharedManager].selectedKernelExploit;
-    DOExploit *pacBypass = [DOExploitManager sharedManager].selectedPACBypass;
-    DOExploit *pplBypass = [DOExploitManager sharedManager].selectedPPLBypass;
-    if (!kernelExploit) {
+    DOExploitManager *exploitManager = [DOExploitManager sharedManager];
+    DOExploit *pacBypass = exploitManager.selectedPACBypass;
+    DOExploit *pplBypass = exploitManager.selectedPPLBypass;
+    DOExploit *selectedKernelExploit = exploitManager.selectedKernelExploit;
+    if (!selectedKernelExploit) {
         return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"Kernel exploit is required but we did not find any"}];
     }
     if (!pacBypass && [DOEnvironmentManager sharedManager].isPACBypassRequired) {
@@ -279,10 +325,92 @@ sets[idx] = NULL;
     if (!pplBypass && [DOEnvironmentManager sharedManager].isPPLBypassRequired) {
         return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"PPL bypass is required but we did not find any"}];
     }
-    
-    [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:DOLocalizedString(@"Exploiting Kernel (%@)"), kernelExploit.name] debug:NO];
-    if ([kernelExploit load] != 0) return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to load kernel exploit: %s", dlerror()]}];
-    if ([kernelExploit run] != 0) return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"Failed to exploit kernel"}];
+
+    // roothide: build fallback chain - selected exploit first, then remaining supported kernel exploits by priority (descending)
+    NSMutableArray *candidates = [NSMutableArray new];
+    [candidates addObject:selectedKernelExploit];
+    NSArray *remaining = [[exploitManager availableExploitsForType:EXPLOIT_TYPE_KERNEL] sortedArrayUsingDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"priority" ascending:NO]]];
+    for (DOExploit *exploit in remaining) {
+        if (exploit != selectedKernelExploit) [candidates addObject:exploit];
+    }
+
+    // roothide: demote exploits that failed or hung earlier this boot to the end of the chain
+    NSMutableArray *freshCandidates = [NSMutableArray new];
+    NSMutableArray *markedCandidates = [NSMutableArray new];
+    for (DOExploit *exploit in candidates) {
+        if ([self _exploitHasValidAttemptMarker:exploit.identifier]) {
+            [markedCandidates addObject:exploit];
+        }
+        else {
+            [freshCandidates addObject:exploit];
+        }
+    }
+    if (freshCandidates.count == 0) {
+        // everything already failed or hung this boot: reset markers and run a full cycle again
+        for (DOExploit *exploit in markedCandidates) {
+            [self _removeExploitAttemptMarker:exploit.identifier];
+        }
+        [freshCandidates addObjectsFromArray:markedCandidates];
+        [markedCandidates removeAllObjects];
+    }
+    [candidates removeAllObjects];
+    [candidates addObjectsFromArray:freshCandidates];
+    [candidates addObjectsFromArray:markedCandidates];
+
+    NSMutableArray *candidateNames = [NSMutableArray new];
+    for (DOExploit *exploit in candidates) {
+        [candidateNames addObject:exploit.displayName];
+    }
+    [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Kernel exploit chain: %@", [candidateNames componentsJoinedByString:@" -> "]] debug:NO];
+
+    DOExploit *kernelExploit = nil;
+    NSError *lastError = nil;
+    for (DOExploit *candidate in candidates) {
+        [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Trying kernel exploit: %@", candidate.displayName] debug:NO];
+        if ([candidate load] != 0) {
+            lastError = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to load kernel exploit (%@): %s", candidate.displayName, dlerror()]}];
+            [[DOUIManager sharedInstance] sendLog:lastError.localizedDescription debug:NO];
+            continue;
+        }
+
+        // roothide: mark the attempt before running; the marker survives hangs/crashes and demotes this exploit on the next try
+        [self _writeExploitAttemptMarker:candidate.identifier];
+        gCurrentKernelExploitIdentifier = candidate.identifier;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+            NSString *identifier = gCurrentKernelExploitIdentifier;
+            if (identifier && [identifier isEqualToString:candidate.identifier]) {
+                if ([[NSFileManager defaultManager] fileExistsAtPath:[self _exploitAttemptMarkerPath:identifier]]) {
+                    [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Kernel exploit %@ hung for 120s, exiting app. Next attempt will try a different exploit first.", candidate.displayName] debug:NO];
+                    _exit(1);
+                }
+            }
+        });
+
+        int runResult = [candidate run];
+
+        [self _removeExploitAttemptMarker:candidate.identifier];
+        gCurrentKernelExploitIdentifier = nil;
+
+        if (runResult == 0) {
+            kernelExploit = candidate;
+            break;
+        }
+
+        lastError = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Kernel exploit %@ failed", candidate.displayName]}];
+        [[DOUIManager sharedInstance] sendLog:lastError.localizedDescription debug:NO];
+    }
+
+    if (!kernelExploit) {
+        if (!lastError) {
+            lastError = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"All kernel exploits failed"}];
+        }
+        return lastError;
+    }
+
+    // roothide: success - clear all attempt markers
+    for (DOExploit *exploit in candidates) {
+        [self _removeExploitAttemptMarker:exploit.identifier];
+    }
     
     jbinfo_initialize_boot_constants();
     libjailbreak_translation_init();
