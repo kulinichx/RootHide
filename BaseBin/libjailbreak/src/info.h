@@ -726,6 +726,7 @@ __attribute__((__unused__)) static void _safe_xpc_dictionary_set_string(xpc_obje
 void jbinfo_initialize_dynamic_offsets(xpc_object_t xoffsetDict);
 void jbinfo_initialize_hardcoded_offsets(void);
 void jbinfo_initialize_boot_constants(void);
+bool jbinfo_selfcheck(char *errbuf, size_t errlen);
 xpc_object_t jbinfo_get_serialized(void);
 
 uint64_t get_vm_real_kernel_page_size(void);

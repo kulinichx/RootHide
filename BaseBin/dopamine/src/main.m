@@ -149,6 +149,15 @@ void find_offsets(void)
 		printf("offset finding failed with %s\n", error.description.UTF8String);
 		exit(-1);
 	}
+	// iOS17 selfcheck: verify proc offsets (a546da6+1) - abort before trustcache if mismatch
+	char errbuf[256] = {0};
+	if (!jbinfo_selfcheck(errbuf, sizeof(errbuf))) {
+		printf("Selfcheck FAIL: %s (aborting to avoid panic)\n", errbuf);
+		fflush(stdout);
+		exit(-1);
+	} else {
+		printf("Selfcheck PASS (proc 0x60 flag 0x25C)\n"); fflush(stdout);
+	}
 }
 
 void fix_non_default_apps(void)

@@ -31,6 +31,17 @@ static int xnu_version_compare(struct xnu_version v1, struct xnu_version v2)
 	return 0;
 }
 
+static int darwin_version_compare(const char *a, const char *b)
+{
+	int ma1=0, mi1=0, pa1=0, ma2=0, mi2=0, pa2=0;
+	sscanf(a, "%d.%d.%d", &ma1, &mi1, &pa1);
+	sscanf(b, "%d.%d.%d", &ma2, &mi2, &pa2);
+	if (ma1 != ma2) return ma1 > ma2 ? 1 : -1;
+	if (mi1 != mi2) return mi1 > mi2 ? 1 : -1;
+	if (pa1 != pa2) return pa1 > pa2 ? 1 : -1;
+	return 0;
+}
+
 void jbinfo_initialize_hardcoded_offsets(void)
 {
 	struct utsname name;
@@ -402,7 +413,7 @@ void jbinfo_initialize_hardcoded_offsets(void)
 								}
 
 								// iOS 17+
-								if (strcmp(darwinVersion, "23.0.0") >= 0) {
+								if (darwin_version_compare(darwinVersion, "23.0.0") >= 0) {
 									if (hasSPTM) {
 										gSystemInfo.kernelConstant.PVH_HIGH_FLAGS = 0x7400000000000000LL;
 
@@ -449,7 +460,7 @@ void jbinfo_initialize_hardcoded_offsets(void)
 									// ucred_rw
 									gSystemInfo.kernelStruct.ucred_rw.weak_ref = 0x0;
 
-									if (strcmp(darwinVersion, "23.1.0") >= 0) {	// iOS 17.1+
+									if (darwin_version_compare(darwinVersion, "23.1.0") >= 0) {	// iOS 17.1+
 										// inpcb
 										gSystemInfo.kernelStruct.inpcb.icmp6filt = 0x148;
 										gSystemInfo.kernelStruct.inpcb.chksum 	 = 0x150;
@@ -457,7 +468,7 @@ void jbinfo_initialize_hardcoded_offsets(void)
 										// socket
 										gSystemInfo.kernelStruct.socket.usecount = 0x24c;
 
-										if (strcmp(darwinVersion, "23.4.0") >= 0) { // iOS 17.4+
+										if (darwin_version_compare(darwinVersion, "23.4.0") >= 0) { // iOS 17.4+
 											gSystemInfo.kernelConstant.TFRO_HARDENED = 0x100;
 
 											// IOSurface
@@ -769,3 +780,48 @@ uint64_t get_l2_block_count(void)
 		return 0;
 	}
 }
+
+// --- iOS17 selfcheck: verify proc offsets at runtime to avoid panic (a546da6+1) ---
+#include <os/log.h>
+#include <unistd.h>
+
+bool jbinfo_selfcheck(char *errbuf, size_t errlen) {
+    // 1. pid 自检：proc @ 0x60 应等于 getpid()
+    uint64_t selfProc = proc_find(getpid());
+    if (!selfProc) { snprintf(errbuf, errlen, "proc_find(self) null"); return false; }
+    uint32_t pid_at_0x60 = *(uint32_t*)(selfProc + gSystemInfo.kernelStruct.proc.pid);
+    if (pid_at_0x60 != (uint32_t)getpid()) {
+        snprintf(errbuf, errlen, "pid offset 0x%lx mismatch: mem %u vs getpid %d", (long)gSystemInfo.kernelStruct.proc.pid, pid_at_0x60, getpid());
+        return false;
+    }
+    // 2. flag 自检：p_flag 在 0x25C 应含 P_LHASTASK (0x2) 且非 0
+    uint32_t flag = *(uint32_t*)(selfProc + gSystemInfo.kernelStruct.proc.flag);
+    if (flag == 0) {
+        snprintf(errbuf, errlen, "proc.flag 0x%lx is 0 (offset wrong)", (long)gSystemInfo.kernelStruct.proc.flag);
+        return false;
+    }
+    if ((flag & 0x2) == 0) {
+        os_log(OS_LOG_DEFAULT, "proc.flag 0x%x missing P_LHASTASK, maybe offset drift", flag);
+    }
+    // 3. struct_size 自检
+    if (gSystemInfo.kernelStruct.proc.struct_size != 0 && gSystemInfo.kernelStruct.proc.struct_size != 0x730) {
+        os_log(OS_LOG_DEFAULT, "proc struct_size 0x%lx != 0x730, flag may be at 0x454", (long)gSystemInfo.kernelStruct.proc.struct_size);
+    }
+    // 4. proc_ro csflags 小值校验
+    uint64_t proc_ro = *(uint64_t*)(selfProc + gSystemInfo.kernelStruct.proc.proc_ro);
+    if (proc_ro) {
+        uint32_t csflags = *(uint32_t*)(proc_ro + gSystemInfo.kernelStruct.proc_ro.csflags);
+        if (csflags > 0xFFFF) {
+            snprintf(errbuf, errlen, "proc_ro.csflags 0x%lx value 0x%x too large", (long)gSystemInfo.kernelStruct.proc_ro.csflags, csflags);
+            return false;
+        }
+    }
+    // 5. textvp 非空
+    uint64_t textvp = *(uint64_t*)(selfProc + gSystemInfo.kernelStruct.proc.textvp);
+    if (textvp == 0) {
+        snprintf(errbuf, errlen, "proc.textvp 0x%lx is null", (long)gSystemInfo.kernelStruct.proc.textvp);
+        return false;
+    }
+    return true;
+}
+
