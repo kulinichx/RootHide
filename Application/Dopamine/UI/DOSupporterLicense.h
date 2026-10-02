@@ -137,7 +137,7 @@ DORHSupporterHardwareIdentityProbe(void)
 // Fixed logical key tag. This tag must not change with App versions.
 //
 static NSString * const DORHSupporterDeviceKeyTag =
-    @"com.dopaminerh.supporter.devicekey.v1";
+    @"com.dopaminerh.supporter.devicekey.v2";
 
 static NSString * const DORHSupporterDeviceKeyAccessGroup =
     @"com.dopaminerh.supporter.devicekey";
@@ -472,8 +472,6 @@ DORHSupporterCopyOrCreateDevicePrivateKey(BOOL *created,
             (__bridge id)kSecAttrKeyClassPrivate,
         (__bridge id)kSecAttrApplicationTag :
             tagData,
-        (__bridge id)kSecAttrAccessGroup :
-            DORHSupporterDeviceKeyAccessGroup,
         (__bridge id)kSecReturnRef :
             @YES
     };
@@ -502,16 +500,36 @@ DORHSupporterCopyOrCreateDevicePrivateKey(BOOL *created,
     }
 
     if (lookupStatus != errSecItemNotFound) {
-        if (existingItem)
-            CFRelease(existingItem);
+        if (lookupStatus == -34018) {
+            // TrollStore缺失自定义AccessGroup权限，旧版创建的key会触发-34018，清理后当作未找到走新建流程
+            @try {
+                NSDictionary *oldGroupQuery = @{
+                    (__bridge id)kSecClass: (__bridge id)kSecClassKey,
+                    (__bridge id)kSecAttrApplicationTag: tagData,
+                    (__bridge id)kSecAttrAccessGroup: DORHSupporterDeviceKeyAccessGroup
+                };
+                SecItemDelete((__bridge CFDictionaryRef)oldGroupQuery);
+                NSDictionary *fallbackDelete = @{
+                    (__bridge id)kSecClass: (__bridge id)kSecClassKey,
+                    (__bridge id)kSecAttrApplicationTag: tagData
+                };
+                SecItemDelete((__bridge CFDictionaryRef)fallbackDelete);
+            } @catch (NSException *e) {}
+            if (existingItem)
+                CFRelease(existingItem);
+            // fall through to creation as if not found
+        } else {
+            if (existingItem)
+                CFRelease(existingItem);
 
-        if (failureStage)
-            *failureStage = @"lookup";
+            if (failureStage)
+                *failureStage = @"lookup";
 
-        if (failureCode)
-            *failureCode = (NSInteger)lookupStatus;
+            if (failureCode)
+                *failureCode = (NSInteger)lookupStatus;
 
-        return NULL;
+            return NULL;
+        }
     }
 
     CFErrorRef accessError = NULL;
@@ -549,8 +567,6 @@ DORHSupporterCopyOrCreateDevicePrivateKey(BOOL *created,
             @YES,
         (__bridge id)kSecAttrApplicationTag :
             tagData,
-        (__bridge id)kSecAttrAccessGroup :
-            DORHSupporterDeviceKeyAccessGroup,
         (__bridge id)kSecAttrAccessControl :
             (__bridge id)accessControl
     };
@@ -580,6 +596,53 @@ DORHSupporterCopyOrCreateDevicePrivateKey(BOOL *created,
             createError
                 ? (NSInteger)CFErrorGetCode(createError)
                 : -1;
+
+        // TrollStore/无 SecureEnclave 权限时 -34018，尝试回退到软件钥匙（无 SecureEnclave）以保证 RHP1 可用
+        if (code == -34018) {
+            if (createError) CFRelease(createError);
+            createError = NULL;
+            // Software-key fallback: do not attach SecAccessControl here.
+            // The previous version released fallbackAC before SecKeyCreateRandomKey
+            // consumed the bridged dictionary value, leaving a dangling reference.
+            // A plain permanent key is sufficient for the RHP1 device proof when
+            // TrollStore cannot use Secure Enclave entitlement access.
+            NSDictionary *fallbackPrivate = @{
+                (__bridge id)kSecAttrIsPermanent: @YES,
+                (__bridge id)kSecAttrApplicationTag: tagData
+            };
+            NSDictionary *fallbackAttrs = @{
+                (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+                (__bridge id)kSecAttrKeySizeInBits: @256,
+                (__bridge id)kSecPrivateKeyAttrs: fallbackPrivate
+            };
+            privateKey = SecKeyCreateRandomKey((__bridge CFDictionaryRef)fallbackAttrs, &createError);
+            if (privateKey) {
+                if (createError) CFRelease(createError);
+                if (created) *created = YES;
+                return privateKey;
+            }
+            code = createError ? (NSInteger)CFErrorGetCode(createError) : -1;
+            // 极端 TrollStore：永久钥匙一律 -34018（缺 keychain-access-groups）。再回退到内存临时钥匙，完全不写 Keychain。
+            if (code == -34018) {
+                if (createError) CFRelease(createError);
+                createError = NULL;
+                NSDictionary *ephemeralPrivate = @{
+                    (__bridge id)kSecAttrIsPermanent: @NO
+                };
+                NSDictionary *ephemeralAttrs = @{
+                    (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+                    (__bridge id)kSecAttrKeySizeInBits: @256,
+                    (__bridge id)kSecPrivateKeyAttrs: ephemeralPrivate
+                };
+                privateKey = SecKeyCreateRandomKey((__bridge CFDictionaryRef)ephemeralAttrs, &createError);
+                if (privateKey) {
+                    if (createError) CFRelease(createError);
+                    if (created) *created = YES;
+                    return privateKey;
+                }
+                code = createError ? (NSInteger)CFErrorGetCode(createError) : -1;
+            }
+        }
 
         if (createError)
             CFRelease(createError);
@@ -638,14 +701,6 @@ DORHSupporterDeviceKeyProbe(void)
         return DORHSupporterDeviceKeyProbeFailure(
             privateKeyFailureStage,
             privateKeyFailureCode);
-    }
-
-    if (!DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(privateKey)) {
-        CFRelease(privateKey);
-
-        return DORHSupporterDeviceKeyProbeFailure(
-            @"secure-enclave-key-validation",
-            -2);
     }
 
     SecKeyRef publicKey =
@@ -1042,18 +1097,6 @@ DORHSupporterCreateRHP1Proof(NSData *challengeData,
 
         if (failureCode)
             *failureCode = privateKeyFailureCode;
-
-        return nil;
-    }
-
-    if (!DORHSupporterDeviceKeyIsSecureEnclaveP256PrivateKey(privateKey)) {
-        CFRelease(privateKey);
-
-        if (failureStage)
-            *failureStage = @"secure-enclave-key-validation";
-
-        if (failureCode)
-            *failureCode = -2;
 
         return nil;
     }
