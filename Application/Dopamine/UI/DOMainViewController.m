@@ -2033,6 +2033,9 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
             // Show the exact object decoded back from the committed media file.
             weakSelf.customGlassAvatarPhotoView.image = persistedAvatar;
             weakSelf.customGlassAvatarPhotoView.hidden = NO;
+            // The docked lens makes the photo translucent; never let the
+            // placeholder glyph show through a real avatar.
+            weakSelf.customGlassAvatarFallbackIconView.hidden = YES;
         });
     }];
 }
@@ -2945,6 +2948,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     if (savedAvatar) {
         self.customGlassAvatarPhotoView.image = savedAvatar;
         self.customGlassAvatarPhotoView.hidden = NO;
+        self.customGlassAvatarFallbackIconView.hidden = YES;
     }
 
     avatarGlass.userInteractionEnabled = YES;
