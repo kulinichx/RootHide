@@ -1899,18 +1899,24 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 
     if (!verified) {
         // Post-jailbreak respring launch: cfprefsd can briefly serve stale data
-        // so the first verification pass fails. Re-check shortly after; if the
-        // license is valid again, reconcile UI and glass like a manual re-entry.
+        // so the first verification pass can fail. Re-check with backoff instead
+        // of a single attempt; a newer pass invalidates older pending retries.
         __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf)
-                return;
-            if (DORHSupporterIsVerified()) {
-                [strongSelf applyCustomGlassHomeAppearance];
-                [[NSNotificationCenter defaultCenter] postNotificationName:DORHSupporterLicenseDidChangeNotification object:nil];
-            }
-        });
+        static NSUInteger supporterRetryToken = 0;
+        NSUInteger retryToken = ++supporterRetryToken;
+        NSArray<NSNumber *> *retryDelays = @[@2.5, @8.0, @20.0];
+        for (NSNumber *retryDelay in retryDelays) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(retryDelay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf || retryToken != supporterRetryToken)
+                    return;
+                if (DORHSupporterIsVerified()) {
+                    supporterRetryToken++;
+                    [strongSelf applyCustomGlassHomeAppearance];
+                    [[NSNotificationCenter defaultCenter] postNotificationName:DORHSupporterLicenseDidChangeNotification object:nil];
+                }
+            });
+        }
     }
 }
 
