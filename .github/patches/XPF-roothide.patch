@@ -106,11 +106,6 @@ index 63b320b..73fce4a 100644
 +	return namePointer;
 +}
 +
-+static bool xpf_supported_fileset(void)
-+{
-+	return gXPF.kernelIsFileset;
-+}
-+
  void xpf_common_init(void)
  {
 +	xpf_item_register("kernelSymbol.launch_env_logging", xpf_find_amfi_oid, (void *)(uintptr_t)1);
@@ -122,10 +117,22 @@ index 63b320b..73fce4a 100644
  	xpf_item_register("kernelConstant.kernel_el", xpf_find_kernel_el, NULL);
  	if (!gXPF.sptm) {
 diff --git a/src/xpf.c b/src/xpf.c
-index ea860b0..ae20900 100644
+index ea860b0..2b6acee 100644
 --- a/src/xpf.c
 +++ b/src/xpf.c
-@@ -399,7 +399,29 @@ XPFSet gIOSurfaceSet = {
+@@ -20,6 +20,11 @@ bool xpf_supported_always(void)
+ 	return true;
+ }
+ 
++bool xpf_supported_fileset(void)
++{
++	return gXPF.kernelIsFileset;
++}
++
+ bool xpf_supported_sptm(void)
+ {
+ 	return (bool)gXPF.sptm;
+@@ -399,7 +404,29 @@ XPFSet gIOSurfaceSet = {
  	}
  };
  
@@ -155,7 +162,7 @@ index ea860b0..ae20900 100644
  	&gBaseSet,
  	&gTranslationSet,
  	&gTranslationSPTMSet,
-@@ -545,6 +567,7 @@ int xpf_start_with_kernel_path(const char *kernelPath, const char *optSptmPath,
+@@ -545,6 +572,7 @@ int xpf_start_with_kernel_path(const char *kernelPath, const char *optSptmPath,
  	if (gXPF.kernelIsFileset) {
  		gXPF.kernelAMFITextSection = xpf_pfsec_init("com.apple.driver.AppleMobileFileIntegrity", "__TEXT_EXEC", "__text");
  		gXPF.kernelAMFIStringSection = xpf_pfsec_init("com.apple.driver.AppleMobileFileIntegrity", "__TEXT", "__cstring");
@@ -163,7 +170,7 @@ index ea860b0..ae20900 100644
  		gXPF.kernelSandboxTextSection = xpf_pfsec_init("com.apple.security.sandbox", "__TEXT_EXEC", "__text");
  		gXPF.kernelSandboxAuthStubSection = xpf_pfsec_init("com.apple.security.sandbox", "__TEXT_EXEC", "__auth_stubs");
  		gXPF.kernelSandboxStringSection = xpf_pfsec_init("com.apple.security.sandbox", "__TEXT", "__cstring");
-@@ -554,6 +577,7 @@ int xpf_start_with_kernel_path(const char *kernelPath, const char *optSptmPath,
+@@ -554,6 +582,7 @@ int xpf_start_with_kernel_path(const char *kernelPath, const char *optSptmPath,
  		gXPF.kernelInfoPlistSection = xpf_pfsec_init("com.apple.security.AppleImage4", "__TEXT", "__info_plist");
  	}
  	else {
@@ -171,7 +178,7 @@ index ea860b0..ae20900 100644
  		gXPF.kernelPrelinkTextSection = xpf_pfsec_init(NULL, "__PRELINK_TEXT", "__text");
  		gXPF.kernelPLKTextSection = xpf_pfsec_init(NULL, "__PLK_TEXT_EXEC", "__text");
  		gXPF.kernelKmodInfoSection = xpf_pfsec_init(NULL, "__PRELINK_INFO", "__kmod_info");
-@@ -880,4 +904,4 @@ void xpf_stop(void)
+@@ -880,4 +909,4 @@ void xpf_stop(void)
  	}
  	
  	gXPF = (struct s_XPF){ 0 };
