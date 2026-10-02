@@ -1501,7 +1501,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     self.backgroundBlurSlider.value = [defaults floatForKey:DOCustomGlassBackgroundBlurKey];
     self.backgroundBlurValueLabel = [self appearanceValueLabel];
     [controlsStack addArrangedSubview:[self appearanceControlRowWithTitle:@"壁纸模糊"
-                                                                 subtitle:@"整张背景的模糊程度"
+                                                                 subtitle:@"仅静态壁纸生效"
                                                                    slider:self.backgroundBlurSlider
                                                                valueLabel:self.backgroundBlurValueLabel]];
 
@@ -1617,8 +1617,12 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         self.glassAppearanceControl.selectedSegmentIndex =
             [appearance isEqualToString:DOCustomGlassAppearanceDark] ? 1 : 0;
     }
-    if (self.backgroundBlurSlider)
+    if (self.backgroundBlurSlider) {
         self.backgroundBlurSlider.value = [defaults floatForKey:DOCustomGlassBackgroundBlurKey];
+        BOOL usingVideoWallpaper = [self.navigationController customGlassIsUsingVideoWallpaper];
+        self.backgroundBlurSlider.enabled = !usingVideoWallpaper;
+        self.backgroundBlurSlider.alpha = usingVideoWallpaper ? 0.40 : 1.0;
+    }
     if (self.glassBlurSlider)
         self.glassBlurSlider.value = [defaults floatForKey:DOCustomGlassBlurIntensityKey];
     if (self.glassTransparencySlider)
