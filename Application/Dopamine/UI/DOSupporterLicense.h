@@ -32,6 +32,13 @@ static NSString * const DORHSupporterPersistentDeviceCodeKey =
     @"DeviceCode";
 static NSString * const DORHSupporterPersistentLicenseCodeKey =
     @"LicenseCode";
+// Tombstone: set by "Remove License", cleared only by storing a license.
+// It outranks NSUserDefaults, because RootHide redirects the preferences of
+// jailbroken processes into jbroot: a removal done while jailbroken cannot
+// reach the real /var/mobile/Library/Preferences copy, which would otherwise
+// verify after reboot and be self-healed back into the external file.
+static NSString * const DORHSupporterPersistentLicenseRemovedKey =
+    @"LicenseRemoved";
 
 static inline NSError *DORHSupporterLicenseError(NSInteger code, NSString *description)
 {
@@ -1428,6 +1435,21 @@ static inline BOOL DORHSupporterSetPersistentString(NSString *key, NSString *val
     return DORHSupporterWritePersistentState(state);
 }
 
+static inline BOOL DORHSupporterLicenseTombstoned(void)
+{
+    id value = DORHSupporterReadPersistentState()[DORHSupporterPersistentLicenseRemovedKey];
+    return [value respondsToSelector:@selector(boolValue)] && [value boolValue];
+}
+
+static inline void DORHSupporterPurgeDefaultsLicense(void)
+{
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if ([defaults objectForKey:DORHSupporterLicenseDefaultsKey] == nil)
+        return;
+    [defaults removeObjectForKey:DORHSupporterLicenseDefaultsKey];
+    [defaults synchronize];
+}
+
 static inline NSString *DORHSupporterEmbeddedDeviceCode(NSString *licenseCode)
 {
     NSString *trimmed =
@@ -1510,9 +1532,12 @@ static inline NSString *DORHSupporterDeviceCode(void)
             DORHSupporterPersistentDeviceCodeKey,
             legacyDevice);
 
-        DORHSupporterSetPersistentString(
-            DORHSupporterPersistentLicenseCodeKey,
-            legacyLicense);
+        // Never resurrect a removed license through device-code migration.
+        if (!DORHSupporterLicenseTombstoned()) {
+            DORHSupporterSetPersistentString(
+                DORHSupporterPersistentLicenseCodeKey,
+                legacyLicense);
+        }
 
         return cachedDeviceCode;
     }
@@ -1667,6 +1692,12 @@ static inline NSDictionary<NSString *, id> *DORHSupporterVerifyLicenseCode(NSStr
 
 static inline NSDictionary<NSString *, id> *DORHSupporterCurrentLicenseInfo(void)
 {
+    // A removal (made in either jailbreak state) wins over any stale copy.
+    if (DORHSupporterLicenseTombstoned()) {
+        DORHSupporterPurgeDefaultsLicense();
+        return nil;
+    }
+
     NSString *persistentLicense =
         DORHSupporterPersistentString(
             DORHSupporterPersistentLicenseCodeKey);
@@ -1733,10 +1764,10 @@ static inline BOOL DORHSupporterStoreLicenseCode(NSString *licenseCode, NSError 
         [licenseCode stringByTrimmingCharactersInSet:
             NSCharacterSet.whitespaceAndNewlineCharacterSet];
 
-    BOOL persisted =
-        DORHSupporterSetPersistentString(
-            DORHSupporterPersistentLicenseCodeKey,
-            trimmed);
+    NSMutableDictionary<NSString *, id> *state = DORHSupporterReadPersistentState();
+    state[DORHSupporterPersistentLicenseCodeKey] = trimmed;
+    [state removeObjectForKey:DORHSupporterPersistentLicenseRemovedKey];
+    BOOL persisted = DORHSupporterWritePersistentState(state);
 
     if (!persisted) {
         NSLog(@"[Supporter] persistent license write failed; NSUserDefaults fallback in use");
@@ -1760,9 +1791,11 @@ static inline void DORHSupporterRemoveLicense(void)
 {
     // Deliberately keep the stable DeviceCode: removing entitlement must not
     // turn the same physical device into a new licensing identity.
-    BOOL ok = DORHSupporterSetPersistentString(
-        DORHSupporterPersistentLicenseCodeKey,
-        nil);
+    // Write the tombstone in the same atomic write that drops the license.
+    NSMutableDictionary<NSString *, id> *removedState = DORHSupporterReadPersistentState();
+    [removedState removeObjectForKey:DORHSupporterPersistentLicenseCodeKey];
+    removedState[DORHSupporterPersistentLicenseRemovedKey] = @YES;
+    BOOL ok = DORHSupporterWritePersistentState(removedState);
 
     // Robust: if the write failed or the license is still readable, force
     // delete the file so a reboot cannot bypass the gate.

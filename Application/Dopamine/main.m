@@ -7,6 +7,7 @@
 
 #import <UIKit/UIKit.h>
 #import "DOAppDelegate.h"
+#import "UI/DOCustomGlassThemeSync.h"
 
 #import "DOEnvironmentManager.h"
 #import <libjailbreak/info.h>
@@ -47,6 +48,9 @@ int main(int argc, char * argv[]) {
     
     NSString * appDelegateClassName;
     @autoreleasepool {
+        // Same Custom Glass settings before and after jailbreak (RootHide
+        // redirects jailbroken-process preferences into jbroot).
+        DOCustomGlassThemeSyncBootstrap();
         // Setup code that might create autoreleased objects goes here.
         appDelegateClassName = NSStringFromClass([DOAppDelegate class]);
     }
