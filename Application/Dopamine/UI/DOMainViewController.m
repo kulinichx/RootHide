@@ -1892,6 +1892,22 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         self.jailbreakBtn.enabled = !isJailbroken && isSupported;
         [self applySupporterLockAppearanceToJailbreakButton];
     }
+
+    if (!verified) {
+        // Post-jailbreak respring launch: cfprefsd can briefly serve stale data
+        // so the first verification pass fails. Re-check shortly after; if the
+        // license is valid again, reconcile UI and glass like a manual re-entry.
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf)
+                return;
+            if (DORHSupporterIsVerified()) {
+                [strongSelf applyCustomGlassHomeAppearance];
+                [[NSNotificationCenter defaultCenter] postNotificationName:DORHSupporterLicenseDidChangeNotification object:nil];
+            }
+        });
+    }
 }
 
 - (void)supporterLicenseDidChange:(NSNotification *)notification
@@ -1958,6 +1974,13 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     dismissTap.cancelsTouchesInView = NO;
     [self.view addGestureRecognizer:dismissTap];
     self.supporterOnlyDismissTapGesture = dismissTap;
+
+    // Auto-dismiss after 4 seconds; manual tap-to-dismiss remains available.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self.supporterOnlyHintView == hint) {
+            [self dismissSupporterOnlyHint];
+        }
+    });
 }
 
 - (void)presentCustomGlassAvatarPicker

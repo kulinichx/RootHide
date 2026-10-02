@@ -346,6 +346,10 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
                                              selector:@selector(customGlassHandleApplicationDidBecomeActive:)
                                                  name:UIApplicationDidBecomeActiveNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(supporterLicenseDidChange:)
+                                                 name:DORHSupporterLicenseDidChangeNotification
+                                               object:nil];
     [self setNavigationBarHidden:YES];
 
     // setupBackground already resolved the user-media path (or immutable
@@ -522,6 +526,21 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
             }];
         });
     });
+}
+
+- (void)supporterLicenseDidChange:(NSNotification *)notification
+{
+    (void)notification;
+    if (![NSThread isMainThread]) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf supporterLicenseDidChange:notification];
+        });
+        return;
+    }
+    // License became valid (e.g. recovered after the post-jailbreak respring):
+    // re-resolve the shared background so Custom Glass returns without restart.
+    [self customGlassRefreshSharedBackground];
 }
 
 - (void)customGlassRefreshSharedBackground

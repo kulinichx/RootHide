@@ -40,6 +40,7 @@
 
 // roothide: kernel exploit fallback chain + hang self-healing
 static NSString *gCurrentKernelExploitIdentifier = nil;
+static NSString *gCurrentWatchdogStage = nil;
 int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr, mach_port_t portarray[], uint32_t count);
 
 #define kCFPreferencesNoContainer CFSTR("kCFPreferencesNoContainer")
@@ -310,6 +311,24 @@ sets[idx] = NULL;
     return (boot != 0) && (now != 0) && (boot == now);
 }
 
+- (void)_armWatchdogForStage:(NSString *)stage timeout:(NSTimeInterval)timeout
+{
+    gCurrentWatchdogStage = stage;
+    NSString *armedStage = stage;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+        NSString *currentStage = gCurrentWatchdogStage;
+        if (currentStage && [currentStage isEqualToString:armedStage]) {
+            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"roothide watchdog: stage %@ exceeded %.0fs, exiting app.", armedStage, timeout] debug:NO];
+            _exit(1);
+        }
+    });
+}
+
+- (void)_disarmWatchdog
+{
+    gCurrentWatchdogStage = nil;
+}
+
 - (NSError *)doExploitation
 {
     DOExploitManager *exploitManager = [DOExploitManager sharedManager];
@@ -376,17 +395,10 @@ sets[idx] = NULL;
         // roothide: mark the attempt before running; the marker survives hangs/crashes and demotes this exploit on the next try
         [self _writeExploitAttemptMarker:candidate.identifier];
         gCurrentKernelExploitIdentifier = candidate.identifier;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
-            NSString *identifier = gCurrentKernelExploitIdentifier;
-            if (identifier && [identifier isEqualToString:candidate.identifier]) {
-                if ([[NSFileManager defaultManager] fileExistsAtPath:[self _exploitAttemptMarkerPath:identifier]]) {
-                    [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Kernel exploit %@ hung for 120s, exiting app. Next attempt will try a different exploit first.", candidate.displayName] debug:NO];
-                    _exit(1);
-                }
-            }
-        });
+        [self _armWatchdogForStage:[NSString stringWithFormat:@"kernel exploit (%@)", candidate.displayName] timeout:120];
 
         int runResult = [candidate run];
+        [self _disarmWatchdog];
 
         [self _removeExploitAttemptMarker:candidate.identifier];
         gCurrentKernelExploitIdentifier = nil;
@@ -418,16 +430,20 @@ sets[idx] = NULL;
     
     if (pacBypass) {
         [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:DOLocalizedString(@"Bypassing PAC (%@)"), pacBypass.name] debug:NO];
-        if ([pacBypass load] != 0) {[kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to load PAC bypass: %s", dlerror()]}];};
-        if ([pacBypass run] != 0) {[kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"Failed to bypass PAC"}];}
+        [self _armWatchdogForStage:@"PAC bypass" timeout:120];
+                if ([pacBypass load] != 0) {[self _disarmWatchdog]; [kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to load PAC bypass: %s", dlerror()]}];};
+                if ([pacBypass run] != 0) {[self _disarmWatchdog]; [kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"Failed to bypass PAC"}];}
+        [self _disarmWatchdog];
         // At this point we presume the PAC bypass has given us stable kcall primitives
         gSystemInfo.jailbreakInfo.usesPACBypass = true;
     }
 
     if ([[DOEnvironmentManager sharedManager] isPPLBypassRequired]) {
         [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:DOLocalizedString(@"Bypassing PPL (%@)"), pplBypass.name] debug:NO];
-        if ([pplBypass load] != 0) {[pacBypass cleanup]; [kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to load PPL bypass: %s", dlerror()]}];};
-        if ([pplBypass run] != 0) {[pacBypass cleanup]; [kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"Failed to bypass PPL"}];}
+        [self _armWatchdogForStage:@"PPL bypass" timeout:120];
+                if ([pplBypass load] != 0) {[self _disarmWatchdog]; [pacBypass cleanup]; [kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to load PPL bypass: %s", dlerror()]}];};
+                if ([pplBypass run] != 0) {[self _disarmWatchdog]; [pacBypass cleanup]; [kernelExploit cleanup]; return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey:@"Failed to bypass PPL"}];}
+        [self _disarmWatchdog];
         // At this point we presume the PPL bypass gave us unrestricted phys write primitives
     }
     if (![DOEnvironmentManager sharedManager].isArm64e) {
@@ -833,7 +849,9 @@ void *boomerang_server(struct boomerang_info *info)
     
     
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Building Phys R/W Primitive") debug:NO];
+    [self _armWatchdogForStage:@"building phys r/w primitive" timeout:240];
     *errOut = [self buildPhysRWPrimitive];
+    [self _disarmWatchdog];
     if (*errOut) {
         [self cleanUpExploits];
         return;
@@ -846,7 +864,9 @@ void *boomerang_server(struct boomerang_info *info)
     if (removeJailbreakEnabled) [[DOPreferenceManager sharedManager] setPreferenceValue:@NO forKey:@"removeJailbreakEnabled"];
 
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Elevating Privileges") debug:NO];
+    [self _armWatchdogForStage:@"elevating privileges" timeout:120];
     *errOut = [self elevatePrivileges];
+    [self _disarmWatchdog];
     if (*errOut) return;
     *errOut = [self showNonDefaultSystemApps];
     if (*errOut) {
