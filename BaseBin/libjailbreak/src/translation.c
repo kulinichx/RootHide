@@ -17,15 +17,21 @@ uint64_t phystokv(uint64_t pa)
 		uint64_t va;
 		uint64_t len;
 	} ptov_table[PTOV_TABLE_SIZE];
-	kreadbuf(ksymbol(ptov_table), &ptov_table[0], sizeof(ptov_table));
+	if (ksymbol(ptov_table)) {
+		kreadbuf(ksymbol(ptov_table), &ptov_table[0], sizeof(ptov_table));
 
-	for (uint64_t i = 0; (i < PTOV_TABLE_SIZE) && (ptov_table[i].len != 0); i++) {
-		if ((pa >= ptov_table[i].pa) && (pa < (ptov_table[i].pa + ptov_table[i].len))) {
-			return pa - ptov_table[i].pa + ptov_table[i].va;
+		for (uint64_t i = 0; (i < PTOV_TABLE_SIZE) && (ptov_table[i].len != 0); i++) {
+			if ((pa >= ptov_table[i].pa) && (pa < (ptov_table[i].pa + ptov_table[i].len))) {
+				return pa - ptov_table[i].pa + ptov_table[i].va;
+			}
 		}
 	}
 
-	return pa - kconstant(physBase) + kconstant(virtBase);
+	if (kconstant(physBase) && kconstant(virtBase) && !ksymbol(SPTMArgs)) {
+		return pa - kconstant(physBase) + kconstant(virtBase);
+	}
+
+	return 0;
 }
 
 uint64_t vtophys_lvl(uint64_t tte_ttep, uint64_t va, uint64_t *leaf_level, uint64_t *leaf_tte_ttep)
