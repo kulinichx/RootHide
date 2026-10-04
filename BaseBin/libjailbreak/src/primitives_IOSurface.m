@@ -190,9 +190,14 @@ int IOSurface_map_withCacheMode(uint64_t pa, uint64_t size, void **uaddr, uint32
 	*uaddr = IOSurfaceGetBaseAddress(mappedSurfaceRef);
 
 /*********************** roothide specific **************************************/
-    vm_prot_t cur_prot, max_prot;
-    kern_return_t kr = vm_remap(mach_task_self(), (vm_address_t *)uaddr, size, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)*uaddr, FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
-    assert (kr == KERN_SUCCESS);
+    if (@available(iOS 17.0, *)) {
+        // Use the mapping returned by IOSurface directly on iOS 17, matching
+        // upstream Dopamine. Keep the historical RootHide alias for older iOS.
+    } else {
+        vm_prot_t cur_prot, max_prot;
+        kern_return_t kr = vm_remap(mach_task_self(), (vm_address_t *)uaddr, size, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)*uaddr, FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
+        if (kr != KERN_SUCCESS) return -1;
+    }
 /*********************************************************************************/
 
 	return 0;
