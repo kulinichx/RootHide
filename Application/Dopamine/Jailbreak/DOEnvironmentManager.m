@@ -140,7 +140,7 @@ extern char **environ;
 
 - (NSString *)versionSupportString
 {
-    return @"iOS 16.0 – 17.3.1";
+    return @"iOS 17.0 – 17.3.1";
 }
 
 - (BOOL)isInstalledThroughTrollStore
@@ -1600,7 +1600,7 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSString *displayName, 
 - (BOOL)isSupported
 {
     NSString *systemVersion = [self systemVersion];
-    if ([systemVersion compare:@"16.0" options:NSNumericSearch] == NSOrderedAscending ||
+    if ([systemVersion compare:@"17.0" options:NSNumericSearch] == NSOrderedAscending ||
         [systemVersion compare:@"17.3.1" options:NSNumericSearch] == NSOrderedDescending) {
         return false;
     }
