@@ -1,6 +1,7 @@
 #include "info.h"
-// iOS17 standalone (f9b15a2 base) - darwin 23.x (17.0-17.6) based on upstream f3908ed, pending device verification
-// NOTE: proc/task/proc_ro for 23.x inherits iOS 16 baseline (flag 0x25C / pid 0x60 / proc_ro+0x18); not yet device-probed for 17.x
+// iOS17 standalone (f9b15a2 base) - target Darwin 23.0 through 23.3 (iOS 17.0-17.3.1), based on upstream f3908ed; pending device verification
+// NOTE: Darwin 23 inherits the 22.4+ assignments (flag 0x454, textvp 0x548,
+// pid 0x60, proc_ro 0x18). These are code-path values, NOT device-verified offsets.
 #include "kernel.h"
 #include "machine_info.h"
 #include "primitives.h"
@@ -9,6 +10,10 @@
 #include <xpc/xpc.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <os/log.h>
 
 struct system_info gSystemInfo = { 0 };
 
@@ -781,46 +786,87 @@ uint64_t get_l2_block_count(void)
 	}
 }
 
-// --- iOS17 selfcheck: verify proc offsets at runtime to avoid panic (a546da6+1) ---
-#include <os/log.h>
-#include <unistd.h>
+// Best-effort offset sanity check. It does not replace per-device XNU validation.
+// Never dereference a kernel virtual address as a userspace pointer.
+static bool jbinfo_checked_read(uint64_t address, void *out, size_t size)
+{
+    if (!address || !out || !size || address > UINT64_MAX - size) return false;
+    memset(out, 0, size);
+    return kreadbuf(address, out, size) == 0;
+}
 
-bool jbinfo_selfcheck(char *errbuf, size_t errlen) {
-    // 1. pid 自检：proc @ 0x60 应等于 getpid()
-    uint64_t selfProc = proc_find(getpid());
-    if (!selfProc) { snprintf(errbuf, errlen, "proc_find(self) null"); return false; }
-    uint32_t pid_at_0x60 = *(uint32_t*)(selfProc + gSystemInfo.kernelStruct.proc.pid);
-    if (pid_at_0x60 != (uint32_t)getpid()) {
-        snprintf(errbuf, errlen, "pid offset 0x%lx mismatch: mem %u vs getpid %d", (long)gSystemInfo.kernelStruct.proc.pid, pid_at_0x60, getpid());
+bool jbinfo_selfcheck(char *errbuf, size_t errlen)
+{
+    if (!errbuf || !errlen) return false;
+    errbuf[0] = '\0';
+
+    // Avoid proc_find's unchecked kread32 and unbounded list walk. This bound
+    // can only fail safely when the underlying primitive reports read errors.
+    uint64_t cursor = ksymbol(allproc);
+    uint64_t selfProc = 0;
+    if (!cursor) {
+        snprintf(errbuf, errlen, "allproc symbol unavailable");
         return false;
     }
-    // 2. flag 自检：p_flag 在 0x25C 应含 P_LHASTASK (0x2) 且非 0
-    uint32_t flag = *(uint32_t*)(selfProc + gSystemInfo.kernelStruct.proc.flag);
-    if (flag == 0) {
-        snprintf(errbuf, errlen, "proc.flag 0x%lx is 0 (offset wrong)", (long)gSystemInfo.kernelStruct.proc.flag);
+    for (unsigned i = 0; i < 16384; i++) {
+        uint64_t nextRaw = 0;
+        if (!jbinfo_checked_read(cursor + koffsetof(proc, list_next), &nextRaw, sizeof(nextRaw))) {
+            snprintf(errbuf, errlen, "cannot read proc list at step %u", i);
+            return false;
+        }
+        uint64_t next = UNSIGN_PTR(nextRaw);
+        if (!next) break;
+        if (next == cursor) {
+            snprintf(errbuf, errlen, "proc list loops at step %u", i);
+            return false;
+        }
+        uint32_t pid = 0;
+        if (!jbinfo_checked_read(next + koffsetof(proc, pid), &pid, sizeof(pid))) {
+            snprintf(errbuf, errlen, "cannot read proc.pid at step %u", i);
+            return false;
+        }
+        if (pid == (uint32_t)getpid()) {
+            selfProc = next;
+            break;
+        }
+        cursor = next;
+    }
+    if (!selfProc) {
+        snprintf(errbuf, errlen, "self proc not found (pid offset 0x%x)", koffsetof(proc, pid));
+        return false;
+    }
+
+    uint32_t flag = 0;
+    if (!jbinfo_checked_read(selfProc + koffsetof(proc, flag), &flag, sizeof(flag)) || !flag) {
+        snprintf(errbuf, errlen, "proc.flag read failed/zero (offset 0x%x)", koffsetof(proc, flag));
         return false;
     }
     if ((flag & 0x2) == 0) {
-        os_log(OS_LOG_DEFAULT, "proc.flag 0x%x missing P_LHASTASK, maybe offset drift", flag);
+        os_log(OS_LOG_DEFAULT, "proc.flag 0x%x missing P_LHASTASK (warning only)", flag);
     }
-    // 3. struct_size 自检
-    if (gSystemInfo.kernelStruct.proc.struct_size != 0 && gSystemInfo.kernelStruct.proc.struct_size != 0x730) {
-        os_log(OS_LOG_DEFAULT, "proc struct_size 0x%lx != 0x730, flag may be at 0x454", (long)gSystemInfo.kernelStruct.proc.struct_size);
-    }
-    // 4. proc_ro csflags 小值校验
-    uint64_t proc_ro = *(uint64_t*)(selfProc + gSystemInfo.kernelStruct.proc.proc_ro);
-    if (proc_ro) {
-        uint32_t csflags = *(uint32_t*)(proc_ro + gSystemInfo.kernelStruct.proc_ro.csflags);
-        if (csflags > 0xFFFF) {
-            snprintf(errbuf, errlen, "proc_ro.csflags 0x%lx value 0x%x too large", (long)gSystemInfo.kernelStruct.proc_ro.csflags, csflags);
-            return false;
-        }
-    }
-    // 5. textvp 非空
-    uint64_t textvp = *(uint64_t*)(selfProc + gSystemInfo.kernelStruct.proc.textvp);
-    if (textvp == 0) {
-        snprintf(errbuf, errlen, "proc.textvp 0x%lx is null", (long)gSystemInfo.kernelStruct.proc.textvp);
+
+    uint64_t procRoRaw = 0;
+    if (!jbinfo_checked_read(selfProc + koffsetof(proc, proc_ro), &procRoRaw, sizeof(procRoRaw)) || !procRoRaw) {
+        snprintf(errbuf, errlen, "proc_ro read failed/null (offset 0x%x)", koffsetof(proc, proc_ro));
         return false;
+    }
+    uint64_t procRo = UNSIGN_PTR(procRoRaw);
+    uint32_t csflags = 0;
+    if (!jbinfo_checked_read(procRo + koffsetof(proc_ro, csflags), &csflags, sizeof(csflags))) {
+        snprintf(errbuf, errlen, "proc_ro.csflags read failed (offset 0x%x)", koffsetof(proc_ro, csflags));
+        return false;
+    }
+    // High bits in csflags (e.g. CS_PLATFORM_BINARY) are legitimate. A read
+    // succeeding is not proof the offset is correct; do not impose 0xFFFF.
+
+    uint64_t textvp = 0;
+    if (!jbinfo_checked_read(selfProc + koffsetof(proc, textvp), &textvp, sizeof(textvp)) || !textvp) {
+        snprintf(errbuf, errlen, "proc.textvp read failed/null (offset 0x%x)", koffsetof(proc, textvp));
+        return false;
+    }
+    if (gSystemInfo.kernelStruct.proc.struct_size && gSystemInfo.kernelStruct.proc.struct_size != 0x730) {
+        os_log(OS_LOG_DEFAULT, "proc struct_size 0x%x: verify offsets on this kernel",
+               gSystemInfo.kernelStruct.proc.struct_size);
     }
     return true;
 }

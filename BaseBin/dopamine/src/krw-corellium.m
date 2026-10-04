@@ -3,24 +3,25 @@
 #include <libjailbreak/translation.h>
 #include "corellium.h"
 
+// libjailbreak primitives return 0 for success; unicopy returns bytes copied.
 static int kreadbuf_wrapper(uint64_t kaddr, void* output, size_t size)
 {
-	return unicopy(UNICOPY_DST_USER | UNICOPY_SRC_KERN, (uintptr_t)output, (uintptr_t)kaddr, size) == size;
+	return unicopy(UNICOPY_DST_USER | UNICOPY_SRC_KERN, (uintptr_t)output, (uintptr_t)kaddr, size) == size ? 0 : -1;
 }
 
 static int kwritebuf_wrapper(uint64_t kaddr, const void* input, size_t size)
 {
-	return unicopy(UNICOPY_DST_KERN | UNICOPY_SRC_USER, (uintptr_t)kaddr, (uintptr_t)input, size) == size;
+	return unicopy(UNICOPY_DST_KERN | UNICOPY_SRC_USER, (uintptr_t)kaddr, (uintptr_t)input, size) == size ? 0 : -1;
 }
 
 static int physreadbuf_wrapper(uint64_t pa, void* output, size_t size)
 {
-	return unicopy(UNICOPY_DST_USER | UNICOPY_SRC_PHYS, (uintptr_t)output, (uintptr_t)pa, size) == size;
+	return unicopy(UNICOPY_DST_USER | UNICOPY_SRC_PHYS, (uintptr_t)output, (uintptr_t)pa, size) == size ? 0 : -1;
 }
 
 static int physwritebuf_wrapper(uint64_t pa, const void* input, size_t size)
 {
-	return unicopy(UNICOPY_DST_PHYS | UNICOPY_SRC_USER, (uintptr_t)pa, (uintptr_t)input, size) == size;
+	return unicopy(UNICOPY_DST_PHYS | UNICOPY_SRC_USER, (uintptr_t)pa, (uintptr_t)input, size) == size ? 0 : -1;
 }
 
 int corellium_krw_init(void)

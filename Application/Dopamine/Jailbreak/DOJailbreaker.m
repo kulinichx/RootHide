@@ -61,6 +61,7 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     JBErrorCodeFailedInitProtection          = -12,
     JBErrorCodeFailedInitFakeLib             = -13,
     JBErrorCodeFailedDuplicateApps           = -14,
+    JBErrorCodeFailedOffsetValidation        = -15,
 };
 
 @implementation DOJailbreaker
@@ -261,10 +262,12 @@ sets[idx] = NULL;
     kwrite32(ucred + koffsetof(ucred, groups), 0);
     
     // Add P_SUGID
-    uint32_t flag = kread32(proc + koffsetof(proc, flag));
-    if ((flag & P_SUGID) != 0) {
-        flag &= P_SUGID;
-        kwrite32(proc + koffsetof(proc, flag), flag);
+    uint32_t flag = 0;
+    if (kreadbuf(proc + koffsetof(proc, flag), &flag, sizeof(flag)) != 0) {
+        return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedGetRoot userInfo:@{NSLocalizedDescriptionKey:@"Failed to read proc flags"}];
+    }
+    if ((flag & P_SUGID) == 0 && kwrite32(proc + koffsetof(proc, flag), flag | P_SUGID) != 0) {
+        return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedGetRoot userInfo:@{NSLocalizedDescriptionKey:@"Failed to set P_SUGID"}];
     }
     
     if (getuid() != 0) return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedGetRoot userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Failed to get root, uid still %d", getuid()]}];
@@ -618,6 +621,15 @@ void *boomerang_server(struct boomerang_info *info)
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Building Phys R/W Primitive") debug:NO];
     *errOut = [self buildPhysRWPrimitive];
     if (*errOut) {
+        [self cleanUpExploits];
+        return;
+    }
+    // After stable kernel read is available, validate before the first
+    // privilege/credential writes. This is not a replacement for device tests.
+    char offsetError[256] = {0};
+    if (!jbinfo_selfcheck(offsetError, sizeof(offsetError))) {
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedOffsetValidation
+                                userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Kernel offset sanity check failed: %s", offsetError]}];
         [self cleanUpExploits];
         return;
     }
