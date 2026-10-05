@@ -34,6 +34,7 @@ def main() -> None:
     roothide_client = read("BaseBin/libjailbreak/src/jbclient_roothide.c")
     roothide_root = read("BaseBin/libjailbreak/src/jbroot.c")
     roothide_domain = read("BaseBin/launchdhook/src/jbserver/jbdomain_roothide.c")
+    jbserver = read("BaseBin/libjailbreak/src/jbserver.c")
 
     # The basebin graph must build the RootHide package, not the independent
     # rootlesshooks package.
@@ -76,6 +77,10 @@ def main() -> None:
     require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "jailbreakd lookup")', "jailbreakd lookup caller validation")
     require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "trust executable")', "executable trust caller validation")
     require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "trust library")', "library trust caller validation")
+    require(jbserver, "jbserver_xpc_value_matches_type", "jbserver XPC argument type validation")
+    require(jbserver, "xpc_get_type(domainValue) != XPC_TYPE_UINT64", "jbserver domain type validation")
+    require(jbserver, "xpc_get_type(actionValue) != XPC_TYPE_UINT64", "jbserver action type validation")
+    require(jbserver, "if (!xreply)", "jbserver reply creation validation")
 
     print("PASS: RootHide-only build, check-in, launchd and dylib contract")
 

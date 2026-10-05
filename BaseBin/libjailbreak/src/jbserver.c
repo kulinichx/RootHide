@@ -3,6 +3,27 @@
 
 #include "roothider.h"
 
+static bool jbserver_xpc_value_matches_type(xpc_object_t value, jbserver_type type)
+{
+	if (!value) return true; // Individual handlers retain their existing optional-argument semantics.
+
+	xpc_type_t actualType = xpc_get_type(value);
+	switch (type) {
+		case JBS_TYPE_BOOL:       return actualType == XPC_TYPE_BOOL;
+		case JBS_TYPE_UINT64:     return actualType == XPC_TYPE_UINT64;
+		case JBS_TYPE_STRING:     return actualType == XPC_TYPE_STRING;
+		case JBS_TYPE_DATA:       return actualType == XPC_TYPE_DATA;
+		case JBS_TYPE_ARRAY:      return actualType == XPC_TYPE_ARRAY;
+		case JBS_TYPE_DICTIONARY: return actualType == XPC_TYPE_DICTIONARY;
+		case JBS_TYPE_FD:         return actualType == XPC_TYPE_FD;
+		case JBS_TYPE_XPC_GENERIC:
+		case JBS_TYPE_CALLER_TOKEN:
+			return true;
+	}
+
+	return false;
+}
+
 int jbserver_received_xpc_message(struct jbserver_impl *server, xpc_object_t xmsg)
 {
 	if (xpc_get_type(xmsg) != XPC_TYPE_DICTIONARY) return -1;
@@ -11,8 +32,10 @@ int jbserver_received_xpc_message(struct jbserver_impl *server, xpc_object_t xms
 	roothide_handle_xpc_msg(xmsg);
 /*********************************************/
 
-	if (!xpc_dictionary_get_value(xmsg, "jb-domain")) return -1;
-	if (!xpc_dictionary_get_value(xmsg, "action")) return -1;
+	xpc_object_t domainValue = xpc_dictionary_get_value(xmsg, "jb-domain");
+	xpc_object_t actionValue = xpc_dictionary_get_value(xmsg, "action");
+	if (!domainValue || xpc_get_type(domainValue) != XPC_TYPE_UINT64) return -1;
+	if (!actionValue || xpc_get_type(actionValue) != XPC_TYPE_UINT64) return -1;
 
 	uint64_t domainIdx = xpc_dictionary_get_uint64(xmsg, "jb-domain");
 	if (domainIdx == 0) return -1;
@@ -40,6 +63,14 @@ int jbserver_received_xpc_message(struct jbserver_impl *server, xpc_object_t xms
 	int (*handler)(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7, void *a8) = action->handler;
 	void *args[8] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 	void *argsOut[8] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
+
+	for (uint64_t i = 0; action->args[i].name && i < 8; i++) {
+		jbserver_arg *argDesc = &action->args[i];
+		if (argDesc->out || argDesc->type == JBS_TYPE_CALLER_TOKEN) continue;
+
+		xpc_object_t value = xpc_dictionary_get_value(xmsg, argDesc->name);
+		if (!jbserver_xpc_value_matches_type(value, argDesc->type)) return -3;
+	}
 
 	for (uint64_t i = 0; action->args[i].name && i < 8; i++) {
 		jbserver_arg *argDesc = &action->args[i];
@@ -82,9 +113,19 @@ int jbserver_received_xpc_message(struct jbserver_impl *server, xpc_object_t xms
 		}
 	}
 
+	xpc_object_t xreply = xpc_dictionary_create_reply(xmsg);
+	if (!xreply) {
+		for (uint64_t i = 0; action->args[i].name && i < 8; i++) {
+			jbserver_arg *argDesc = &action->args[i];
+			if (!argDesc->out && argDesc->type == JBS_TYPE_FD && (int)(int64_t)args[i] >= 0) {
+				close((int)(int64_t)args[i]);
+			}
+		}
+		return -4;
+	}
+
 	int result = handler(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
 
-	xpc_object_t xreply = xpc_dictionary_create_reply(xmsg);
 	for (uint64_t i = 0; action->args[i].name && i < 8; i++) {
 		jbserver_arg *argDesc = &action->args[i];
 		if (argDesc->out) {
