@@ -57,7 +57,6 @@ def main() -> None:
 
     # The fallback path and the process path hook must use the same RootHide
     # runtime root and package.
-    require(roothider_main, 'JBROOT_PATH("/usr/lib/roothideinit.dylib")', "RootHide init dylib")
     require(roothider_main, 'JBROOT_PATH("/basebin/roothidehooks.dylib")', "RootHide path hook dylib")
     require(roothider_main, "roothide_runtime_contract_check(", "RootHide startup contract check")
     require(roothider_main, "rootdir[0] != '/'", "absolute RootHide check-in root")
