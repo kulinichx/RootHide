@@ -34,6 +34,7 @@ xpc_object_t new_xpc_dictionary_create_reply(xpc_object_t original)
 int (*orig_xpc_pipe_routine_reply)(xpc_object_t reply);
 int new_xpc_pipe_routine_reply(xpc_object_t reply)
 {
+	if (!reply) return -1;
 	if (xpc_get_type(reply) == XPC_TYPE_DICTIONARY)
 	{
 		xpc_object_t original = xpc_dictionary_get_value(reply, "roothide-blacklisted-process-request");
@@ -120,6 +121,7 @@ int new_xpc_pipe_routine_reply(xpc_object_t reply)
 #define RB2_USERREBOOT (0x2000000000000000llu)
 void check_usreboot_msg(xpc_object_t xmsg)
 {
+	if (!xmsg || xpc_get_type(xmsg) != XPC_TYPE_DICTIONARY) return;
 	if (xpc_dictionary_get_uint64(xmsg, "flags") != RB2_USERREBOOT)
 	{
 		return;
@@ -177,6 +179,7 @@ void check_usreboot_msg(xpc_object_t xmsg)
 
 void roothide_handle_xpc_msg(xpc_object_t xmsg)
 {
+	if (!xmsg || xpc_get_type(xmsg) != XPC_TYPE_DICTIONARY) return;
 	check_usreboot_msg(xmsg);
 
 	audit_token_t clientToken = {0};
@@ -216,6 +219,10 @@ void roothide_handle_xpc_msg(xpc_object_t xmsg)
 				}
 			} else {
 				bundle = strdup("");
+			}
+			if (!bundle) {
+				JBLogError("failed to allocate bundle identifier");
+				return;
 			}
 
 			volatile int clientPid = audit_token_to_pid(clientToken);

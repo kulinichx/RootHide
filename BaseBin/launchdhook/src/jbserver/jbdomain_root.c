@@ -168,6 +168,7 @@ struct jbserver_domain gRootDomain = {
 			.handler = roothide_unsupport_request,
 			.args = (jbserver_arg[]){
 				{ .name = "cdhash", .type = JBS_TYPE_DATA, .out = false },
+				{ .name = "cdhash-length", .type = JBS_TYPE_UINT64, .out = false },
 				{ 0 },
 			},
 		},

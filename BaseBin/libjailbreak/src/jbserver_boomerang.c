@@ -115,6 +115,7 @@ int jbserver_received_boomerang_xpc_message(struct jbserver_impl *server, xpc_ob
 		uint64_t action = xpc_dictionary_get_uint64(xmsg, "action");
 		if (action == JBS_BOOMERANG_DONE) {
 			xpc_object_t xreply = xpc_dictionary_create_reply(xmsg);
+			if (!xreply) return -4;
 			xpc_dictionary_set_uint64(xreply, "result", 0);
 			xpc_pipe_routine_reply(xreply);
 			xpc_release(xreply);

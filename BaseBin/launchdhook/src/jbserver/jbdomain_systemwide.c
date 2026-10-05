@@ -515,6 +515,7 @@ struct jbserver_domain gSystemwideDomain = {
 				{ .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
 				{ .name = "fd", .type = JBS_TYPE_UINT64, .out = false },
 				{ .name = "siginfo", .type = JBS_TYPE_DATA, .out = false },
+				{ .name = "siginfo-length", .type = JBS_TYPE_UINT64, .out = false },
 				{ .name = "attach", .type = JBS_TYPE_BOOL, .out = false },
 				{ 0 },
 			},
