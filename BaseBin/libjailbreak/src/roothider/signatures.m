@@ -182,6 +182,8 @@ typedef struct {
 	uint32_t* Subtypes;
 } preferredArchInfo;
 
+#define ROOTHIDE_MAX_RECURSIVE_CDHASHES 4096
+
 static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString *workingDir, NSMutableSet* fileCaches, NSMutableArray* rpathStack, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut, bool *collectionFailed)
 {
 @autoreleasepool {
@@ -201,6 +203,11 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 		return false;
 	};
 	void (^cdhashesAdd)(cdhash_t) = ^(cdhash_t cdhash) {
+        if (*cdhashCountOut >= ROOTHIDE_MAX_RECURSIVE_CDHASHES) {
+            JBLogError("Recursive trust cdhash limit exceeded");
+            if(collectionFailed) *collectionFailed = true;
+            return;
+        }
         uint32_t newCount = (*cdhashCountOut) + 1;
         cdhash_t *newHashes = realloc((*cdhashesOut), newCount * sizeof(cdhash_t));
         if(!newHashes) {
@@ -364,6 +371,9 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 
 int recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
 {
+        if(!path || !cdhashesOut || !cdhashCountOut) return -1;
+        *cdhashesOut = NULL;
+        *cdhashCountOut = 0;
         bool collectionFailed = false;
 	if(!callerExecutablePath) {
 		callerExecutablePath = path;

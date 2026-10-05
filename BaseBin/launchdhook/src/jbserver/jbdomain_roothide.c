@@ -51,6 +51,14 @@ typedef struct {
 	uint32_t* Subtypes;
 } preferredArchInfo;
 #define ROOTHIDE_MAX_PREFERRED_ARCHS 8
+
+static bool roothide_path_argument_valid(const char *path, bool required, bool absolute)
+{
+    if (!path) return !required;
+    size_t length = strnlen(path, PATH_MAX);
+    if (length == 0 || length == PATH_MAX) return false;
+    return !absolute || path[0] == '/';
+}
 int recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);
 
 static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerImagePath, const char *dlopenCallerExecutablePath, const char *workingDir, xpc_object_t preferredArchsArray)
@@ -114,12 +122,17 @@ static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerIm
 int roothide_trust_executable_recurse(audit_token_t *callerToken, const char *executablePath, const char *processWorkingDir, xpc_object_t preferredArchsArray)
 {
 	if (!roothide_privileged_action_allowed(callerToken, "trust executable")) return -1;
+	if (!roothide_path_argument_valid(executablePath, true, false) ||
+	    !roothide_path_argument_valid(processWorkingDir, false, true)) return -1;
 	return trust_macho_recurse(executablePath, NULL, executablePath, processWorkingDir, preferredArchsArray);
 }
 
 static int roothide_trust_library_recurse(audit_token_t *callerToken, const char *libraryPath, const char *callerLibraryPath, const char *currentWorkingDir)
 {
 	if (!roothide_privileged_action_allowed(callerToken, "trust library")) return -1;
+	if (!roothide_path_argument_valid(libraryPath, true, false) ||
+	    !roothide_path_argument_valid(callerLibraryPath, false, true) ||
+	    !roothide_path_argument_valid(currentWorkingDir, false, true)) return -1;
 	pid_t callerPid = audit_token_to_pid(*callerToken);
 	const char *callerExecutablePath = proc_get_path(callerPid, NULL);
 	if (!callerExecutablePath || callerExecutablePath[0] != '/') {
