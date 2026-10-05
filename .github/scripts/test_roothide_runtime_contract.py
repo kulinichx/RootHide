@@ -35,6 +35,7 @@ def main() -> None:
     roothide_root = read("BaseBin/libjailbreak/src/jbroot.c")
     roothide_domain = read("BaseBin/launchdhook/src/jbserver/jbdomain_roothide.c")
     jbserver = read("BaseBin/libjailbreak/src/jbserver.c")
+    cfprefsd_hook = read("BaseBin/roothidehooks/cfprefsd.x")
 
     # The basebin graph must build the RootHide package, not the independent
     # rootlesshooks package.
@@ -81,6 +82,8 @@ def main() -> None:
     require(jbserver, "xpc_get_type(domainValue) != XPC_TYPE_UINT64", "jbserver domain type validation")
     require(jbserver, "xpc_get_type(actionValue) != XPC_TYPE_UINT64", "jbserver action type validation")
     require(jbserver, "if (!xreply)", "jbserver reply creation validation")
+    require(cfprefsd_hook, "pid_t previousClientPid = gCurrentClientPid;", "cfprefsd nested client PID preservation")
+    require(cfprefsd_hook, "gCurrentClientPid = previousClientPid;", "cfprefsd client PID restoration")
 
     print("PASS: RootHide-only build, check-in, launchd and dylib contract")
 

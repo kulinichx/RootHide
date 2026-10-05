@@ -114,9 +114,11 @@ void* new__CFPrefsDaemon_handleMessage_fromPeer_replyHandler__(id self, xpc_obje
 	// NSLog(@"CFPrefsDaemon: handleMessage Operation=%lld, msg=%s", xpc_dictionary_get_int64(message, "CFPreferencesOperation"), desc);
 	// if(desc) free(desc);
 
+	pid_t previousClientPid = gCurrentClientPid;
 	gCurrentClientPid = clientPid;
-
-	return DISPATCH_orig__CFPrefsDaemon_handleMessage_fromPeer_replyHandler__(self, message, connection, replyHandler);
+	void *result = DISPATCH_orig__CFPrefsDaemon_handleMessage_fromPeer_replyHandler__(self, message, connection, replyHandler);
+	gCurrentClientPid = previousClientPid;
+	return result;
 }
 void* LEGACY_new__CFPrefsDaemon_handleMessage_fromPeer_replyHandler__(id self, SEL selector, xpc_object_t message, xpc_connection_t connection, void* replyHandler)
 {
