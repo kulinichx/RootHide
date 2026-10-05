@@ -72,6 +72,10 @@ def main() -> None:
     require(roothide_domain, "xpc_get_type(typeValue) != XPC_TYPE_UINT64", "preferred architecture type validation")
     require(roothide_domain, "type > UINT32_MAX || subtype > UINT32_MAX", "preferred architecture range validation")
     forbid(roothide_domain, "preferredArchTypes[preferredArchCount]", "client-sized preferred architecture VLA")
+    require(roothide_domain, "roothide_privileged_action_allowed", "RootHide privileged action guard")
+    require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "jailbreakd lookup")', "jailbreakd lookup caller validation")
+    require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "trust executable")', "executable trust caller validation")
+    require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "trust library")', "library trust caller validation")
 
     print("PASS: RootHide-only build, check-in, launchd and dylib contract")
 

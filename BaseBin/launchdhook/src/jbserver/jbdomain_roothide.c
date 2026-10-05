@@ -23,6 +23,28 @@ bool roothide_domain_allowed(audit_token_t clientToken)
 	return true;
 }
 
+static bool roothide_privileged_action_allowed(audit_token_t *callerToken, const char *action)
+{
+	if (!callerToken) {
+		JBLogError("%s: missing caller token", action);
+		return false;
+	}
+
+	pid_t pid = audit_token_to_pid(*callerToken);
+	if (pid <= 1 || isBlacklistedToken(callerToken)) {
+		JBLogError("%s: denying caller pid=%d", action, pid);
+		return false;
+	}
+
+	const char *processPath = proc_get_path(pid, NULL);
+	if (!processPath || processPath[0] != '/') {
+		JBLogError("%s: unable to resolve caller pid=%d", action, pid);
+		return false;
+	}
+
+	return true;
+}
+
 typedef struct {
 	uint32_t Count;
 	uint32_t* Types;
@@ -89,13 +111,15 @@ static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerIm
 	return result;
 }
 
-int roothide_trust_executable_recurse(const char *executablePath, const char *processWorkingDir, xpc_object_t preferredArchsArray)
+int roothide_trust_executable_recurse(audit_token_t *callerToken, const char *executablePath, const char *processWorkingDir, xpc_object_t preferredArchsArray)
 {
+	if (!roothide_privileged_action_allowed(callerToken, "trust executable")) return -1;
 	return trust_macho_recurse(executablePath, NULL, executablePath, processWorkingDir, preferredArchsArray);
 }
 
-static int roothide_trust_library_recurse(const char *libraryPath, const char *callerLibraryPath, const char *callerExecutablePath, const char *currentWorkingDir)
+static int roothide_trust_library_recurse(audit_token_t *callerToken, const char *libraryPath, const char *callerLibraryPath, const char *callerExecutablePath, const char *currentWorkingDir)
 {
+	if (!roothide_privileged_action_allowed(callerToken, "trust library")) return -1;
 	// When trusting a library that's dlopened at runtime, we need to pass the caller path
 	// This is to support dlopen("@executable_path/whatever", RTLD_NOW) and stuff like that
 	// (Yes that is a thing >.<)
@@ -165,7 +189,7 @@ static int roothide_blacklist_check(audit_token_t *callerToken, const char* chec
 }
 static int roothide_jailbreakd_lookup(audit_token_t *callerToken, xpc_object_t *portOut)
 {
-    if(!portOut) return -1;
+    if(!portOut || !roothide_privileged_action_allowed(callerToken, "jailbreakd lookup")) return -1;
     *portOut = NULL;
     mach_port_t port = jailbreakdClientPort();
     if(!MACH_PORT_VALID(port)) {
@@ -283,6 +307,7 @@ struct jbserver_domain gRootHideDomain = {
 		{
 			.handler = roothide_trust_library_recurse,
 			.args = (jbserver_arg[]){
+				{ .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
 				{ .name = "library-path", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "caller-library-path", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "caller-executable-path", .type = JBS_TYPE_STRING, .out = false },
@@ -294,6 +319,7 @@ struct jbserver_domain gRootHideDomain = {
 		{
 			.handler = roothide_trust_executable_recurse,
 			.args = (jbserver_arg[]){
+				{ .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
 				{ .name = "executable-path", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "process-working-dir", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "preferred-archs", .type = JBS_TYPE_ARRAY, .out = false },
