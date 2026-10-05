@@ -85,6 +85,10 @@ def main() -> None:
     require(jbserver, "if (!xreply)", "jbserver reply creation validation")
     require(cfprefsd_hook, "pid_t previousClientPid = gCurrentClientPid;", "cfprefsd nested client PID preservation")
     require(cfprefsd_hook, "gCurrentClientPid = previousClientPid;", "cfprefsd client PID restoration")
+    require(cfprefsd_hook, "CFPREFS_PATH_BUFFER_SIZE", "cfprefsd explicit path buffer capacity")
+    require(cfprefsd_hook, "strnlen((char *)buffer, CFPREFS_PATH_BUFFER_SIZE)", "cfprefsd bounded source path scan")
+    require(cfprefsd_hook, "strlcpy((char*)buffer, newpath, CFPREFS_PATH_BUFFER_SIZE)", "cfprefsd bounded redirected path copy")
+    forbid(cfprefsd_hook, "strcpy((char*)buffer, newpath)", "cfprefsd unbounded redirected path copy")
     require(workflow, "make -C BaseBin roothidehooks", "focused roothidehooks build coverage")
     require(workflow, "artifacts/roothidehooks.dylib", "focused roothidehooks artifact coverage")
 

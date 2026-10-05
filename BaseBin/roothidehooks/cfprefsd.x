@@ -5,6 +5,7 @@
 #include "common.h"
 
 #define PROC_PIDPATHINFO_MAXSIZE        (4*MAXPATHLEN)
+#define CFPREFS_PATH_BUFFER_SIZE        1024
 
 pid_t __thread gCurrentClientPid = 0;
 
@@ -65,7 +66,14 @@ BOOL new_CFPrefsGetPathForTriplet(CFStringRef identifier, CFStringRef user, BOOL
 
 	if(orig && buffer)
 	{
+		size_t originalPathLength = strnlen((char *)buffer, CFPREFS_PATH_BUFFER_SIZE);
+		if (originalPathLength == CFPREFS_PATH_BUFFER_SIZE) {
+			NSLog(@"CFPrefsGetPathForTriplet rejected unterminated path buffer");
+			return orig;
+		}
+
 		NSString* origPath = [NSString stringWithUTF8String:(char*)buffer];
+		if (!origPath) return orig;
 		BOOL needsRedirection = preferencePlistNeedsRedirection(origPath);
 
 		if (needsRedirection) {
@@ -78,9 +86,10 @@ BOOL new_CFPrefsGetPathForTriplet(CFStringRef identifier, CFStringRef user, BOOL
 		if (needsRedirection) {
 			NSLog(@"Plist redirected to jbroot:%@", origPath);
 			const char* newpath = jbroot(origPath.UTF8String);
-			//buffer size=1024 in CFXPreferences_fileProtectionClassForIdentifier_user_host_container___block_invoke
-			if(strlen(newpath) < 1024) {
-				strcpy((char*)buffer, newpath);
+			// This private CoreFoundation call site currently supplies a 1024-byte buffer.
+			// Keep the capacity explicit and reject malformed or oversized paths before writing.
+			if(newpath && strnlen(newpath, CFPREFS_PATH_BUFFER_SIZE) < CFPREFS_PATH_BUFFER_SIZE) {
+				strlcpy((char*)buffer, newpath, CFPREFS_PATH_BUFFER_SIZE);
 				NSLog(@"CFPrefsGetPathForTriplet redirect to %s", buffer);
 			}
 			else {
