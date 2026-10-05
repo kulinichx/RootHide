@@ -168,6 +168,8 @@ jobs:
           # The P0 forward-port candidate also changes these runtime components.
           make -C BaseBin launchdhook
           make -C BaseBin jailbreakd
+          # Compile the RootHide process hooks so cfprefsd/lsd hook changes are covered.
+          make -C BaseBin roothidehooks
           # Build dyldhook directly so focused mode does not pull the full basebin/trustcache graph.
           make -C BaseBin/dyldhook
 
@@ -175,10 +177,12 @@ jobs:
           cp BaseBin/systemhook/systemhook.dylib artifacts/systemhook.dylib
           cp BaseBin/launchdhook/launchdhook.dylib artifacts/launchdhook.dylib
           cp BaseBin/jailbreakd/jailbreakd artifacts/jailbreakd
+          cp BaseBin/roothidehooks/.theos/obj/roothidehooks.dylib artifacts/roothidehooks.dylib
           cp BaseBin/dyldhook/dyldhook_merge.arm64.dylib artifacts/dyldhook_merge.arm64.dylib
           cp BaseBin/dyldhook/dyldhook_merge.arm64e.dylib artifacts/dyldhook_merge.arm64e.dylib
 
           file artifacts/systemhook.dylib artifacts/launchdhook.dylib artifacts/jailbreakd \
+            artifacts/roothidehooks.dylib \
             artifacts/dyldhook_merge.arm64.dylib artifacts/dyldhook_merge.arm64e.dylib
           if strings artifacts/systemhook.dylib | grep -E "APTTRUST-|TRUSTFLOW-"; then
             echo "unexpected experimental trust diagnostics in systemhook" >&2
@@ -207,6 +211,7 @@ jobs:
             artifacts/systemhook.dylib
             artifacts/launchdhook.dylib
             artifacts/jailbreakd
+            artifacts/roothidehooks.dylib
             artifacts/dyldhook_merge.arm64.dylib
             artifacts/dyldhook_merge.arm64e.dylib
             artifacts/source-provenance.txt
