@@ -159,6 +159,9 @@ jobs:
       - name: RootHide path hook retry regressions
         run: python3 .github/scripts/test_pathhook_runtime.py
 
+      - name: RootHide jbserver malformed XPC regressions
+        run: python3 .github/scripts/test_jbserver_runtime.py
+
       - name: iOS 17 host safety regressions
         run: python3 .github/scripts/test_ios17_health.py
 

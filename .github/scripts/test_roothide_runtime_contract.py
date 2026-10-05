@@ -150,6 +150,7 @@ def main() -> None:
     require(workflow, "make -C BaseBin roothidehooks", "focused roothidehooks build coverage")
     require(workflow, "python3 .github/scripts/test_envbuf_runtime.py", "envbuf executable negative test coverage")
     require(workflow, "python3 .github/scripts/test_pathhook_runtime.py", "path hook executable retry coverage")
+    require(workflow, "python3 .github/scripts/test_jbserver_runtime.py", "jbserver malformed XPC executable coverage")
     require(workflow, "artifacts/roothidehooks.dylib", "focused roothidehooks artifact coverage")
 
     print("PASS: RootHide-only build, check-in, launchd and dylib contract")
