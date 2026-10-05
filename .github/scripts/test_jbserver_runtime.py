@@ -36,8 +36,8 @@ typedef fake_type xpc_type_t;
 #define XPC_TYPE_STRING T_STRING
 #define XPC_TYPE_ARRAY T_ARRAY
 #define XPC_TYPE_FD T_FD
-static struct fake type_uint={T_UINT},type_bool={T_BOOL},type_data={T_DATA};
-static xpc_type_t xpc_get_type(xpc_object_t o){ return o?o->type:T_OTHER; }
+static struct fake type_uint={.type=T_UINT},type_bool={.type=T_BOOL},type_data={.type=T_DATA};
+static xpc_type_t xpc_get_type(xpc_object_t o){ return o?o->type:T_GENERIC; }
 static xpc_object_t xpc_dictionary_get_value(xpc_object_t o,const char*n){ if(!o)return 0; if(!strcmp(n,"jb-domain"))return o->domain?&type_uint:0; if(!strcmp(n,"action"))return o->action?&type_uint:0; if(!strcmp(n,"fd"))return &type_uint; if(!strcmp(n,"blob"))return o->data?&type_data:0; if(!strcmp(n,"blob-length"))return 0; if(!strcmp(n,"attach"))return &type_bool; return 0; }
 static uint64_t xpc_dictionary_get_uint64(xpc_object_t o,const char*n){ if(!strcmp(n,"jb-domain"))return o->domain;if(!strcmp(n,"action"))return o->action;if(!strcmp(n,"fd"))return o->fd;return 0; }
 static bool xpc_dictionary_get_bool(xpc_object_t o,const char*n){(void)n;return o->attach;}
@@ -47,7 +47,7 @@ static xpc_object_t xpc_dictionary_get_array(xpc_object_t o,const char*n){(void)
 static xpc_object_t xpc_dictionary_get_dictionary(xpc_object_t o,const char*n){(void)o;(void)n;return 0;}
 static int xpc_dictionary_dup_fd(xpc_object_t o,const char*n){(void)o;(void)n;return -1;}
 static void xpc_dictionary_get_audit_token(xpc_object_t o,audit_token_t*t){(void)o;memset(t,0,sizeof(*t));}
-static struct fake reply={T_DICT};
+static struct fake reply={.type=T_DICT};
 static xpc_object_t xpc_dictionary_create_reply(xpc_object_t o){return o?&reply:0;}
 static void xpc_dictionary_set_bool(xpc_object_t o,const char*n,bool v){(void)o;(void)n;(void)v;}
 static void xpc_dictionary_set_uint64(xpc_object_t o,const char*n,uint64_t v){(void)o;(void)n;(void)v;}
