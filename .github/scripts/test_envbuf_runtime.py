@@ -86,6 +86,18 @@ int main(void) {
     reset_failure(0);
     envbuf_setenv(&empty, "A", "1");
     assert(empty && empty[0] == NULL);
+    reset_failure(1);
+    envbuf_setenv(&empty, "A", "1");
+    assert(empty && empty[0] == NULL);
+    reset_failure(-1);
+    envbuf_setenv(&empty, "A", "1");
+    envbuf_setenv(&empty, "B", "2");
+    assert(strcmp(envbuf_getenv((const char **)empty, "A"), "1") == 0);
+    assert(strcmp(envbuf_getenv((const char **)empty, "B"), "2") == 0);
+    reset_failure(0);
+    envbuf_unsetenv(&empty, "A");
+    assert(envbuf_getenv((const char **)empty, "A") == NULL);
+    assert(strcmp(envbuf_getenv((const char **)empty, "B"), "2") == 0);
     reset_failure(-1);
     envbuf_free(empty);
     return 0;
