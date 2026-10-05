@@ -1,6 +1,8 @@
 #include <errno.h>
+#include <limits.h>
 #include <pwd.h>
 #include <stdio.h>
+#include <string.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <libgen.h>
@@ -63,12 +65,85 @@ void loadPathHook()
 {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-		void* roothidehooks = dlopen(JBROOT_PATH("/basebin/roothidehooks.dylib"), RTLD_NOW);
-		ASSERT(roothidehooks != NULL);
+		const char *path = JBROOT_PATH("/basebin/roothidehooks.dylib");
+		void* roothidehooks = dlopen(path, RTLD_NOW);
+		if (!roothidehooks) {
+			const char *error = dlerror();
+			SYSLOG("RootHide path hook load failed: path=%s error=%s", path ? path : "<null>", error ? error : "<unknown>");
+			return;
+		}
 		void (*pathhook)() = dlsym(roothidehooks, "pathhook");
-		ASSERT(pathhook != NULL);
+		if (!pathhook) {
+			SYSLOG("RootHide path hook symbol missing: path=%s", path);
+			return;
+		}
 		pathhook();
 	});
+}
+
+static bool roothide_runtime_contract_check(const char *rootdir,
+                                            char *hooksPath,
+                                            size_t hooksPathSize,
+                                            char *initPath,
+                                            size_t initPathSize)
+{
+    const char *jbroot = get_jbroot();
+    if (!rootdir || rootdir[0] != '/') {
+        fprintf(stderr, "[RootHide] runtime contract failed at rootdir: path=%s is not absolute\n", rootdir ? rootdir : "<null>");
+        SYSLOG("RootHide runtime contract failed at rootdir: path=%s is not absolute", rootdir ? rootdir : "<null>");
+        return false;
+    }
+    if (!jbroot || jbroot[0] != '/') {
+        fprintf(stderr, "[RootHide] runtime contract failed at jbroot: path=%s is not absolute\n", jbroot ? jbroot : "<null>");
+        SYSLOG("RootHide runtime contract failed at jbroot: path=%s is not absolute", jbroot ? jbroot : "<null>");
+        return false;
+    }
+
+    size_t rootLength = strlen(rootdir);
+    size_t jbrootLength = strlen(jbroot);
+    while (rootLength > 1 && rootdir[rootLength - 1] == '/') rootLength--;
+    while (jbrootLength > 1 && jbroot[jbrootLength - 1] == '/') jbrootLength--;
+    if (rootLength != jbrootLength || strncmp(rootdir, jbroot, rootLength) != 0) {
+        fprintf(stderr, "[RootHide] runtime contract failed at root binding: checkin=%s jbroot=%s\n", rootdir, jbroot);
+        SYSLOG("RootHide runtime contract failed at root binding: checkin=%s jbroot=%s", rootdir, jbroot);
+        return false;
+    }
+
+    int hooksLength = snprintf(hooksPath, hooksPathSize, "%s/basebin/roothidehooks.dylib", rootdir);
+    int initLength = snprintf(initPath, initPathSize, "%s/usr/lib/roothideinit.dylib", rootdir);
+    if (hooksLength < 0 || (size_t)hooksLength >= hooksPathSize) {
+        fprintf(stderr, "[RootHide] runtime contract failed at hooks path construction: root=%s\n", rootdir);
+        SYSLOG("RootHide runtime contract failed at hooks path construction: root=%s", rootdir);
+        return false;
+    }
+    if (initLength < 0 || (size_t)initLength >= initPathSize) {
+        fprintf(stderr, "[RootHide] runtime contract failed at init path construction: root=%s\n", rootdir);
+        SYSLOG("RootHide runtime contract failed at init path construction: root=%s", rootdir);
+        return false;
+    }
+
+    const char *resolvedHooksPath = JBROOT_PATH("/basebin/roothidehooks.dylib");
+    const char *resolvedInitPath = JBROOT_PATH("/usr/lib/roothideinit.dylib");
+    if (!resolvedHooksPath || !resolvedInitPath ||
+        strncmp(resolvedHooksPath, jbroot, jbrootLength) != 0 ||
+        strncmp(resolvedInitPath, jbroot, jbrootLength) != 0) {
+        fprintf(stderr, "[RootHide] runtime contract failed at JBROOT_PATH resolution: root=%s\n", jbroot);
+        SYSLOG("RootHide runtime contract failed at JBROOT_PATH resolution: root=%s", jbroot);
+        return false;
+    }
+
+    if (access(hooksPath, R_OK) != 0) {
+        fprintf(stderr, "[RootHide] runtime contract failed at path hook: path=%s error=%s\n", hooksPath, strerror(errno));
+        SYSLOG("RootHide runtime contract failed at path hook: path=%s error=%s", hooksPath, strerror(errno));
+        return false;
+    }
+    if (access(initPath, R_OK) != 0) {
+        fprintf(stderr, "[RootHide] runtime contract failed at init dylib: path=%s error=%s\n", initPath, strerror(errno));
+        SYSLOG("RootHide runtime contract failed at init dylib: path=%s error=%s", initPath, strerror(errno));
+        return false;
+    }
+
+    return true;
 }
 
 void redirect_env_paths(const char* rootdir)
@@ -487,8 +562,15 @@ void roothide_init()
 	}
 }
 
-void roothide_init_with_checkin(const char* rootdir)
+bool roothide_init_with_checkin(const char* rootdir)
 {
+	char hooksPath[PATH_MAX] = {0};
+	char initPath[PATH_MAX] = {0};
+	if (!roothide_runtime_contract_check(rootdir, hooksPath, sizeof(hooksPath), initPath, sizeof(initPath)))
+	{
+		return false;
+	}
+
 	if(dyld_patch_fallback_enabled)
 	{
 		init_dyldhooks();
@@ -496,7 +578,15 @@ void roothide_init_with_checkin(const char* rootdir)
 
 	redirect_paths(rootdir);
 
-	dlopen(JBROOT_PATH("/usr/lib/roothideinit.dylib"), RTLD_NOW);
+	void *roothideinit = dlopen(initPath, RTLD_NOW);
+	if (!roothideinit) {
+		const char *error = dlerror();
+		fprintf(stderr, "[RootHide] runtime init load failed: path=%s error=%s\n", initPath, error ? error : "<unknown>");
+		SYSLOG("RootHide runtime init load failed: path=%s error=%s", initPath, error ? error : "<unknown>");
+		return false;
+	}
+
+	return true;
 }
 
 void roothide_init_with_executable(const char* executable)

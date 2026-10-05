@@ -440,7 +440,9 @@ __attribute__((constructor)) static void initializer(void)
 
 /*************************** roothide *************************/
 /* after unsandboxing jbroot and applying library-trust-hook */
-roothide_init_with_checkin(JB_RootPath); // will hook dlopen* if necessary
+if (!roothide_init_with_checkin(JB_RootPath)) { // will hook dlopen* if necessary
+	return;
+}
 /*************************** roothide ************************/
 
 

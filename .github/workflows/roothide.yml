@@ -150,6 +150,9 @@ jobs:
           grep -F 'extern const char *HOOK_DYLIB_PATH;' \
             BaseBin/systemhook/src/common/common.h
 
+      - name: RootHide-only runtime contract
+        run: python3 .github/scripts/test_roothide_runtime_contract.py
+
       - name: iOS 17 host safety regressions
         run: python3 .github/scripts/test_ios17_health.py
 

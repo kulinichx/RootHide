@@ -34,7 +34,7 @@ bool isRemovableBundlePath(const char* path);
 bool allowInjectWithSafeMode(const char* path);
 
 void roothide_init();
-void roothide_init_with_checkin(const char* rootdir);
+bool roothide_init_with_checkin(const char* rootdir);
 void roothide_init_with_executable(const char* executable);
 
 int __sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen);
