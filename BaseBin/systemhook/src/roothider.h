@@ -35,7 +35,7 @@ bool allowInjectWithSafeMode(const char* path);
 
 void roothide_init();
 bool roothide_init_with_checkin(const char* rootdir);
-void roothide_init_with_executable(const char* executable);
+bool roothide_init_with_executable(const char* executable);
 
 int __sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen);
 int __sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen);

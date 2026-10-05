@@ -609,7 +609,7 @@ bool roothide_init_with_checkin(const char* rootdir)
 	return true;
 }
 
-void roothide_init_with_executable(const char* executable)
+bool roothide_init_with_executable(const char* executable)
 {
 	if (__builtin_available(iOS 16.0, *))
 	{
@@ -623,5 +623,16 @@ void roothide_init_with_executable(const char* executable)
 		loadPathHook(); //requre jit
 	}
 
-	dlopen(JBROOT_PATH("/usr/lib/roothidepatch.dylib"), RTLD_NOW); //require jit
+	const char *patchPath = JBROOT_PATH("/usr/lib/roothidepatch.dylib");
+	if (!patchPath) {
+		SYSLOG("RootHide process patch path resolution failed");
+		return false;
+	}
+	if (!dlopen(patchPath, RTLD_NOW)) { // requires JIT
+		const char *error = dlerror();
+		fprintf(stderr, "[RootHide] process patch load failed: path=%s error=%s\n", patchPath, error ? error : "<unknown>");
+		SYSLOG("RootHide process patch load failed: path=%s error=%s", patchPath, error ? error : "<unknown>");
+		return false;
+	}
+	return true;
 }

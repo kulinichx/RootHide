@@ -82,6 +82,24 @@ static int trust_executable_recurse_no_arch(const char *path)
 #include "sandbox.h"
 #include "private.h"
 
+static bool load_required_runtime_dylib(const char *component, const char *path)
+{
+	if (!path) {
+		fprintf(stderr, "[RootHide] required runtime load failed: component=%s path=<null> error=path resolution failed\n", component);
+		SYSLOG("RootHide required runtime load failed: component=%s path=<null> error=path resolution failed", component);
+		return false;
+	}
+
+	if (!dlopen(path, RTLD_NOW)) {
+		const char *error = dlerror();
+		fprintf(stderr, "[RootHide] required runtime load failed: component=%s path=%s error=%s\n", component, path, error ? error : "<unknown>");
+		SYSLOG("RootHide required runtime load failed: component=%s path=%s error=%s", component, path, error ? error : "<unknown>");
+		return false;
+	}
+
+	return true;
+}
+
 bool gFullyDebugged = false;
 static void *gLibSandboxHandle;
 char *JB_BootUUID = NULL;
@@ -450,19 +468,19 @@ if (!roothide_init_with_checkin(JB_RootPath)) { // will hook dlopen* if necessar
 	// Since pages have been modified in this process, we need to load forkfix to ensure forking will work
 	// Optimization: If the process cannot fork at all due to sandbox, we don't need to do anything
 	if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0) {
-		dlopen(JBROOT_PATH("/basebin/forkfix.dylib"), RTLD_NOW);
+		if (!load_required_runtime_dylib("forkfix", JBROOT_PATH("/basebin/forkfix.dylib"))) return;
 	}
 #endif
 
 	if (load_executable_path() == 0) {
-		// Load rootlesshooks / watchdoghook when neccessary
+		// Load RootHide process hooks / watchdog hook when necessary
 		if (!strcmp(gExecutablePath, "/usr/sbin/cfprefsd") ||
 			!strcmp(gExecutablePath, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") ||
 			!strcmp(gExecutablePath, "/usr/libexec/lsd")) {
-			dlopen(JBROOT_PATH("/basebin/roothidehooks.dylib"), RTLD_NOW);
+			if (!load_required_runtime_dylib("process hooks", JBROOT_PATH("/basebin/roothidehooks.dylib"))) return;
 		}
 		else if (!strcmp(gExecutablePath, "/usr/libexec/watchdogd")) {
-			dlopen(JBROOT_PATH("/basebin/watchdoghook.dylib"), RTLD_NOW);
+			if (!load_required_runtime_dylib("watchdog hook", JBROOT_PATH("/basebin/watchdoghook.dylib"))) return;
 		}
 
 		// ptrace hook to allow attaching a debugger to processes that systemhook did not inject into
@@ -491,7 +509,7 @@ if (!roothide_init_with_checkin(JB_RootPath)) { // will hook dlopen* if necessar
 
 
 /******************* roothide *****************/
-roothide_init_with_executable(gExecutablePath);
+if (!roothide_init_with_executable(gExecutablePath)) return;
 /******************* roothide ****************/
 
 

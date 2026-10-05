@@ -47,6 +47,11 @@ def main() -> None:
     # systemhook must receive the RootHide check-in and load the RootHide
     # dylib. The test deliberately checks the concrete dispatch strings.
     require(systemhook, "if (!roothide_init_with_checkin(JB_RootPath))", "fail-closed RootHide check-in")
+    require(systemhook, "load_required_runtime_dylib", "required runtime dylib loader")
+    require(systemhook, 'load_required_runtime_dylib("forkfix"', "forkfix load result propagation")
+    require(systemhook, 'load_required_runtime_dylib("process hooks"', "process hook load result propagation")
+    require(systemhook, 'load_required_runtime_dylib("watchdog hook"', "watchdog hook load result propagation")
+    require(systemhook, "if (!roothide_init_with_executable(gExecutablePath))", "process patch load result propagation")
     require(systemhook, 'JBROOT_PATH("/basebin/roothidehooks.dylib")', "systemhook RootHide dylib")
     forbid(systemhook, 'JBROOT_PATH("/basebin/rootlesshooks.dylib")', "systemhook rootless dylib")
 
@@ -62,6 +67,9 @@ def main() -> None:
     require(roothider_main, "bool roothide_init_with_checkin", "RootHide check-in result propagation")
     require(roothider_main, "return false;", "RootHide startup failure propagation")
     require(roothider_main, "return true;", "RootHide startup success propagation")
+    require(roothider_main, "bool roothide_init_with_executable", "process-specific init result propagation")
+    require(roothider_main, "process patch load failed", "process patch load error reporting")
+    forbid(roothider_main, 'dlopen(JBROOT_PATH("/usr/lib/roothidepatch.dylib")', "ignored process patch load result")
     forbid(roothider_main, "ASSERT(roothidehooks != NULL)", "fatal path hook load assertion")
     forbid(roothider_main, "ASSERT(pathhook != NULL)", "fatal path hook symbol assertion")
     require(roothider_main, "pthread_mutex_t pathHookLock", "retryable path hook synchronization")
