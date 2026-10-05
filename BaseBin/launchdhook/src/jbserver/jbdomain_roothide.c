@@ -206,7 +206,14 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
 
     pid_t pid = audit_token_to_pid(*callerToken);
     uid_t uid = audit_token_to_euid(*callerToken);
-    if(uid != 0) return -1;
+    if(uid != 0 || pid <= 1 || isBlacklistedToken(callerToken)) return -1;
+
+    const char *processPath = proc_get_path(pid, NULL);
+    const char *expectedPath = JBROOT_PATH("/basebin/jailbreakd");
+    if(!processPath || !expectedPath || strcmp(processPath, expectedPath) != 0) {
+        JBLogError("jailbreakd checkin: denying caller pid=%d path=%s", pid, processPath ? processPath : "<unknown>");
+        return -1;
+    }
 
     mach_port_t port = jailbreakdServerPort();
     if(!MACH_PORT_VALID(port)) {

@@ -93,6 +93,8 @@ def main() -> None:
     forbid(roothide_domain, "preferredArchTypes[preferredArchCount]", "client-sized preferred architecture VLA")
     require(roothide_domain, "roothide_privileged_action_allowed", "RootHide privileged action guard")
     require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "jailbreakd lookup")', "jailbreakd lookup caller validation")
+    require(roothide_domain, 'JBROOT_PATH("/basebin/jailbreakd")', "exact jailbreakd checkin path")
+    require(roothide_domain, "strcmp(processPath, expectedPath) != 0", "jailbreakd checkin path binding")
     require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "trust executable")', "executable trust caller validation")
     require(roothide_domain, 'roothide_privileged_action_allowed(callerToken, "trust library")', "library trust caller validation")
     require(jbserver, "jbserver_xpc_value_matches_type", "jbserver XPC argument type validation")
