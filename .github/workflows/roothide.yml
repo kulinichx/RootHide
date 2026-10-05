@@ -156,6 +156,9 @@ jobs:
       - name: RootHide envbuf negative and sanitizer regressions
         run: python3 .github/scripts/test_envbuf_runtime.py
 
+      - name: RootHide path hook retry regressions
+        run: python3 .github/scripts/test_pathhook_runtime.py
+
       - name: iOS 17 host safety regressions
         run: python3 .github/scripts/test_ios17_health.py
 
