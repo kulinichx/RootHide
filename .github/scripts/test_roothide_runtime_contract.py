@@ -115,6 +115,7 @@ def main() -> None:
     require(systemhook_common, "if (!envc) return orig(envp);", "environment copy failure fallback")
     require(roothider_main, "if (!envc)", "RootHide environment copy failure handling")
     require(workflow, "make -C BaseBin roothidehooks", "focused roothidehooks build coverage")
+    require(workflow, "python3 .github/scripts/test_envbuf_runtime.py", "envbuf executable negative test coverage")
     require(workflow, "artifacts/roothidehooks.dylib", "focused roothidehooks artifact coverage")
 
     print("PASS: RootHide-only build, check-in, launchd and dylib contract")
