@@ -95,15 +95,17 @@ struct jbserver_domain gBoomerangDomain = {
 	},
 };
 
-struct jbserver_impl gBoomerangServer = {
-	.maxDomain = 1,
-	.domains = (struct jbserver_domain*[]){
+static struct jbserver_domain *gBoomerangDomains[] = {
 		&gUnusedDomain,
 		&gUnusedDomain,
 		&gUnusedDomain,
 		&gBoomerangDomain,
 		NULL,
-	}
+};
+
+struct jbserver_impl gBoomerangServer = {
+	.maxDomain = (sizeof(gBoomerangDomains) / sizeof(gBoomerangDomains[0])) - 1,
+	.domains = gBoomerangDomains,
 };
 
 int jbserver_received_boomerang_xpc_message(struct jbserver_impl *server, xpc_object_t xmsg)

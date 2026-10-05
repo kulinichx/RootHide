@@ -7,9 +7,7 @@ extern struct jbserver_domain gRootDomain;
 extern struct jbserver_domain gDopamineDomain;
 extern struct jbserver_domain gRootHideDomain;
 
-struct jbserver_impl gGlobalServer = {
-	.maxDomain = 1,
-	.domains = (struct jbserver_domain*[]){
+static struct jbserver_domain *gGlobalDomains[] = {
 		&gSystemwideDomain,
 		&gPlatformDomain,
 		&gWatchdogDomain,
@@ -17,5 +15,9 @@ struct jbserver_impl gGlobalServer = {
 		&gDopamineDomain,
 		&gRootHideDomain,
 		NULL,
-	}
+};
+
+struct jbserver_impl gGlobalServer = {
+	.maxDomain = (sizeof(gGlobalDomains) / sizeof(gGlobalDomains[0])) - 1,
+	.domains = gGlobalDomains,
 };
