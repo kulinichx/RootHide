@@ -28,6 +28,7 @@ typedef struct {
 	uint32_t* Types;
 	uint32_t* Subtypes;
 } preferredArchInfo;
+#define ROOTHIDE_MAX_PREFERRED_ARCHS 8
 int recurse_collect_untrusted_cdhashes(const char *path, const char *callerImagePath, const char *callerExecutablePath, const char *workingDir, preferredArchInfo* preferredArch, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);
 
 static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerImagePath, const char *dlopenCallerExecutablePath, const char *workingDir, xpc_object_t preferredArchsArray)
@@ -36,19 +37,40 @@ static int trust_macho_recurse(const char *machoPath, const char *dlopenCallerIm
 	
 	size_t preferredArchCount = 0;
 	if (preferredArchsArray) preferredArchCount = xpc_array_get_count(preferredArchsArray);
-	uint32_t preferredArchTypes[preferredArchCount];
-	uint32_t preferredArchSubtypes[preferredArchCount];
+	if (preferredArchCount > ROOTHIDE_MAX_PREFERRED_ARCHS) {
+		JBLogError("Rejecting %zu preferred architectures (maximum %d)", preferredArchCount, ROOTHIDE_MAX_PREFERRED_ARCHS);
+		return -1;
+	}
+
+	uint32_t preferredArchTypes[ROOTHIDE_MAX_PREFERRED_ARCHS] = {0};
+	uint32_t preferredArchSubtypes[ROOTHIDE_MAX_PREFERRED_ARCHS] = {0};
 	for (size_t i = 0; i < preferredArchCount; i++) {
-		preferredArchTypes[i] = 0;
-		preferredArchSubtypes[i] = UINT32_MAX;
 		xpc_object_t arch = xpc_array_get_value(preferredArchsArray, i);
-		if (xpc_get_type(arch) == XPC_TYPE_DICTIONARY) {
-			preferredArchTypes[i] = xpc_dictionary_get_uint64(arch, "type");
-			preferredArchSubtypes[i] = xpc_dictionary_get_uint64(arch, "subtype");
+		if (!arch || xpc_get_type(arch) != XPC_TYPE_DICTIONARY) {
+			JBLogError("Invalid preferred architecture entry at index %zu", i);
+			return -1;
 		}
+
+		xpc_object_t typeValue = xpc_dictionary_get_value(arch, "type");
+		xpc_object_t subtypeValue = xpc_dictionary_get_value(arch, "subtype");
+		if (!typeValue || xpc_get_type(typeValue) != XPC_TYPE_UINT64 ||
+			!subtypeValue || xpc_get_type(subtypeValue) != XPC_TYPE_UINT64) {
+			JBLogError("Invalid preferred architecture fields at index %zu", i);
+			return -1;
+		}
+
+		uint64_t type = xpc_uint64_get_value(typeValue);
+		uint64_t subtype = xpc_uint64_get_value(subtypeValue);
+		if (type > UINT32_MAX || subtype > UINT32_MAX) {
+			JBLogError("Preferred architecture value out of range at index %zu", i);
+			return -1;
+		}
+
+		preferredArchTypes[i] = (uint32_t)type;
+		preferredArchSubtypes[i] = (uint32_t)subtype;
 	}
 	
-	preferredArchInfo preferredArch = {preferredArchCount, preferredArchTypes, preferredArchSubtypes};
+	preferredArchInfo preferredArch = {(uint32_t)preferredArchCount, preferredArchTypes, preferredArchSubtypes};
 
 	cdhash_t *cdhashes = NULL;
 	uint32_t cdhashesCount = 0;

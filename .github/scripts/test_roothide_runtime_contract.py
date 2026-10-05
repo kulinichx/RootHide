@@ -33,6 +33,7 @@ def main() -> None:
     launchdhook = read("BaseBin/launchdhook/src/main.m")
     roothide_client = read("BaseBin/libjailbreak/src/jbclient_roothide.c")
     roothide_root = read("BaseBin/libjailbreak/src/jbroot.c")
+    roothide_domain = read("BaseBin/launchdhook/src/jbserver/jbdomain_roothide.c")
 
     # The basebin graph must build the RootHide package, not the independent
     # rootlesshooks package.
@@ -67,6 +68,10 @@ def main() -> None:
     # compatibility channel.
     require(roothide_client, "JBS_DOMAIN_ROOTHIDE", "RootHide XPC domain")
     require(roothide_root, "jbinfo(rootPath)", "RootHide runtime root provider")
+    require(roothide_domain, "ROOTHIDE_MAX_PREFERRED_ARCHS", "bounded preferred architecture count")
+    require(roothide_domain, "xpc_get_type(typeValue) != XPC_TYPE_UINT64", "preferred architecture type validation")
+    require(roothide_domain, "type > UINT32_MAX || subtype > UINT32_MAX", "preferred architecture range validation")
+    forbid(roothide_domain, "preferredArchTypes[preferredArchCount]", "client-sized preferred architecture VLA")
 
     print("PASS: RootHide-only build, check-in, launchd and dylib contract")
 
