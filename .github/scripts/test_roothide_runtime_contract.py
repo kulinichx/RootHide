@@ -64,6 +64,10 @@ def main() -> None:
     require(roothider_main, "return true;", "RootHide startup success propagation")
     forbid(roothider_main, "ASSERT(roothidehooks != NULL)", "fatal path hook load assertion")
     forbid(roothider_main, "ASSERT(pathhook != NULL)", "fatal path hook symbol assertion")
+    require(roothider_main, "pthread_mutex_t pathHookLock", "retryable path hook synchronization")
+    require(roothider_main, "bool pathHookLoaded = false", "path hook successful-load state")
+    require(roothider_main, "pathHookLoaded = true;", "path hook success commit")
+    require(roothider_main, "dlclose(roothidehooks);", "failed path hook handle cleanup")
     require(launchdhook, "roothide_launchd_preinit();", "launchd RootHide preinit")
     require(launchdhook, "roothide_launchd_postinit(firstLoad);", "launchd RootHide postinit")
 

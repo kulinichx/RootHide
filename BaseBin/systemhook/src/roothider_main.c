@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,22 +64,41 @@ bool _CFCanChangeEUIDs(void) {
 
 void loadPathHook()
 {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-		const char *path = JBROOT_PATH("/basebin/roothidehooks.dylib");
-		void* roothidehooks = dlopen(path, RTLD_NOW);
-		if (!roothidehooks) {
-			const char *error = dlerror();
-			SYSLOG("RootHide path hook load failed: path=%s error=%s", path ? path : "<null>", error ? error : "<unknown>");
-			return;
-		}
-		void (*pathhook)() = dlsym(roothidehooks, "pathhook");
-		if (!pathhook) {
-			SYSLOG("RootHide path hook symbol missing: path=%s", path);
-			return;
-		}
-		pathhook();
-	});
+	static pthread_mutex_t pathHookLock = PTHREAD_MUTEX_INITIALIZER;
+	static bool pathHookLoaded = false;
+
+	pthread_mutex_lock(&pathHookLock);
+	if (pathHookLoaded) {
+		pthread_mutex_unlock(&pathHookLock);
+		return;
+	}
+
+	const char *path = JBROOT_PATH("/basebin/roothidehooks.dylib");
+	if (!path) {
+		SYSLOG("RootHide path hook path resolution failed");
+		pthread_mutex_unlock(&pathHookLock);
+		return;
+	}
+
+	void *roothidehooks = dlopen(path, RTLD_NOW);
+	if (!roothidehooks) {
+		const char *error = dlerror();
+		SYSLOG("RootHide path hook load failed: path=%s error=%s", path, error ? error : "<unknown>");
+		pthread_mutex_unlock(&pathHookLock);
+		return;
+	}
+
+	void (*pathhook)(void) = dlsym(roothidehooks, "pathhook");
+	if (!pathhook) {
+		SYSLOG("RootHide path hook symbol missing: path=%s", path);
+		dlclose(roothidehooks);
+		pthread_mutex_unlock(&pathHookLock);
+		return;
+	}
+
+	pathhook();
+	pathHookLoaded = true;
+	pthread_mutex_unlock(&pathHookLock);
 }
 
 static bool roothide_runtime_contract_check(const char *rootdir,
