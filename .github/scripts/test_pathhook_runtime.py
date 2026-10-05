@@ -40,9 +40,10 @@ static void *test_dlsym(void *handle, const char *name) {
 }
 static int test_dlclose(void *handle) { assert(handle == (void *)0x1234); close_count++; return 0; }
 static const char *test_dlerror(void) { return "injected failure"; }
+static void test_syslog(const char *format, ...) { (void)format; }
 #define RTLD_NOW 2
 #define JBROOT_PATH(path) (test_path)
-#define SYSLOG(...) ((void)0)
+#define SYSLOG(...) test_syslog(__VA_ARGS__)
 #define dlopen test_dlopen
 #define dlsym test_dlsym
 #define dlclose test_dlclose
