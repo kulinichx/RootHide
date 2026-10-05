@@ -117,9 +117,15 @@ int roothide_trust_executable_recurse(audit_token_t *callerToken, const char *ex
 	return trust_macho_recurse(executablePath, NULL, executablePath, processWorkingDir, preferredArchsArray);
 }
 
-static int roothide_trust_library_recurse(audit_token_t *callerToken, const char *libraryPath, const char *callerLibraryPath, const char *callerExecutablePath, const char *currentWorkingDir)
+static int roothide_trust_library_recurse(audit_token_t *callerToken, const char *libraryPath, const char *callerLibraryPath, const char *currentWorkingDir)
 {
 	if (!roothide_privileged_action_allowed(callerToken, "trust library")) return -1;
+	pid_t callerPid = audit_token_to_pid(*callerToken);
+	const char *callerExecutablePath = proc_get_path(callerPid, NULL);
+	if (!callerExecutablePath || callerExecutablePath[0] != '/') {
+		JBLogError("trust library: unable to bind executable path for pid=%d", callerPid);
+		return -1;
+	}
 	// When trusting a library that's dlopened at runtime, we need to pass the caller path
 	// This is to support dlopen("@executable_path/whatever", RTLD_NOW) and stuff like that
 	// (Yes that is a thing >.<)
@@ -317,7 +323,6 @@ struct jbserver_domain gRootHideDomain = {
 				{ .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
 				{ .name = "library-path", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "caller-library-path", .type = JBS_TYPE_STRING, .out = false },
-				{ .name = "caller-executable-path", .type = JBS_TYPE_STRING, .out = false },
 				{ .name = "current-working-dir", .type = JBS_TYPE_STRING, .out = false },
 				{ 0 },
 			},

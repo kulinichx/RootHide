@@ -179,18 +179,8 @@ int jbclient_trust_library_recurse(const char *libraryPath, void *addressInCalle
 		}
 	}
 
-	/* the executable file may be removed from disk at runtime,
-		 			so we need to use the cached path from dyld */
-	char executablePath[PATH_MAX] = {0};
-	uint32_t bufsize = sizeof(executablePath);
-	//According to dyld this returns real-path on ios (but not on macos)
-	if(_NSGetExecutablePath(executablePath, &bufsize) != 0) {
-		return -2;
-	}
-	
 	xpc_object_t xargs = xpc_dictionary_create_empty();
 	xpc_dictionary_set_string(xargs, "library-path", libraryPath);
-	xpc_dictionary_set_string(xargs, "caller-executable-path", executablePath);
 
 	if(addressInCaller) {
 		const char* callerPath = dyld_image_path_containing_address(addressInCaller);
