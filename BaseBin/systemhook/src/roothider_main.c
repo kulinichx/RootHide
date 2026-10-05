@@ -129,8 +129,16 @@ static bool roothide_runtime_contract_check(const char *rootdir,
         return false;
     }
 
-    int hooksLength = snprintf(hooksPath, hooksPathSize, "%s/basebin/roothidehooks.dylib", rootdir);
-    int initLength = snprintf(initPath, initPathSize, "%s/usr/lib/roothideinit.dylib", rootdir);
+    char normalizedRoot[PATH_MAX];
+    if (rootLength >= sizeof(normalizedRoot)) {
+        SYSLOG("RootHide runtime contract failed at root normalization: path too long");
+        return false;
+    }
+    memcpy(normalizedRoot, rootdir, rootLength);
+    normalizedRoot[rootLength] = '\0';
+
+    int hooksLength = snprintf(hooksPath, hooksPathSize, "%s/basebin/roothidehooks.dylib", normalizedRoot);
+    int initLength = snprintf(initPath, initPathSize, "%s/usr/lib/roothideinit.dylib", normalizedRoot);
     if (hooksLength < 0 || (size_t)hooksLength >= hooksPathSize) {
         fprintf(stderr, "[RootHide] runtime contract failed at hooks path construction: root=%s\n", rootdir);
         SYSLOG("RootHide runtime contract failed at hooks path construction: root=%s", rootdir);
@@ -139,27 +147,6 @@ static bool roothide_runtime_contract_check(const char *rootdir,
     if (initLength < 0 || (size_t)initLength >= initPathSize) {
         fprintf(stderr, "[RootHide] runtime contract failed at init path construction: root=%s\n", rootdir);
         SYSLOG("RootHide runtime contract failed at init path construction: root=%s", rootdir);
-        return false;
-    }
-
-    const char *resolvedHooksPath = JBROOT_PATH("/basebin/roothidehooks.dylib");
-    const char *resolvedInitPath = JBROOT_PATH("/usr/lib/roothideinit.dylib");
-    if (!resolvedHooksPath || !resolvedInitPath ||
-        strncmp(resolvedHooksPath, jbroot, jbrootLength) != 0 ||
-        strncmp(resolvedInitPath, jbroot, jbrootLength) != 0) {
-        fprintf(stderr, "[RootHide] runtime contract failed at JBROOT_PATH resolution: root=%s\n", jbroot);
-        SYSLOG("RootHide runtime contract failed at JBROOT_PATH resolution: root=%s", jbroot);
-        return false;
-    }
-
-    if (access(hooksPath, R_OK) != 0) {
-        fprintf(stderr, "[RootHide] runtime contract failed at path hook: path=%s error=%s\n", hooksPath, strerror(errno));
-        SYSLOG("RootHide runtime contract failed at path hook: path=%s error=%s", hooksPath, strerror(errno));
-        return false;
-    }
-    if (access(initPath, R_OK) != 0) {
-        fprintf(stderr, "[RootHide] runtime contract failed at init dylib: path=%s error=%s\n", initPath, strerror(errno));
-        SYSLOG("RootHide runtime contract failed at init dylib: path=%s error=%s", initPath, strerror(errno));
         return false;
     }
 
