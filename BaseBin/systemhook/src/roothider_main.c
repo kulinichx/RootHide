@@ -365,6 +365,11 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 	// on some devices dyldhook may fail due to vm_protect(VM_PROT_READ|VM_PROT_WRITE), 2, (os/kern) protection failure in dsc::__DATA_CONST:__const, 
 	// so we need to disable dyld-in-cache here. (or we can use VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)
 	char **envc = envbuf_mutcopy((const char **)envp);
+	if (!envc) {
+		if (patch_exec) jbdSpawnExecCancel(path);
+		posix_spawnattr_setflags(attrp, flags);
+		return ENOMEM;
+	}
 	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
 		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 	}
@@ -453,6 +458,12 @@ int roothide_systemhook___execve_posthook(const char *path, char *const argv[], 
 	while(!traced) usleep(10*1000);
 
 	char **envc = envbuf_mutcopy((const char **)envp);
+	if (!envc) {
+		bool detached = false;
+		jbdExecTraceCancel(path, &detached);
+		errno = ENOMEM;
+		return -1;
+	}
 	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
 		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 	}

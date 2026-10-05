@@ -328,6 +328,7 @@ static int spawn_exec_hook_common(const char *path,
 		// the state we want to be in is not the state we are in right now
 
 		envc = envbuf_mutcopy((const char **)envp);
+		if (!envc) return orig(envp);
 
 		if (shouldInsertJBEnv) {
 			if (!systemHookAlreadyInserted) {

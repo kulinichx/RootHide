@@ -29,6 +29,7 @@ def main() -> None:
     basebin_makefile = read("BaseBin/Makefile")
     roothide_makefile = read("BaseBin/roothidehooks/Makefile")
     systemhook = read("BaseBin/systemhook/src/main.c")
+    systemhook_common = read("BaseBin/systemhook/src/common/common.c")
     roothider_main = read("BaseBin/systemhook/src/roothider_main.c")
     launchdhook = read("BaseBin/launchdhook/src/main.m")
     roothide_client = read("BaseBin/libjailbreak/src/jbclient_roothide.c")
@@ -36,6 +37,7 @@ def main() -> None:
     roothide_domain = read("BaseBin/launchdhook/src/jbserver/jbdomain_roothide.c")
     jbserver = read("BaseBin/libjailbreak/src/jbserver.c")
     cfprefsd_hook = read("BaseBin/roothidehooks/cfprefsd.x")
+    envbuf = read("BaseBin/systemhook/src/common/envbuf.c")
     workflow = read(".github/workflows/roothide.yml")
 
     # The basebin graph must build the RootHide package, not the independent
@@ -103,6 +105,15 @@ def main() -> None:
     require(cfprefsd_hook, "strnlen((char *)buffer, CFPREFS_PATH_BUFFER_SIZE)", "cfprefsd bounded source path scan")
     require(cfprefsd_hook, "strlcpy((char*)buffer, newpath, CFPREFS_PATH_BUFFER_SIZE)", "cfprefsd bounded redirected path copy")
     forbid(cfprefsd_hook, "strcpy((char*)buffer, newpath)", "cfprefsd unbounded redirected path copy")
+    require(envbuf, "ENVBUF_MAX_ENTRIES", "bounded environment entry count")
+    require(envbuf, "return calloc(1, sizeof(char *));", "empty mutable environment allocation")
+    require(envbuf, "if (!envcopy)", "environment copy allocation failure handling")
+    require(envbuf, "for (int j = 0; j < i; j++) free(envcopy[j]);", "partial environment copy cleanup")
+    require(envbuf, "k < ENVBUF_MAX_ENTRIES && envp[k] != NULL", "bounded environment search")
+    require(envbuf, "valueLength > SIZE_MAX - 2 || nameLength > SIZE_MAX - valueLength - 2", "environment string size overflow check")
+    require(envbuf, "prevLen < 1 || prevLen >= ENVBUF_MAX_ENTRIES", "environment growth bound")
+    require(systemhook_common, "if (!envc) return orig(envp);", "environment copy failure fallback")
+    require(roothider_main, "if (!envc)", "RootHide environment copy failure handling")
     require(workflow, "make -C BaseBin roothidehooks", "focused roothidehooks build coverage")
     require(workflow, "artifacts/roothidehooks.dylib", "focused roothidehooks artifact coverage")
 
