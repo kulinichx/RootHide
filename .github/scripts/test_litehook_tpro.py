@@ -44,6 +44,10 @@ PREFIX = r'''
 #else
 #undef __arm64__
 #endif
+/* macOS secure/_string.h may already define a fortified strlcpy macro. */
+#ifdef strlcpy
+#undef strlcpy
+#endif
 #define strlcpy tpro_test_strlcpy
 
 typedef uintptr_t vm_address_t;
