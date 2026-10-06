@@ -456,13 +456,9 @@ void jbinfo_initialize_hardcoded_offsets(void)
 									}
 
 									// IOSurface
-									gSystemInfo.kernelStruct.IOSurface.memoryDescriptor = 0x20;
+									gSystemInfo.kernelStruct.IOSurface.memoryDescriptor = 0x40;
 									gSystemInfo.kernelStruct.IOSurface.ranges           = 0x420;
 									gSystemInfo.kernelStruct.IOSurface.rangeCount       = 0x428;
-
-									if (darwin_version_compare(darwinVersion, "23.2.0") >= 0) { // iOS 17.2+
-										gSystemInfo.kernelStruct.IOSurface.memoryDescriptor = 0x40;
-									}
 
 									// IOMachPort
 									gSystemInfo.kernelStruct.IOMachPort.object = 0x30;

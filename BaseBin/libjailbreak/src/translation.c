@@ -44,6 +44,72 @@ uint64_t phystokv(uint64_t pa)
 		}
 	}
 
+	uint64_t papt_ranges_addr = ksymbol(libsptm_papt_ranges);
+	uint64_t n_papt_ranges_addr = ksymbol(libsptm_n_papt_ranges);
+	if (papt_ranges_addr && n_papt_ranges_addr) {
+		uint64_t papt_table = 0;
+		uint64_t papt_table_n_ptr = 0;
+		if (kreadbuf(papt_ranges_addr, &papt_table, sizeof(papt_table)) != 0 ||
+		    kreadbuf(n_papt_ranges_addr, &papt_table_n_ptr, sizeof(papt_table_n_ptr)) != 0) {
+			errno = EIO;
+			return 0;
+		}
+		papt_table = UNSIGN_PTR(papt_table);
+		papt_table_n_ptr = UNSIGN_PTR(papt_table_n_ptr);
+		if (!papt_table || !papt_table_n_ptr) {
+			errno = EFAULT;
+			return 0;
+		}
+
+		uint32_t papt_table_n = 0;
+		if (kreadbuf(papt_table_n_ptr, &papt_table_n, sizeof(papt_table_n)) != 0) {
+			errno = EIO;
+			return 0;
+		}
+		if (papt_table_n == 0 || papt_table_n > 64) {
+			errno = EFAULT;
+			return 0;
+		}
+
+		struct sptm_papt_entry {
+			uint64_t paddr_start;
+			uint64_t papt_start;
+			uint64_t num_mappings;
+		} sptm_papt_table[64] = {0};
+		if (kreadbuf(papt_table, &sptm_papt_table[0], (size_t)papt_table_n * sizeof(struct sptm_papt_entry)) != 0) {
+			errno = EIO;
+			return 0;
+		}
+
+		uint64_t page_size = vm_real_kernel_page_size ? vm_real_kernel_page_size : 0x4000;
+		for (uint32_t i = 0; i < papt_table_n; i++) {
+			struct sptm_papt_entry *curEntry = &sptm_papt_table[i];
+			if (curEntry->num_mappings > UINT64_MAX / page_size) {
+				errno = EOVERFLOW;
+				return 0;
+			}
+			uint64_t len = curEntry->num_mappings * page_size;
+			if (pa >= curEntry->paddr_start) {
+				uint64_t entryOffset = pa - curEntry->paddr_start;
+				if (entryOffset < len) {
+					if (curEntry->papt_start > UINT64_MAX - entryOffset) {
+						errno = EOVERFLOW;
+						return 0;
+					}
+					uint64_t va = curEntry->papt_start + entryOffset;
+					if (va == 0) {
+						errno = EFAULT;
+						return 0;
+					}
+					return va;
+				}
+			}
+		}
+
+		errno = EFAULT;
+		return 0;
+	}
+
 	uint64_t physBase = kconstant(physBase);
 	uint64_t virtBase = kconstant(virtBase);
 	uint64_t physSize = kconstant(physSize);

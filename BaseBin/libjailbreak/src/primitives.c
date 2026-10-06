@@ -186,7 +186,7 @@ int proc_vreadbuf(uint64_t proc, const void *addr, void *outdata, size_t datalen
 	if (!map) return -1;
 	uint64_t pmap = kread_ptr(map + koffsetof(vm_map, pmap));
 	if (!pmap) return -1;
-	uint64_t ttep = kread_ptr(pmap + koffsetof(pmap, ttep));
+	uint64_t ttep = kread64(pmap + koffsetof(pmap, ttep));
 	if (!ttep) return -1;
 	return vreadbuf(ttep, addr, outdata, datalen);
 }
@@ -199,7 +199,7 @@ int proc_vwritebuf(uint64_t proc, const void *addr, const void *indata, size_t d
 	if (!map) return -1;
 	uint64_t pmap = kread_ptr(map + koffsetof(vm_map, pmap));
 	if (!pmap) return -1;
-	uint64_t ttep = kread_ptr(pmap + koffsetof(pmap, ttep));
+	uint64_t ttep = kread64(pmap + koffsetof(pmap, ttep));
 	if (!ttep) return -1;
 	return proc_vwritebuf(ttep, addr, indata, datalen);
 }
@@ -345,6 +345,14 @@ int kwrite16(uint64_t va, uint16_t v)
 int kwrite8(uint64_t va, uint8_t v)
 {
 	return kwritebuf(va, &v, sizeof(v));
+}
+
+int physaccess_mapped(uint64_t pa, uint64_t size, kernel_map_accessor accessorBlock)
+{
+	if (gPrimitives.physaccess_mapped) {
+		return gPrimitives.physaccess_mapped(pa, size, accessorBlock);
+	}
+	return -1;
 }
 
 int kcall(uint64_t *result, uint64_t func, int argc, const uint64_t *argv)

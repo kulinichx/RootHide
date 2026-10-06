@@ -168,6 +168,9 @@ jobs:
       - name: iOS 17 host safety regressions
         run: python3 .github/scripts/test_ios17_health.py
 
+      - name: IOSurface failure-path host regressions
+        run: python3 .github/scripts/test_iosurface_primitives.py
+
       - name: Focused build P0-touched targets
         if: env.BUILD_MODE == 'focused'
         run: |
