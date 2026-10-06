@@ -7,7 +7,7 @@ LDFLAGS = -dynamiclib
 sign: $(TARGET)
 	@ldid -Cadhoc -S $^
 
-$(TARGET): $(wildcard src/*.c src/*.S ../libjailbreak/src/jbclient_*.c)
+$(TARGET): $(wildcard src/*.c src/*.S ../libjailbreak/src/jbclient_*.c) ../libjailbreak/src/roothide_stage.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 clean:
