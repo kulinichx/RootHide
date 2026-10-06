@@ -95,6 +95,11 @@ jobs:
         run: |
           set -euo pipefail
           git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          # THEOS_COMMIT is an older commit that may no longer be reachable
+          # from the repository's advertised branches.  A normal clone can
+          # therefore omit the commit object even though GitHub still serves
+          # it by SHA.  Fetch it explicitly before checking it out.
+          git -C "$THEOS" fetch --no-tags origin "$THEOS_COMMIT"
           git -C "$THEOS" checkout --detach "$THEOS_COMMIT"
           git -C "$THEOS" submodule update --init --recursive
 
