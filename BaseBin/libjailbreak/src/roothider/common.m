@@ -582,7 +582,19 @@ int randomizeAndLoadBasebinTrustcache(const char* basebinPath)
         if(!isFile || !isFile.boolValue) continue;
 
         cdhash_t cdhash={0};
-        if(ensure_randomized_cdhash(fileURL.path.fileSystemRepresentation, cdhash) == 0) {
+        int prepareResult = ensure_randomized_cdhash(fileURL.path.fileSystemRepresentation, cdhash);
+        if ([fileURL.lastPathComponent isEqualToString:@"jbctl"] ||
+            [fileURL.lastPathComponent isEqualToString:@"libjailbreak.dylib"] ||
+            [fileURL.lastPathComponent isEqualToString:@"libchoma.dylib"]) {
+            printf("[basebin-prepare] path=%s result=%d\n", fileURL.path.fileSystemRepresentation, prepareResult);
+            if (prepareResult == 0) {
+                char hashString[CS_CDHASH_LEN * 2 + 1] = {0};
+                convert_data_to_hex_string(cdhash, CS_CDHASH_LEN, hashString);
+                printf("[basebin-prepare] cdhash=%s\n", hashString);
+            }
+            fflush(stdout);
+        }
+        if(prepareResult == 0) {
             cdhash_t *new_cdhashes = realloc(basebins_cdhashes, (basebins_cdhashesCount+1) * sizeof(cdhash_t));
             if(!new_cdhashes) {
                 JBLogError("Failed to grow BaseBin cdhash accumulator");
@@ -607,6 +619,8 @@ int randomizeAndLoadBasebinTrustcache(const char* basebinPath)
     }
 
     int r2 = trustcache_file_upload_with_uuid(basebinTcFile, BASEBIN_TRUSTCACHE_UUID);
+    printf("[basebin-prepare] collected=%u upload-result=%d\n", basebins_cdhashesCount, r2);
+    fflush(stdout);
     free(basebinTcFile);
     if (r2 != 0) {
         return -4;
@@ -1003,4 +1017,3 @@ int wait_for_exit(pid_t pid)
         }
     }
 }
-

@@ -30,6 +30,10 @@
 #import <libjailbreak/jbclient_mach.h>
 #import <libjailbreak/kcall_arm64.h>
 #import <libjailbreak/basebin_gen.h>
+#import <choma/Fat.h>
+#import <choma/MachO.h>
+#import <errno.h>
+#import <string.h>
 #import <CoreServices/LSApplicationProxy.h>
 #import <sys/utsname.h>
 #import "spawn.h"
@@ -46,6 +50,47 @@ CFDictionaryRef _CFPreferencesCopyMultipleWithContainer(CFArrayRef keysToFetch, 
 //char *_dirhelper(int a, char *dst, size_t size);
 
 NSString *const JBErrorDomain = @"JBErrorDomain";
+
+// Read-only diagnostics for a loader rejection. Never reopen these files for
+// writing or retry with another architecture while collecting evidence.
+static void logSpawnImageDiagnostics(const char *path)
+{
+    struct stat st = {0};
+    if (stat(path, &st) != 0) {
+        int statError = errno;
+        printf("[spawn-image] path=%s stat-error=%d (%s)\n", path, statError, strerror(statError));
+        fflush(stdout);
+        return;
+    }
+    printf("[spawn-image] path=%s size=%lld mode=%o uid=%u gid=%u\n",
+           path, (long long)st.st_size, (unsigned)st.st_mode, (unsigned)st.st_uid, (unsigned)st.st_gid);
+    Fat *fat = fat_init_from_path(path);
+    if (!fat) {
+        printf("[spawn-image] Mach-O parse failed\n");
+        fflush(stdout);
+        return;
+    }
+    fat_enumerate_slices(fat, ^(MachO *macho, bool *stop) {
+        struct mach_header *header = macho_get_mach_header(macho);
+        if (!header) {
+            printf("[spawn-image] missing Mach-O header\n");
+            return;
+        }
+        cdhash_t cdhash = {0};
+        CS_SuperBlob *signature = macho_read_code_signature(macho);
+        bool parsed = signature && code_signature_calculate_adhoc_cdhash(signature, cdhash);
+        free(signature);
+        char hashString[CS_CDHASH_LEN * 2 + 1] = {0};
+        if (parsed) convert_data_to_hex_string(cdhash, CS_CDHASH_LEN, hashString);
+        printf("[spawn-image] offset=0x%llx cpu=0x%x subtype=0x%x type=%u flags=0x%x adhoc=%d cdhash=%s\n",
+               (unsigned long long)macho->archDescriptor.offset, (unsigned)header->cputype,
+               (unsigned)header->cpusubtype, (unsigned)header->filetype, (unsigned)header->flags,
+               (int)parsed, parsed ? hashString : "unavailable");
+    });
+    fat_free(fat);
+    fflush(stdout);
+}
+
 typedef NS_ENUM(NSInteger, JBErrorCode) {
     JBErrorCodeFailedToFindKernel            = -1,
     JBErrorCodeFailedKernelPatchfinding      = -2,
@@ -416,7 +461,11 @@ void *boomerang_server(struct boomerang_info *info)
     int spawnError = posix_spawn(&spawnedPid, jbctlPath, NULL, &attr, (char *const *)(const char *[]){ jbctlPath, "internal", "launchd_stash_port", NULL }, NULL);
     posix_spawnattr_destroy(&attr);
     if (spawnError != 0) {
-        return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLaunchdInjection userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Spawning jbctl failed with error code %d", spawnError]}];
+        printf("[jbctl-spawn] error=%d (%s)\n", spawnError, strerror(spawnError));
+        logSpawnImageDiagnostics(jbctlPath);
+        logSpawnImageDiagnostics(JBROOT_PATH("/basebin/libjailbreak.dylib"));
+        logSpawnImageDiagnostics(JBROOT_PATH("/basebin/libchoma.dylib"));
+        return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLaunchdInjection userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Spawning jbctl failed with error code %d (%s)", spawnError, strerror(spawnError)]}];
     }
     int status = 0;
     do {
