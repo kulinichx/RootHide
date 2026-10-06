@@ -43,6 +43,8 @@ jobs:
           set -euo pipefail
           git -C BaseBin/XPF apply "$GITHUB_WORKSPACE/.github/patches/XPF-roothide.patch"
           git -C BaseBin/opainject apply "$GITHUB_WORKSPACE/.github/patches/opainject-build.patch"
+          # Backport upstream 3c221609 onto the pinned litehook revision.
+          git -C BaseBin/_external/modules/litehook apply "$GITHUB_WORKSPACE/.github/patches/litehook-tpro.patch"
 
       - name: Capture source provenance
         run: |
@@ -59,7 +61,7 @@ jobs:
             echo "submodules:"
             git submodule status --recursive
             echo "roothide_patch_inputs:"
-            shasum -a 256 .github/patches/XPF-roothide.patch .github/patches/opainject-build.patch
+            shasum -a 256 .github/patches/XPF-roothide.patch .github/patches/opainject-build.patch .github/patches/litehook-tpro.patch
           } > artifacts/source-provenance.txt
           cat artifacts/source-provenance.txt
 
@@ -178,6 +180,9 @@ jobs:
 
       - name: BaseBin signature checker regressions
         run: python3 .github/scripts/test_basebin_signatures.py
+
+      - name: Litehook TPRO write scope regressions
+        run: python3 .github/scripts/test_litehook_tpro.py
 
       - name: Focused build P0-touched targets
         if: env.BUILD_MODE == 'focused'
