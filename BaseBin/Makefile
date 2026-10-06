@@ -14,11 +14,13 @@ subprojects: ChOma XPF MachOMerger opainject libjailbreak systemhook forkfix lau
 ChOma: .build .include
 	@$(MAKE) -C ChOma TARGET=ios DISABLE_SIGNING=1 DISABLE_TESTS=1 DYLIB_LDFLAGS="-install_name @loader_path/libchoma.dylib"
 	@cp ChOma/output/ios/lib/libchoma.dylib .build
+	@ldid -Cadhoc -S .build/libchoma.dylib
 	@cp -r ChOma/output/ios/include/choma .include
 
 XPF: .build .include ChOma
 	@$(MAKE) -C XPF output/ios/libxpf.dylib CHOMA_PATH=../ChOma CHOMA_DYLIB_PATH="../.build"
 	@cp XPF/output/ios/libxpf.dylib .build/libxpf.dylib
+	@ldid -Cadhoc -S .build/libxpf.dylib
 	@mkdir -p .include/xpf
 	@cp XPF/src/xpf.h .include/xpf
 
@@ -27,7 +29,7 @@ MachOMerger: .build .include
 	@cp MachOMerger/MachOMerger .build
 
 opainject: .build .include
-	$(MAKE) -C opainject FINALPACKAGE=1
+	$(MAKE) -C opainject FINALPACKAGE=1 opainject_CODESIGN_FLAGS="-Cadhoc -Sentitlements.plist"
 	@cp opainject/.theos/obj/opainject .build
 
 libjailbreak: .build .include ChOma

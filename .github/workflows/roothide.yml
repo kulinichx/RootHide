@@ -176,6 +176,9 @@ jobs:
       - name: IOSurface failure-path host regressions
         run: python3 .github/scripts/test_iosurface_primitives.py
 
+      - name: BaseBin signature checker regressions
+        run: python3 .github/scripts/test_basebin_signatures.py
+
       - name: Focused build P0-touched targets
         if: env.BUILD_MODE == 'focused'
         run: |
@@ -216,6 +219,7 @@ jobs:
           export CLANG_MODULE_CACHE_PATH="$RUNNER_TEMP/clang-module-cache"
           mkdir -p "$CLANG_MODULE_CACHE_PATH"
           make -j"$(sysctl -n hw.logicalcpu)" NIGHTLY=1
+          python3 .github/scripts/check_basebin_signatures.py --tipa Application/Dopamine.tipa
 
           version="$(cat BaseBin/_external/basebin/.version)-$(git rev-parse --short HEAD)"
           artifact="Dopamine_${version}_roothide.tipa"
