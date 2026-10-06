@@ -9,7 +9,7 @@ all: $(TARGET) sign
 sign: $(TARGET)
 	@ldid -Cadhoc -S $^
 
-$(TARGET): $(wildcard src/*.c ../../BaseBin/libjailbreak/src/jbclient_*.c)
+$(TARGET): $(wildcard src/*.c ../../BaseBin/libjailbreak/src/jbclient_*.c) ../../BaseBin/libjailbreak/src/roothide_stage.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 clean:
