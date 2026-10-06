@@ -1141,12 +1141,26 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             }
         }
 
+        // Available even after a device reboot, when jailbreak actions are hidden.
+        [specifiers addObject:[PSSpecifier emptyGroupSpecifier]];
+        PSSpecifier *stageLogSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSStaticTextCell edit:nil];
+        [stageLogSpecifier setProperty:DOLocalizedString(@"Menu_Share_RootHide_Log") forKey:@"title"];
+        [stageLogSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+        [stageLogSpecifier setProperty:buttonHeight forKey:@"height"];
+        [stageLogSpecifier setProperty:@"square.and.arrow.up" forKey:@"image"];
+        [stageLogSpecifier setProperty:@"shareRootHideStageLogPressed" forKey:@"action"];
+        [specifiers addObject:stageLogSpecifier];
         _specifiers = specifiers;
     }
     return _specifiers;
 }
 
 #pragma mark - Getters & Setters
+
+- (void)shareRootHideStageLogPressed
+{
+    [[DOUIManager sharedInstance] shareRootHideStageLogFromView:self.view];
+}
 
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier
 {

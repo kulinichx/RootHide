@@ -3,6 +3,7 @@
 #import "codesign.h"
 #import <Foundation/Foundation.h>
 #import <sys/sysctl.h>
+#import "roothide_stage.h"
 
 int apply_dyld_patch(NSString *dyldPath, const char *newUUIDPrefix)
 {
@@ -97,12 +98,14 @@ int merge_dyldhook(NSString *originalDyldPath, NSString *outPath)
 
 int basebin_generate(bool comingFromJBUpdate)
 {
+	roothide_stage_log("basebin.begin update=%d", comingFromJBUpdate);
 	NSString *basebinPath    = JBROOT_PATH(@"/basebin");
 	NSString *genPath        = JBROOT_PATH(@"/basebin/gen");
 	NSString *fakelibPath    = JBROOT_PATH(@"/basebin/.fakelib");
 	NSString *systemhookPath = JBROOT_PATH(@"/basebin/systemhook.dylib");
 
-	[[NSFileManager defaultManager] createDirectoryAtPath:genPath withIntermediateDirectories:YES attributes:nil error:nil];
+	BOOL fileResult = [[NSFileManager defaultManager] createDirectoryAtPath:genPath withIntermediateDirectories:YES attributes:nil error:nil];
+	roothide_stage_log("basebin.mkdir.gen result=%d", fileResult);
 
 	NSString *fakelibDyldPath        = [fakelibPath stringByAppendingPathComponent:@"dyld"];
 	NSString *fakelibSystemHookPath  = [fakelibPath stringByAppendingPathComponent:@"systemhook.dylib"];
@@ -113,33 +116,58 @@ int basebin_generate(bool comingFromJBUpdate)
 	NSString *dyldPatchedPath  = [genPath stringByAppendingPathComponent:@"dyld"];
 
 	NSString *dopamineVersion = [NSString stringWithContentsOfFile:JBROOT_PATH(@"/basebin/.version") encoding:NSUTF8StringEncoding error:nil];
-	if (!dopamineVersion) return 1;
+	if (!dopamineVersion) {
+		roothide_stage_log("basebin.version.failed");
+		return 1;
+	}
+	roothide_stage_log("basebin.version=%s", dopamineVersion.UTF8String);
 
 	if (!comingFromJBUpdate) {
 		// Copy /usr/lib to /var/jb/basebin/.fakelib
-		[[NSFileManager defaultManager] removeItemAtPath:fakelibPath error:nil];
-		[[NSFileManager defaultManager] createDirectoryAtPath:fakelibPath withIntermediateDirectories:YES attributes:nil error:nil];
-		carbonCopy(@"/usr/lib", fakelibPath);
+		roothide_stage_log("fakelib.remove.begin");
+		fileResult = [[NSFileManager defaultManager] removeItemAtPath:fakelibPath error:nil];
+		roothide_stage_log("fakelib.remove.end result=%d", fileResult);
+		fileResult = [[NSFileManager defaultManager] createDirectoryAtPath:fakelibPath withIntermediateDirectories:YES attributes:nil error:nil];
+		roothide_stage_log("fakelib.mkdir result=%d", fileResult);
+		roothide_stage_log("fakelib.copy_usr_lib.begin");
+		int copyResult = carbonCopy(@"/usr/lib", fakelibPath);
+		roothide_stage_log("fakelib.copy_usr_lib.end result=%d", copyResult);
 
 		// Delete the dyld inside .fakelib
-		[[NSFileManager defaultManager] removeItemAtPath:fakelibDyldPath error:nil];
+		fileResult = [[NSFileManager defaultManager] removeItemAtPath:fakelibDyldPath error:nil];
+		roothide_stage_log("fakelib.remove_dyld result=%d", fileResult);
 
 		// Symlink .fakelib/dyld -> /var/jb/basebin/gen/dyld
-		[[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibDyldPath withDestinationPath:dyldPatchedPath error:nil];
+		fileResult = [[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibDyldPath withDestinationPath:dyldPatchedPath error:nil];
+		roothide_stage_log("fakelib.link_dyld result=%d", fileResult);
 
 		// Symlink .fakelib/systemhook.dylib -> /var/jb/basebin/systemhook.dylib
-		[[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibSystemHookPath withDestinationPath:systemhookPath error:nil];
+		fileResult = [[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibSystemHookPath withDestinationPath:systemhookPath error:nil];
+		roothide_stage_log("fakelib.link_systemhook result=%d", fileResult);
 
 		// Backup original dyld
-		carbonCopy(@"/usr/lib/dyld", dyldOrigPath);
+		roothide_stage_log("dyld.backup.begin");
+		copyResult = carbonCopy(@"/usr/lib/dyld", dyldOrigPath);
+		roothide_stage_log("dyld.backup.end result=%d", copyResult);
 	}
 
-	carbonCopy(dyldOrigPath, dyldInflightPath);
+	roothide_stage_log("dyld.copy_inflight.begin");
+	int operationResult = carbonCopy(dyldOrigPath, dyldInflightPath);
+	roothide_stage_log("dyld.copy_inflight.end result=%d", operationResult);
 
 	NSString *dyldUUIDPrefix = [@"DOPA" stringByAppendingString:dopamineVersion];
-	if (apply_dyld_patch(dyldInflightPath, dyldUUIDPrefix.UTF8String) != 0) return 2;
-	if (merge_dyldhook(dyldInflightPath, dyldInflightPath) != 0) return 3;
-	if (resign_file(dyldInflightPath, @"com.apple.dyld", YES) != 0) return 4;
+	roothide_stage_log("dyld.patch.begin");
+	operationResult = apply_dyld_patch(dyldInflightPath, dyldUUIDPrefix.UTF8String);
+	roothide_stage_log("dyld.patch.end result=%d", operationResult);
+	if (operationResult != 0) return 2;
+	roothide_stage_log("dyld.merge.begin");
+	operationResult = merge_dyldhook(dyldInflightPath, dyldInflightPath);
+	roothide_stage_log("dyld.merge.end result=%d", operationResult);
+	if (operationResult != 0) return 3;
+	roothide_stage_log("dyld.resign.begin");
+	operationResult = resign_file(dyldInflightPath, @"com.apple.dyld", YES);
+	roothide_stage_log("dyld.resign.end result=%d", operationResult);
+	if (operationResult != 0) return 4;
 
 	if (comingFromJBUpdate) {
 		// We cannot delete dyld as this point because it's still in use
@@ -153,6 +181,9 @@ int basebin_generate(bool comingFromJBUpdate)
 		[[NSFileManager defaultManager] moveItemAtPath:dyldPatchedPath toPath:dyldOldPath error:nil];
 	}
 
-	[[NSFileManager defaultManager] moveItemAtPath:dyldInflightPath toPath:dyldPatchedPath error:nil];
+	roothide_stage_log("dyld.publish.begin");
+	fileResult = [[NSFileManager defaultManager] moveItemAtPath:dyldInflightPath toPath:dyldPatchedPath error:nil];
+	roothide_stage_log("dyld.publish.end result=%d", fileResult);
+	roothide_stage_log("basebin.end result=0");
 	return 0;
 }

@@ -184,6 +184,9 @@ jobs:
       - name: Litehook TPRO write scope regressions
         run: python3 .github/scripts/test_litehook_tpro.py
 
+      - name: RootHide persistent stage log regressions
+        run: python3 .github/scripts/test_roothide_stage_log.py
+
       - name: Focused build P0-touched targets
         if: env.BUILD_MODE == 'focused'
         run: |

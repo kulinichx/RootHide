@@ -30,6 +30,7 @@
 #import <libjailbreak/jbclient_mach.h>
 #import <libjailbreak/kcall_arm64.h>
 #import <libjailbreak/basebin_gen.h>
+#import <libjailbreak/roothide_stage.h>
 #import <choma/Fat.h>
 #import <choma/MachO.h>
 #import <errno.h>
@@ -771,8 +772,12 @@ void *boomerang_server(struct boomerang_info *info)
 
 /*************************** roothide specific *******************/
 [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"RootHide Stage") debug:NO];
+int logResult = roothide_stage_begin([[DOUIManager sharedInstance] rootHideStageLogPath].fileSystemRepresentation, false);
+roothide_stage_log("activation.begin log_open_result=%d os=%s dyld_patch_enabled=%d", logResult,
+    NSProcessInfo.processInfo.operatingSystemVersionString.UTF8String, gSystemInfo.jailbreakInfo.dyld_patch_enabled);
 
 int ret = basebin_generate(false);
+roothide_stage_log("activation.basebin.end result=%d", ret);
 if (ret != 0) {
     *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedInitFakeLib userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Creating fakelib failed with error: %d", ret]}];
     [self cleanUpPostExploitation];
@@ -780,6 +785,7 @@ if (ret != 0) {
 }
 
 ret = ensure_dyld_trustcache(JBROOT_PATH("/basebin/.fakelib/dyld"));
+roothide_stage_log("activation.trustcache.end result=%d", ret);
 if (ret != 0) {
     *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedInitFakeLib userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to upload dyld trustcache: %d", ret]}];
     [self cleanUpPostExploitation];
@@ -788,6 +794,7 @@ if (ret != 0) {
 
 exec_set_patch(true); /* launchdhook injected and dyld patched, 
 now we can enable dyld patching for new process */
+roothide_stage_log("activation.child_patching.enabled");
 
 // don't use dyld-in-cache due to dyldhooks
 setenv("DYLD_IN_CACHE", "0", 1);
@@ -799,16 +806,24 @@ setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
 /******************************** roothide specific *************************/
     
     // Unsandbox iconservicesagent so that app icons can work
-    exec_cmd_trusted(JBROOT_PATH("/usr/bin/killall"), "-9", "iconservicesagent", NULL);
+    roothide_stage_log("activation.iconservices.begin");
+    int iconResult = exec_cmd_trusted(JBROOT_PATH("/usr/bin/killall"), "-9", "iconservicesagent", NULL);
+    roothide_stage_log("activation.iconservices.end result=%d", iconResult);
     
+    roothide_stage_log("activation.bootstrap_finalize.begin");
     *errOut = [self finalizeBootstrapIfNeeded];
+    roothide_stage_log("activation.bootstrap_finalize.end error=%s", *errOut ? (*errOut).description.UTF8String : "none");
     if (*errOut) {
         [self cleanUpPostExploitation];
         return;
     }
+    roothide_stage_log("activation.restore_mounts.begin");
     [[DOEnvironmentManager sharedManager] restoreFakeMounts];
+    roothide_stage_log("activation.restore_mounts.end");
     
+    roothide_stage_log("activation.idownload.begin enabled=%d", idownloadEnabled);
     [[DOEnvironmentManager sharedManager] setIDownloadEnabled:idownloadEnabled needsUnsandbox:NO];
+    roothide_stage_log("activation.idownload.end");
     
 /*
     [[DOUIManager sharedInstance] sendLog:DOLocalizedString(@"Checking For Duplicate Apps") debug:NO];
@@ -820,7 +835,9 @@ setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
     }
 */
 
+    roothide_stage_log("activation.cleanup.begin");
     *errOut = [self cleanUpPostExploitation];
+    roothide_stage_log("activation.cleanup.end error=%s", *errOut ? (*errOut).description.UTF8String : "none");
     if (*errOut) return;
     
     //printf("Starting launch daemons...\n");
@@ -830,6 +847,7 @@ setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/systemhook.dylib"), 1);
     // It's only neccessary when we don't immediately userspace reboot
     
     printf("Done!\n");
+    roothide_stage_log("activation.complete");
 }
 
 - (void)finalize

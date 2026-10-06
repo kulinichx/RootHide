@@ -2135,9 +2135,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
             }];
         }],
         [UIAction actionWithTitle:DOLocalizedString(@"Menu_Reboot_Userspace_Title") image:[UIImage systemImageNamed:@"arrow.clockwise.circle" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] identifier:@"reboot-userspace" handler:^(__kindof UIAction * _Nonnull action) {
-            [self fadeToBlack:^{
-                [[DOEnvironmentManager sharedManager] rebootUserspace];
-            }];
+            [[DOEnvironmentManager sharedManager] rebootUserspace];
         }],
         [UIAction actionWithTitle:DOLocalizedString(@"Menu_Reboot_Device_Title") image:[UIImage systemImageNamed:@"power" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] identifier:@"reboot-device" handler:^(__kindof UIAction * _Nonnull action) {
             UIAlertController *confirmation = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Menu_Reboot_Device_Title") message:DOLocalizedString(@"Alert_Reboot_Device_Body") preferredStyle:UIAlertControllerStyleAlert];
@@ -3025,9 +3023,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         }];
     }];
     UIAction *userspaceAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [self fadeToBlack:^{
-            [[DOEnvironmentManager sharedManager] rebootUserspace];
-        }];
+        [[DOEnvironmentManager sharedManager] rebootUserspace];
     }];
     UIAction *rebootAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         UIAlertController *confirmation = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Menu_Reboot_Device_Title") message:DOLocalizedString(@"Alert_Reboot_Device_Body") preferredStyle:UIAlertControllerStyleAlert];
@@ -3261,9 +3257,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
             else {
                 // No errors
                 [[DOUIManager sharedInstance] completeJailbreak];
-                [self fadeToBlack: ^{
-                    [jailbreaker finalize];
-                }];
+                [jailbreaker finalize];
             }
         });
         [self.jailbreakBtn unlockMutex];

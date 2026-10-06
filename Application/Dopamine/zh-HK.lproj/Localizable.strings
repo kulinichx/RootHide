@@ -130,3 +130,6 @@
 "System_Uptime_Prefix" = "已運行";
 "System_Uptime_Less_Than_Minute" = "已運行 不到 1 分鐘";
 "Settings_Disable_Update" = "禁止更新檢測";
+"Menu_Share_RootHide_Log" = "匯出 RootHide 日誌";
+"RootHide_Log_Unavailable" = "沒有可匯出的 RootHide 階段日誌。";
+"Userspace_Reboot_Failed_Format" = "使用者空間重新啟動指令失敗（傳回值：%d）。請到設定中匯出 RootHide 日誌。";

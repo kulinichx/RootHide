@@ -24,6 +24,7 @@
 extern char **environ;
 
 #include "roothider.h"
+#include "roothide_stage.h"
 
 #define FAKE_PHYSPAGE_TO_MAP 0x13370000
 
@@ -860,11 +861,16 @@ int fd_attach_signature(int fd, fsignatures_t *signature)
 int cmd_wait_for_exit(pid_t pid)
 {
 	int status = 0;
+	roothide_stage_log("wait.begin pid=%d", pid);
 	do {
 		if (waitpid(pid, &status, 0) == -1) {
+			roothide_stage_log("wait.error pid=%d errno=%d", pid, errno);
 			return -1;
 		}
 	} while (!WIFEXITED(status) && !WIFSIGNALED(status));
+	roothide_stage_log("wait.end pid=%d raw_status=%d exit=%d signal=%d", pid, status,
+		WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+		WIFSIGNALED(status) ? WTERMSIG(status) : 0);
 	return status;
 }
 
@@ -899,7 +905,9 @@ int __exec_cmd_internal_va(bool suspended, bool root, bool waitForExit, pid_t *p
 	}
 
 	pid_t spawnedPid = 0;
+	roothide_stage_log("exec.begin binary=%s suspended=%d wait=%d", binary, suspended, waitForExit);
 	int spawnError = exec_cmd_roothide_spawn(&spawnedPid, binary, NULL, &attr, (char *const *)argv, envToUse);
+	roothide_stage_log("exec.spawn.end binary=%s result=%d pid=%d", binary, spawnError, spawnedPid);
 	if (attr) posix_spawnattr_destroy(&attr);
 	if (spawnError != 0) return spawnError;
 

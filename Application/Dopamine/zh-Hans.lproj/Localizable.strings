@@ -147,3 +147,6 @@
 "System_Uptime_Prefix" = "已运行";
 "System_Uptime_Less_Than_Minute" = "已运行 不到 1 分钟";
 "Settings_Disable_Update" = "禁用更新检测";
+"Menu_Share_RootHide_Log" = "导出 RootHide 日志";
+"RootHide_Log_Unavailable" = "没有可导出的 RootHide 阶段日志。";
+"Userspace_Reboot_Failed_Format" = "用户空间重启命令失败（返回值：%d）。请到设置中导出 RootHide 日志。";

@@ -150,3 +150,6 @@
 "System_Uptime_Prefix" = "uptime:";
 "System_Uptime_Less_Than_Minute" = "uptime: less than 1 minute";
 "Settings_Disable_Update" = "Disable Update";
+"Menu_Share_RootHide_Log" = "Share RootHide Log";
+"RootHide_Log_Unavailable" = "No saved RootHide stage log is available.";
+"Userspace_Reboot_Failed_Format" = "The userspace reboot command failed (result: %d). Open Settings and share the RootHide log.";

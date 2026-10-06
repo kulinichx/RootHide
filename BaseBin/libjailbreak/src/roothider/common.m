@@ -17,6 +17,7 @@
 #include "../libjailbreak.h"
 #include "../codesign.h"
 #include "../info.h"
+#include "../roothide_stage.h"
 #include "jailbreakd.h"
 #include "common.h"
 #include "log.h"
@@ -740,7 +741,9 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
     }
 
     if(need_patch_child && !dyld_patch_enabled()) {
+        roothide_stage_log("spawn.trust.begin path=%s", path);
         if(jbclient_trust_executable_recurse(path, NULL) != 0) {
+            roothide_stage_log("spawn.trust.failed path=%s", path);
             JBLogError("Failed to trust executable: %s", path);
             if(attr) {
                 posix_spawnattr_destroy(&attr);
@@ -748,6 +751,7 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
             }
             return 999;
         }
+        roothide_stage_log("spawn.trust.end path=%s", path);
     }
 
     short flags=0;
@@ -762,8 +766,10 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
 
     pid_t pidval = 0;
     if (!pidp) pidp = &pidval;
+    roothide_stage_log("posix_spawn.begin path=%s patch_child=%d resume=%d", path, need_patch_child, should_resume);
     int ret = posix_spawn(pidp, path, fap, attrp, argv, envp);
     pid_t pid = (ret == 0) ? *pidp : 0;
+    roothide_stage_log("posix_spawn.end result=%d pid=%d", ret, pid);
 
     JBLogDebug("spawn ret=%d pid=%d", ret, pid);
 
@@ -771,7 +777,10 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
     {
         if(need_patch_child) {
             // will fail before launchdhook injected and dyld patched, eg: opainject...
-            if(jbdSpawnPatchChild(pid, should_resume) != 0) {
+            roothide_stage_log("spawn.patch.begin pid=%d resume=%d", pid, should_resume);
+            int patchResult = jbdSpawnPatchChild(pid, should_resume);
+            roothide_stage_log("spawn.patch.end pid=%d result=%d", pid, patchResult);
+            if(patchResult != 0) {
                 JBLogError("Failed to patch spawned process (%d) %s", pid, path);
                 //jailbreak internal spawn, just let it hang forever so that we could get a panic log
                 //kill(pid, SIGQUIT); //core dump
@@ -784,7 +793,8 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
             }
         } else {
             if (should_resume) {
-                kill(pid, SIGCONT);
+                int resumeResult = kill(pid, SIGCONT);
+                roothide_stage_log("spawn.resume pid=%d result=%d errno=%d", pid, resumeResult, resumeResult ? errno : 0);
             }
         }
     }
@@ -800,25 +810,38 @@ int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_fil
 int ensure_dyld_trustcache(const char* path)
 {
     JBLogDebug("trusting dyld file: %s", path);
+    roothide_stage_log("dyld.trustcache.begin path=%s", path);
 
     cdhash_t cdhash = {0};
-    if(ensure_randomized_cdhash(path, cdhash) != 0) {
+    roothide_stage_log("dyld.cdhash.begin");
+    int hashResult = ensure_randomized_cdhash(path, cdhash);
+    roothide_stage_log("dyld.cdhash.end result=%d", hashResult);
+    if(hashResult != 0) {
         JBLogError("Error: failed to ensure randomized cdhash: %s\n", path);
         return -1;
     }
 
-    if(is_cdhash_trustcached(cdhash)) {
+    roothide_stage_log("dyld.trustcache.query.begin");
+    bool alreadyTrusted = is_cdhash_trustcached(cdhash);
+    roothide_stage_log("dyld.trustcache.query.end trusted=%d", alreadyTrusted);
+    if(alreadyTrusted) {
         JBLogDebug("dyld file already trusted: %s", path);
         return 0;
     }
 
     trustcache_file_v1 *dyldTCFile = NULL;
-    if (trustcache_file_build_from_cdhashes(cdhash, 1, &dyldTCFile) != 0) {
+    roothide_stage_log("dyld.trustcache.build.begin");
+    int buildResult = trustcache_file_build_from_cdhashes(cdhash, 1, &dyldTCFile);
+    roothide_stage_log("dyld.trustcache.build.end result=%d", buildResult);
+    if (buildResult != 0) {
         JBLogError("Failed to build dyld trustcache");
         return -1;
     }
 
-    if (trustcache_file_upload_with_uuid(dyldTCFile, DYLD_TRUSTCACHE_UUID) != 0) {
+    roothide_stage_log("dyld.trustcache.upload.begin");
+    int uploadResult = trustcache_file_upload_with_uuid(dyldTCFile, DYLD_TRUSTCACHE_UUID);
+    roothide_stage_log("dyld.trustcache.upload.end result=%d", uploadResult);
+    if (uploadResult != 0) {
         JBLogError("Failed to upload dyld trustcache");
         free(dyldTCFile);
         return -1;

@@ -31,6 +31,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)completeJailbreak;
 - (void)startLogCapture;
 - (void)shareLogRecordFromView:(UIView *)sourceView;
+- (NSString *)rootHideStageLogPath;
+- (void)shareRootHideStageLogFromView:(UIView *)sourceView;
 - (BOOL)isUpdateAvailable;
 - (BOOL)environmentUpdateAvailable;
 - (NSArray *)getLatestReleases;

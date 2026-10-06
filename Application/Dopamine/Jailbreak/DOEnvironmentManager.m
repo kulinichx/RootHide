@@ -23,6 +23,8 @@
 #import <libjailbreak/display.h>
 #import <libjailbreak/machine_info.h>
 #import <libjailbreak/carboncopy.h>
+#import <libjailbreak/roothide_stage.h>
+#import <UIKit/UIKit.h>
 
 #import <IOKit/IOKitLib.h>
 #import "DOUIManager.h"
@@ -234,6 +236,7 @@ extern char **environ;
 {
     uint32_t orgUser = getuid();
     uint32_t orgGroup = getgid();
+    roothide_stage_log("privilege.enter uid=%u euid=%u gid=%u", orgUser, (unsigned)geteuid(), orgGroup);
     if (geteuid() == 0 && orgGroup == 0) {
         rootBlock();
         return;
@@ -241,13 +244,16 @@ extern char **environ;
 
     int ur = 0, gr = 0;
     if (orgUser != 0) ur = setuid(0);
+    int userErrno = ur != 0 ? errno : 0;
     if (orgGroup != 0) gr = setgid(0);
+    roothide_stage_log("privilege.set_root user_result=%d user_errno=%d group_result=%d group_errno=%d", ur, userErrno, gr, gr != 0 ? errno : 0);
     if (ur == 0 && gr == 0) {
         rootBlock();
     }
     
     if (gr == 0 && orgGroup != 0) setgid(orgGroup);
     if (ur == 0 && orgUser != 0) seteuid(orgUser);
+    roothide_stage_log("privilege.leave uid=%u euid=%u gid=%u", (unsigned)getuid(), (unsigned)geteuid(), (unsigned)getgid());
 }
 
 - (int)spawnJbctlAsRootWithArgs:(NSArray *)args
@@ -339,7 +345,9 @@ extern char **environ;
 
     [self runAsRoot:^{
         [self runUnsandboxed:^{
+            roothide_stage_log("jbctl.posix_spawn.begin uid=%d euid=%d gid=%d", getuid(), geteuid(), getgid());
             spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
+            roothide_stage_log("jbctl.posix_spawn.end result=%d pid=%d", spawnResult, pid);
             if (needsLegacySolution && spawnResult == 0) {
                 // Compatibility only: Dopamine <3.0.5 jbctl has no --waitfor support.
                 kill(pid, SIGCONT);
@@ -351,10 +359,14 @@ extern char **environ;
 
     if (!needsLegacySolution && spawnResult == 0) {
         char token = 'w';
-        (void)write(waitPipe[1], &token, sizeof(token));
+        roothide_stage_log("jbctl.handoff.begin pid=%d", pid);
+        ssize_t written = write(waitPipe[1], &token, sizeof(token));
+        roothide_stage_log("jbctl.handoff.end written=%zd errno=%d", written, written < 0 ? errno : 0);
     }
 
+    roothide_stage_log("jbctl.wait.begin spawn_result=%d pid=%d", spawnResult, pid);
     r = (spawnResult == 0) ? cmd_wait_for_exit(pid) : spawnResult;
+    roothide_stage_log("jbctl.wait.end result=%d", r);
 
     if (waitPipe[0] >= 0) close(waitPipe[0]);
     if (waitPipe[1] >= 0) close(waitPipe[1]);
@@ -390,7 +402,35 @@ extern char **environ;
     // Same sequencing rule as respring. The --waitfor pipe is handled by
     // spawnJbctlAsRootWithArgs:, while older installed jbctl versions keep
     // using the compatibility path inside that helper.
-    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self rebootUserspace]; });
+        return;
+    }
+    // Serialize requests on the main queue, keeping the UI and log export
+    // responsive while jbctl waits. A returned success is only a request result.
+    static BOOL requestInFlight = NO;
+    if (requestInFlight) return;
+    requestInFlight = YES;
+    NSString *logPath = [[DOUIManager sharedInstance] rootHideStageLogPath];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // Append on App relaunch so an incomplete activation is still visible.
+        int logResult = roothide_stage_begin(logPath.fileSystemRepresentation, true);
+        roothide_stage_log("userspace_reboot.request log_open_result=%d", logResult);
+        int result = [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+        roothide_stage_log("userspace_reboot.return result=%d", result);
+        roothide_stage_end();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            requestInFlight = NO;
+            if (result != 0) {
+                UIViewController *presenter = [UIApplication sharedApplication].keyWindow.rootViewController;
+                while (presenter.presentedViewController) presenter = presenter.presentedViewController;
+                NSString *message = [NSString stringWithFormat:DOLocalizedString(@"Userspace_Reboot_Failed_Format"), result];
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Menu_Reboot_Userspace_Title") message:message preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleDefault handler:nil]];
+                [presenter presentViewController:alert animated:YES completion:nil];
+            }
+        });
+    });
 }
 
 - (void)refreshJailbreakApps

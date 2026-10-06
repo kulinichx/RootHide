@@ -246,6 +246,29 @@
     [self sendLog:log debug:debug update:NO];
 }
 
+- (NSString *)rootHideStageLogPath
+{
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/RootHideStage.log"];
+}
+
+- (void)shareRootHideStageLogFromView:(UIView *)sourceView
+{
+    NSString *log = [NSString stringWithContentsOfFile:[self rootHideStageLogPath] encoding:NSUTF8StringEncoding error:nil];
+    UIViewController *presenter = sourceView.window.rootViewController;
+    while (presenter.presentedViewController) presenter = presenter.presentedViewController;
+    if (!log.length) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Menu_Share_RootHide_Log") message:DOLocalizedString(@"RootHide_Log_Unavailable") preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleDefault handler:nil]];
+        [presenter presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    // Share a snapshot so a still-running stage cannot change the shared text.
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[log] applicationActivities:nil];
+    share.popoverPresentationController.sourceView = sourceView;
+    share.popoverPresentationController.sourceRect = sourceView.bounds;
+    [presenter presentViewController:share animated:YES completion:nil];
+}
+
 - (void)shareLogRecordFromView:(UIView *)sourceView
 {
     if (self.logRecord.count == 0)
