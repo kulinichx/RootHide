@@ -12,25 +12,58 @@ struct tt_level arm_tt_level[4];
 #define PTOV_TABLE_SIZE 8
 uint64_t phystokv(uint64_t pa)
 {
+	errno = 0;
 	struct ptov_table_entry {
 		uint64_t pa;
 		uint64_t va;
 		uint64_t len;
-	} ptov_table[PTOV_TABLE_SIZE];
-	if (ksymbol(ptov_table)) {
-		kreadbuf(ksymbol(ptov_table), &ptov_table[0], sizeof(ptov_table));
+	} ptov_table[PTOV_TABLE_SIZE] = {0};
+	uint64_t ptov_table_addr = ksymbol(ptov_table);
+	if (ptov_table_addr) {
+		if (kreadbuf(ptov_table_addr, &ptov_table[0], sizeof(ptov_table)) != 0) {
+			errno = EIO;
+			return 0;
+		}
 
 		for (uint64_t i = 0; (i < PTOV_TABLE_SIZE) && (ptov_table[i].len != 0); i++) {
-			if ((pa >= ptov_table[i].pa) && (pa < (ptov_table[i].pa + ptov_table[i].len))) {
-				return pa - ptov_table[i].pa + ptov_table[i].va;
+			if (pa >= ptov_table[i].pa) {
+				uint64_t entryOffset = pa - ptov_table[i].pa;
+				if (entryOffset < ptov_table[i].len) {
+					if (ptov_table[i].va > UINT64_MAX - entryOffset) {
+						errno = EOVERFLOW;
+						return 0;
+					}
+					uint64_t va = ptov_table[i].va + entryOffset;
+					if (va == 0) {
+						errno = EFAULT;
+						return 0;
+					}
+					return va;
+				}
 			}
 		}
 	}
 
-	if (kconstant(physBase) && kconstant(virtBase) && !ksymbol(SPTMArgs)) {
-		return pa - kconstant(physBase) + kconstant(virtBase);
+	uint64_t physBase = kconstant(physBase);
+	uint64_t virtBase = kconstant(virtBase);
+	uint64_t physSize = kconstant(physSize);
+	if (physBase && virtBase && !ksymbol(SPTMArgs)) {
+		if (pa >= physBase) {
+			uint64_t offset = pa - physBase;
+			if (!physSize || offset < physSize) {
+				if (virtBase > UINT64_MAX - offset) {
+					errno = EOVERFLOW;
+					return 0;
+				}
+				uint64_t va = virtBase + offset;
+				if (va != 0) return va;
+				errno = EFAULT;
+				return 0;
+			}
+		}
 	}
 
+	errno = EFAULT;
 	return 0;
 }
 

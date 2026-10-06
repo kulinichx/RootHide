@@ -153,6 +153,9 @@ jobs:
       - name: RootHide-only runtime contract
         run: python3 .github/scripts/test_roothide_runtime_contract.py
 
+      - name: RootHide physical translation regressions
+        run: python3 .github/scripts/test_translation_health.py
+
       - name: RootHide envbuf negative and sanitizer regressions
         run: python3 .github/scripts/test_envbuf_runtime.py
 
