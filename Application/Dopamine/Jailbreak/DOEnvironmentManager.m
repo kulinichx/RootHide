@@ -416,7 +416,16 @@ extern char **environ;
         // Append on App relaunch so an incomplete activation is still visible.
         int logResult = roothide_stage_begin(logPath.fileSystemRepresentation, true);
         roothide_stage_log("userspace_reboot.request log_open_result=%d", logResult);
-        int result = [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+        // The App has already dropped its saved root credentials by this
+        // point (iOS 17 reports uid/euid/gid 501).  Calling the generic
+        // spawn helper would therefore fail in runAsRoot() before it ever
+        // reaches posix_spawn().  exec_cmd_root() applies the root persona
+        // directly to the child and does not depend on setuid(0) here.
+        roothide_stage_log("userspace_reboot.spawn.begin uid=%d euid=%d gid=%d",
+                           getuid(), geteuid(), getgid());
+        int result = exec_cmd_root(JBROOT_PATH("/basebin/jbctl"),
+                                   "reboot_userspace", NULL);
+        roothide_stage_log("userspace_reboot.spawn.end result=%d", result);
         roothide_stage_log("userspace_reboot.return result=%d", result);
         roothide_stage_end();
         dispatch_async(dispatch_get_main_queue(), ^{
