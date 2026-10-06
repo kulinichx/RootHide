@@ -5,6 +5,8 @@
 #include <libjailbreak/roothider.h>
 #include <libjailbreak/codesign.h>
 #include <os/log.h>
+#include <limits.h>
+#include <stdlib.h>
 
 int roothide_unsupport_request()
 {
@@ -229,8 +231,18 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
 
     const char *processPath = proc_get_path(pid, NULL);
     const char *expectedPath = JBROOT_PATH("/basebin/jailbreakd");
-    if(!processPath || !expectedPath || strcmp(processPath, expectedPath) != 0) {
-        JBLogError("jailbreakd checkin: denying caller pid=%d path=%s", pid, processPath ? processPath : "<unknown>");
+    char normalizedProcessPath[PATH_MAX] = {0};
+    char normalizedExpectedPath[PATH_MAX] = {0};
+    bool processPathResolved = processPath && realpath(processPath, normalizedProcessPath) != NULL;
+    bool expectedPathResolved = expectedPath && realpath(expectedPath, normalizedExpectedPath) != NULL;
+    if(!processPathResolved || !expectedPathResolved ||
+       strcmp(normalizedProcessPath, normalizedExpectedPath) != 0) {
+        JBLogError("jailbreakd checkin: denying caller pid=%d path=%s normalized=%s expected=%s normalizedExpected=%s",
+                   pid,
+                   processPath ? processPath : "<unknown>",
+                   processPathResolved ? normalizedProcessPath : "<unresolved>",
+                   expectedPath ? expectedPath : "<unknown>",
+                   expectedPathResolved ? normalizedExpectedPath : "<unresolved>");
         return -1;
     }
 
