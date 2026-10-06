@@ -126,7 +126,9 @@ def main():
         harness = temp / 'test.c'
         harness.write_text(HARNESS, encoding='utf-8')
         binary = temp / 'test'
-        subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-Wall', '-Wextra', '-Werror',
+        # Darwin hides O_NOFOLLOW in the POSIX-only namespace. Enable its
+        # extensions without removing strict C11 or warning checks.
+        subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror',
                         '-pthread', '-I', str(SOURCE), str(harness), str(SOURCE / 'roothide_stage.c'),
                         '-o', str(binary)], check=True)
         subprocess.run([str(binary), 'test', str(temp / 'stage.log')], check=True)
