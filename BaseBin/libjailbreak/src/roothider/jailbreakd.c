@@ -13,6 +13,7 @@
 #include "common.h"
 #include "log.h"
 #include "../jbserver.h"
+#include "../roothide_stage.h"
 
 #ifdef ENABLE_LOGS
 static void (*JBDLogDebugFunction)(const char *format, ...);
@@ -82,6 +83,7 @@ mach_port_t jailbreakdClientPortFastGet()
 	mach_port_t port = MACH_PORT_NULL;
 	mach_port_t self_host = mach_host_self();
 	kern_return_t kr = host_get_special_port(self_host, HOST_LOCAL_NODE, HOST_LAUNCHCTL_PORT, &port);
+	roothide_stage_log("jbd.fast_lookup.end result=%d port=%x", kr, port);
 	mach_port_deallocate(mach_task_self(), self_host);
 	if(kr != KERN_SUCCESS) {
 		JBLogError("jailbreakdClientPortFastGet failed: %x,%s", kr, mach_error_string(kr));
@@ -137,9 +139,15 @@ int spawnJailbreakd()
 				struct jbserver_impl *globalServer = dlsym(RTLD_DEFAULT, "gGlobalServer");
 				int (*receiveMessage)(struct jbserver_impl *, xpc_object_t) =
 					dlsym(RTLD_DEFAULT, "jbserver_received_xpc_message");
+				bool isDictionary = xdict && xpc_get_type(xdict) == XPC_TYPE_DICTIONARY;
+				roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH,
+					"bootstrap.dispatch.begin domain=%llu action=%llu server_found=%d handler_found=%d",
+					(unsigned long long)(isDictionary ? xpc_dictionary_get_uint64(xdict, "jb-domain") : 0),
+					(unsigned long long)(isDictionary ? xpc_dictionary_get_uint64(xdict, "action") : 0), globalServer != NULL, receiveMessage != NULL);
 				int handled = (globalServer && receiveMessage)
 					? receiveMessage(globalServer, xdict)
 					: -1;
+				roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH, "bootstrap.dispatch.end result=%d", handled);
 				if (handled != 0) {
 					JBLogError("jailbreakd bootstrap request failed: %d", handled);
 				}
@@ -314,16 +322,23 @@ mach_port_t jailbreakdClientPort()
 
 xpc_object_t jailbreakdXpcRequest(xpc_object_t xdict)
 {
+	uint64_t requestId = xdict && xpc_get_type(xdict) == XPC_TYPE_DICTIONARY ? xpc_dictionary_get_uint64(xdict, "id") : 0;
+	roothide_stage_log("jbd.port_lookup.begin id=%llu", (unsigned long long)requestId);
 	mach_port_t port = jailbreakdClientPort();
+	roothide_stage_log("jbd.port_lookup.end id=%llu port=%x valid=%d", (unsigned long long)requestId, port, MACH_PORT_VALID(port));
 	if (!MACH_PORT_VALID(port)) {
 		JBLogError("invalid jailbreakdClientPort: %x", port);
 		return NULL;
 	}
 	
 	xpc_object_t xreply = NULL;
+	roothide_stage_log("jbd.pipe_create.begin id=%llu", (unsigned long long)requestId);
 	xpc_object_t pipe = xpc_pipe_create_from_port(port, 0);
+	roothide_stage_log("jbd.pipe_create.end id=%llu created=%d", (unsigned long long)requestId, pipe != NULL);
 	if (pipe) {
+		roothide_stage_log("jbd.rpc.begin id=%llu", (unsigned long long)requestId);
 		int err = xpc_pipe_routine(pipe, xdict, &xreply);
+		roothide_stage_log("jbd.rpc.end id=%llu error=%d reply=%d", (unsigned long long)requestId, err, xreply != NULL);
 		if (err != 0) {
 			char *desc = NULL;
 			JBLogError("xpc_pipe_routine error on sending message to jailbreakd: %d / %s\n%s", err, xpc_strerror(err), (desc=xpc_copy_description(xdict)));

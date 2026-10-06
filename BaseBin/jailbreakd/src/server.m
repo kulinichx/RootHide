@@ -4,6 +4,7 @@
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
+#include <libjailbreak/roothide_stage.h>
 
 void jailbreakd_reply_message(JBD_MESSAGE_ID msgId, xpc_object_t reply)
 {
@@ -11,6 +12,7 @@ void jailbreakd_reply_message(JBD_MESSAGE_ID msgId, xpc_object_t reply)
 	JBLogDebug("reply message %d with %s", msgId, (desc=xpc_copy_description(reply)));
 	if(desc) free(desc);
 	int err = xpc_pipe_routine_reply(reply);
+	roothide_stage_log("jailbreakd.reply id=%llu error=%d", (unsigned long long)msgId, err);
 	if (err != 0) {
 		JBLogError("Error %d sending response", err);
 	}
@@ -21,6 +23,7 @@ void jailbreakd_received_message(mach_port_t port)
 	@autoreleasepool {
 		xpc_object_t message = nil;
 		int err = xpc_pipe_receive(port, &message);
+		roothide_stage_log("jailbreakd.receive result=%d", err);
 		if (err != 0) {
 			JBLogError("xpc_pipe_receive error %d", err);
 			return;
@@ -29,6 +32,7 @@ void jailbreakd_received_message(mach_port_t port)
 		xpc_object_t reply = xpc_dictionary_create_reply(message);
 
 		JBD_MESSAGE_ID msgId = xpc_dictionary_get_uint64(message, "id");
+		roothide_stage_log("jailbreakd.message id=%llu", (unsigned long long)msgId);
 		
 		if (xpc_get_type(message) == XPC_TYPE_DICTIONARY) {
 			audit_token_t auditToken = {0};
@@ -73,16 +77,22 @@ void jailbreakd_received_message(mach_port_t port)
 					bool forceDyldPatch = xpc_dictionary_get_bool(message, "force-dyld-patch");
 					pid_t ppid = proc_get_ppid(pid);
 					JBLogDebug("spawn patch: client pid=%d, child pid=%d, child's parent pid=%d, child proc=%s", clientPid, pid, ppid, proc_get_path(pid,NULL));
+					roothide_stage_log("jailbreakd.patch.request client=%d child=%d parent=%d resume=%d force_dyld=%d", clientPid, pid, ppid, resume, forceDyldPatch);
 					if(ppid == clientPid) {
 						if(ppid==1 && resume==false) {
 							//`frida -f` sucks with proc_patch_dyld on ios15
 							result = proc_patch_csflags(pid);
 						}
-						else if(roothide_patch_proc_ex(pid, forceDyldPatch) == 0) {
-							if(resume) kill(pid, SIGCONT);
-						} else {
-							JBLogError("spawn patch failed: %d", pid);
-							result = -1;
+						else {
+							roothide_stage_log("jailbreakd.patch.begin child=%d", pid);
+							int patchResult = roothide_patch_proc_ex(pid, forceDyldPatch);
+							roothide_stage_log("jailbreakd.patch.end child=%d result=%d", pid, patchResult);
+							if(patchResult == 0) {
+								if(resume) kill(pid, SIGCONT);
+							} else {
+								JBLogError("spawn patch failed: %d", pid);
+								result = -1;
+							}
 						}
 					} else {
 						JBLogError("spawn patch denied: %d", pid);

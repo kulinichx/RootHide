@@ -6,6 +6,7 @@
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
+#include <libjailbreak/roothide_stage.h>
 
 extern char **environ;
 
@@ -25,9 +26,16 @@ void enableXPCLog(void* debugLog, void* errorLog);
 
 int main(int argc, char* argv[])
 {
+	if (@available(iOS 17.0, *)) {
+		int logResult = roothide_stage_begin(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH, true);
+		roothide_stage_log("jailbreakd.start log_open_result=%d uid=%d ppid=%d", logResult, getuid(), getppid());
+	}
+	roothide_stage_log("jailbreakd.crashreporter.begin");
 	crashreporter_start();
+	roothide_stage_log("jailbreakd.crashreporter.end");
 
 	setJetsamLimit(50, false);
+	roothide_stage_log("jailbreakd.jetsam.end");
 
 #ifdef ENABLE_LOGS
 	enableXPCLog(JBLogDebugFunction, JBLogErrorFunction);
@@ -41,6 +49,7 @@ int main(int argc, char* argv[])
 		mach_port_t *registeredPorts=NULL;
 		mach_msg_type_number_t registeredPortsCount = 0;
 		kern_return_t kr = mach_ports_lookup(mach_task_self(), &registeredPorts, &registeredPortsCount);
+		roothide_stage_log("jailbreakd.registered_ports result=%d count=%u", kr, registeredPortsCount);
 		if(kr != KERN_SUCCESS || registeredPortsCount < 3) {
 			JBLogError("mach_ports_lookup error: %d, %x, %s", registeredPortsCount, kr, mach_error_string(kr));
 			return 1;
@@ -50,6 +59,7 @@ int main(int argc, char* argv[])
 		}
 
 		mach_port_t bootstraport = registeredPorts[2];
+		roothide_stage_log("jailbreakd.bootstrap_port port=%x valid=%d", bootstraport, MACH_PORT_VALID(bootstraport));
 		if(!MACH_PORT_VALID(bootstraport)) {
 			JBLogError("invalid bootstraport");
 			return 2;
@@ -62,6 +72,7 @@ int main(int argc, char* argv[])
 		JBLogDebug("start initializing jb primitives");
 		jbclient_xpc_set_custom_port(bootstraport);
 		int ret = jbclient_initialize_primitives();
+		roothide_stage_log("jailbreakd.primitives.end result=%d", ret);
 		JBLogDebug("jbclient_initialize_primitives ret: %d", ret);
 		if(ret != 0) {
 			JBLogError("Failed to initialize jailbreak primitives: %d", ret);
@@ -112,7 +123,12 @@ int main(int argc, char* argv[])
 		}
 
 		JBLogDebug("check in jailbreakd port...");
+		char ownPath[PATH_MAX] = {0};
+		const char *actualPath = proc_get_path(getpid(), ownPath);
+		roothide_stage_log("jailbreakd.checkin.identity actual=%s expected=%s", actualPath ? actualPath : "<unknown>", JBROOT_PATH("/basebin/jailbreakd"));
+		roothide_stage_log("jailbreakd.checkin.begin");
 		mach_port_t serverPort = jbclient_jailbreakd_checkin();
+		roothide_stage_log("jailbreakd.checkin.end port=%x valid=%d", serverPort, MACH_PORT_VALID(serverPort));
 		if (!MACH_PORT_VALID(serverPort)) {
 			JBLogError("Failed to check in server port");
 			return 6;
@@ -125,6 +141,7 @@ int main(int argc, char* argv[])
 			jailbreakd_received_message(serverPort);
 		});
 		dispatch_resume(source);
+		roothide_stage_log("jailbreakd.server.ready port=%x", serverPort);
 
 		dispatch_main();
 	}

@@ -6,6 +6,7 @@
 //
 
 #import "DOUIManager.h"
+#import <libjailbreak/roothide_stage.h>
 #import "DOEnvironmentManager.h"
 #import "DOThemeManager.h"
 #import "DOTheme.h"
@@ -262,8 +263,14 @@
         [presenter presentViewController:alert animated:YES completion:nil];
         return;
     }
+    NSMutableString *combinedLog = [log mutableCopy];
+    for (NSString *path in @[@ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH, @ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH]) {
+        NSString *serviceLog = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+        [combinedLog appendFormat:@"\n\n--- %@ ---\n%@", path.lastPathComponent,
+            serviceLog.length ? serviceLog : @"No readable service log. This does not establish whether the service started."];
+    }
     // Share a snapshot so a still-running stage cannot change the shared text.
-    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[log] applicationActivities:nil];
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[combinedLog.copy] applicationActivities:nil];
     share.popoverPresentationController.sourceView = sourceView;
     share.popoverPresentationController.sourceRect = sourceView.bounds;
     [presenter presentViewController:share animated:YES completion:nil];

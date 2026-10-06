@@ -10,6 +10,7 @@
 #include <os/alloc_once_private.h>
 
 #include "roothider/log.h"
+#include "roothide_stage.h"
 #ifdef ENABLE_LOGS
 void (*XPCLogDebugFunction)(const char *format, ...);
 void (*XPCLogErrorFunction)(const char *format, ...);
@@ -39,6 +40,10 @@ void jbclient_xpc_set_custom_port(mach_port_t serverPort)
 
 xpc_object_t jbserver_xpc_send_dict(xpc_object_t xdict)
 {
+	bool isDictionary = xdict && xpc_get_type(xdict) == XPC_TYPE_DICTIONARY;
+	roothide_stage_log("jbserver.request.begin domain=%llu action=%llu custom_port=%x",
+		(unsigned long long)(isDictionary ? xpc_dictionary_get_uint64(xdict, "jb-domain") : 0),
+		(unsigned long long)(isDictionary ? xpc_dictionary_get_uint64(xdict, "action") : 0), gJBServerCustomPort);
 	xpc_object_t xreply = NULL;
 
 	xpc_object_t xpipe = NULL;
@@ -60,8 +65,13 @@ xpc_object_t jbserver_xpc_send_dict(xpc_object_t xdict)
 		xpipe = xpc_retain(globalData->xpc_bootstrap_pipe);
 	}
 
-	if (!xpipe) return NULL;
+	if (!xpipe) {
+		roothide_stage_log("jbserver.pipe_create.failed");
+		return NULL;
+	}
+	roothide_stage_log("jbserver.rpc.begin");
 	int err = xpc_pipe_routine_with_flags(xpipe, xdict, &xreply, 0);
+	roothide_stage_log("jbserver.rpc.end error=%d reply=%d", err, xreply != NULL);
 	xpc_release(xpipe);
 	if (err != 0) {
 		return NULL;

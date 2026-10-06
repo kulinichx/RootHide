@@ -46,12 +46,23 @@ int main(int argc, char **argv) {
     errno = EDOM;
     roothide_stage_log("disabled");
     assert(errno == EDOM && access(path, F_OK) != 0);
+    char service_path[4096];
+    snprintf(service_path, sizeof(service_path), "%s.service", path);
+    errno = EDOM;
+    roothide_stage_file_log(service_path, "bootstrap-only event=%d", 1);
+    assert(errno == EDOM);
+    read_log(service_path, buffer, sizeof(buffer));
+    assert(strstr(buffer, "bootstrap-only event=1"));
+    roothide_stage_log("must-remain-disabled");
+    assert(access(path, F_OK) != 0); // One event must not enable general logging.
     assert(roothide_stage_begin(path, false) == 0);
+    roothide_stage_file_log(service_path, "second-bootstrap-event");
     errno = ERANGE;
     roothide_stage_log("first result=%d", 7);
     assert(errno == ERANGE);
     read_log(path, buffer, sizeof(buffer));
     assert(strstr(buffer, "first result=7")); // Visible before close/normal exit.
+    assert(!strstr(buffer, "bootstrap-event")); // Do not replace the active App log.
 
     pid_t pid = fork();
     assert(pid >= 0);
@@ -94,6 +105,12 @@ int main(int argc, char **argv) {
     read_log(path, buffer, sizeof(buffer));
     assert(strstr(buffer, "before-abrupt-exit") && !strstr(buffer, "stderr-only"));
     assert(unlink(link_path) == 0);
+    assert(symlink(path, link_path) == 0);
+    roothide_stage_file_log(link_path, "must-not-follow-symlink");
+    read_log(path, buffer, sizeof(buffer));
+    assert(!strstr(buffer, "must-not-follow-symlink"));
+    assert(unlink(link_path) == 0);
+    assert(unlink(service_path) == 0);
     puts("PASS: persists before abrupt exit, append/truncate, errno, opt-in, no inherited fd, no symlink overwrite");
     return 0;
 }
