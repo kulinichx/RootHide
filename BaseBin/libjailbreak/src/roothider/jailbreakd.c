@@ -150,6 +150,24 @@ int spawnJailbreakd()
 				roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH, "bootstrap.dispatch.end result=%d", handled);
 				if (handled != 0) {
 					JBLogError("jailbreakd bootstrap request failed: %d", handled);
+					if (isDictionary) {
+						xpc_object_t errorReply = xpc_dictionary_create_reply(xdict);
+						if (errorReply) {
+							xpc_dictionary_set_int64(errorReply, "result", handled);
+							roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH,
+								"bootstrap.dispatch.error_reply.begin result=%d", handled);
+							xpc_pipe_routine_reply(errorReply);
+							roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH,
+								"bootstrap.dispatch.error_reply.end result=%d", handled);
+							xpc_release(errorReply);
+						} else {
+							roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH,
+								"bootstrap.dispatch.error_reply.create_failed result=%d", handled);
+						}
+					} else {
+						roothide_stage_file_log(ROOTHIDE_BOOTSTRAP_STAGE_LOG_PATH,
+								"bootstrap.dispatch.error_reply.skipped non_dictionary=1 result=%d", handled);
+					}
 				}
 				xpc_release(xdict);
 			}
