@@ -135,7 +135,9 @@ def main():
     helper = environment.split('- (int)spawnJbctlAsRootWithArgs:', 1)[1].split('- (int)runTrollStoreAction:', 1)[0]
     assert '[self runAsRoot:^' in helper
     assert '"--waitfor"' in helper
-    assert 'seteuid(0)' in environment and 'setegid(0)' in environment
+    assert 'jbclient_dopamine_get_root()' in environment
+    assert 'jbclient_dopamine_drop_root()' in environment
+    assert 'seteuid(0)' not in environment and 'setegid(0)' not in environment
     assert 'setuid(0)' not in environment and 'setgid(0)' not in environment
     main_ui = (ROOT / 'Application/Dopamine/UI/DOMainViewController.m').read_text(encoding='utf-8')
     assert '[self fadeToBlack:^{\n                [[DOEnvironmentManager sharedManager] rebootUserspace];' not in main_ui

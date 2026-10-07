@@ -47,6 +47,15 @@ enum {
     JBS_ROOT_TRUSTCACHE_CLEAR,
 };
 
+// Domain: Dopamine
+// Reachable exclusively from the Dopamine app.
+#define JBS_DOMAIN_DOPAMINE 5
+enum {
+    JBS_DOPAMINE_IS_JAILBROKEN = 1,
+    JBS_DOPAMINE_GET_ROOT,
+    JBS_DOPAMINE_DROP_ROOT,
+};
+
 
 #define JBS_DOMAIN_ROOTHIDE 6 // index in gGlobalServer
 enum {

@@ -234,37 +234,27 @@ extern char **environ;
 
 - (void)runAsRoot:(void (^)(void))rootBlock
 {
-    uid_t originalUser = geteuid();
-    gid_t originalGroup = getegid();
-    roothide_stage_log("privilege.enter uid=%u euid=%u gid=%u egid=%u",
-                       (unsigned)getuid(), (unsigned)originalUser,
-                       (unsigned)getgid(), (unsigned)originalGroup);
-    if (originalUser == 0 && originalGroup == 0) {
-        rootBlock();
-        return;
-    }
+	uid_t originalUser = geteuid();
+	gid_t originalGroup = getegid();
+	roothide_stage_log("privilege.enter uid=%u euid=%u gid=%u egid=%u",
+	                   (unsigned)getuid(), (unsigned)originalUser,
+	                   (unsigned)getgid(), (unsigned)originalGroup);
+	if (originalUser == 0 && originalGroup == 0) {
+		rootBlock();
+		return;
+	}
 
-    int ur = 0, gr = 0;
-    int userErrno = 0, groupErrno = 0;
-    if (originalUser != 0) {
-        ur = seteuid(0);
-        userErrno = ur != 0 ? errno : 0;
-    }
-    if (ur == 0 && originalGroup != 0) {
-        gr = setegid(0);
-        groupErrno = gr != 0 ? errno : 0;
-    }
-    roothide_stage_log("privilege.set_root user_result=%d user_errno=%d group_result=%d group_errno=%d",
-                       ur, userErrno, gr, groupErrno);
-    if (ur == 0 && gr == 0) {
-        rootBlock();
-    }
-    
-    if (gr == 0 && originalGroup != 0) setegid(originalGroup);
-    if (ur == 0 && originalUser != 0) seteuid(originalUser);
-    roothide_stage_log("privilege.leave uid=%u euid=%u gid=%u egid=%u",
-                       (unsigned)getuid(), (unsigned)geteuid(),
-                       (unsigned)getgid(), (unsigned)getegid());
+	int rootResult = jbclient_dopamine_get_root();
+	roothide_stage_log("privilege.set_root server_result=%d uid=%u euid=%u gid=%u egid=%u",
+	                   rootResult, (unsigned)getuid(), (unsigned)geteuid(),
+	                   (unsigned)getgid(), (unsigned)getegid());
+	if (rootResult == 0) {
+		rootBlock();
+		int dropResult = jbclient_dopamine_drop_root();
+		roothide_stage_log("privilege.drop_root server_result=%d uid=%u euid=%u gid=%u egid=%u",
+		                   dropResult, (unsigned)getuid(), (unsigned)geteuid(),
+		                   (unsigned)getgid(), (unsigned)getegid());
+	}
 }
 
 - (int)spawnJbctlAsRootWithArgs:(NSArray *)args
