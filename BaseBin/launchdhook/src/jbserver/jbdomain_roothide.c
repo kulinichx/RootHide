@@ -276,6 +276,7 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
         JBLogError("Invalid jailbreakd server port: %x", port);
         roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                                 "jailbreakd.checkin.handler.reject reason=server_port");
+        jailbreakdServerPortCheckinFailed();
         return -1;
     }
 
@@ -284,7 +285,25 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
     roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                             "jailbreakd.checkin.handler.reply mach_recv=%d",
                             *portOut != NULL);
-    return *portOut ? 0 : -1;
+    if (!*portOut) {
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=mach_recv_create");
+        jailbreakdServerPortCheckinFailed();
+        return -1;
+    }
+
+    if (jailbreakdServerPortCheckinComplete() != 0) {
+        xpc_release(*portOut);
+        *portOut = NULL;
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=ready_publish");
+        jailbreakdServerPortCheckinFailed();
+        return -1;
+    }
+
+    roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                            "jailbreakd.checkin.handler.ready=1 pid=%d", pid);
+    return 0;
 }
 
 static int roothide_dyld_patch_enabled(audit_token_t *callerToken, bool* enabled)

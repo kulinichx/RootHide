@@ -22,6 +22,8 @@ void setJailbreakdProcess(pid_t pid);
 
 mach_port_t jailbreakdClientPort();
 mach_port_t jailbreakdServerPort();
+int jailbreakdServerPortCheckinComplete(void);
+void jailbreakdServerPortCheckinFailed(void);
 
 int jbdTestCall(int value);
 int jbdSystemwideLog(const char* fmt, ...);

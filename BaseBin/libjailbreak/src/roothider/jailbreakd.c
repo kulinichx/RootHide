@@ -34,9 +34,31 @@ int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr,
 
 static bool __firstLoad = false;
 static bool __jailbreakd_initialized = false;
+static bool __jailbreakd_port_ready = false;
+static pthread_mutex_t __jailbreakd_port_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t __jailbreakd_restart_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t __jailbreakd_port_generation = 0;
 mach_port_t gJailbreakdPort = MACH_PORT_NULL;
 
 #define JAILBREAKD_CLIENT_PORT_FAST_GET
+
+static int destroyLocalJailbreakdServerPortLocked(void)
+{
+	__jailbreakd_port_ready = false;
+	if (!MACH_PORT_VALID(gJailbreakdPort)) {
+		gJailbreakdPort = MACH_PORT_NULL;
+		return 0;
+	}
+
+	kern_return_t kr = mach_port_destroy(mach_task_self(), gJailbreakdPort);
+	if (kr != KERN_SUCCESS) {
+		JBLogError("mach_port_destroy failed for jailbreakd port: %x,%s", kr, mach_error_string(kr));
+		return -1;
+	}
+
+	gJailbreakdPort = MACH_PORT_NULL;
+	return 0;
+}
 
 int registerServerPort()
 {
@@ -45,16 +67,21 @@ int registerServerPort()
 		return -1;
 	}
 
-	// deallocate the previous port if it exists
-	if(MACH_PORT_VALID(gJailbreakdPort)) {
-		mach_port_deallocate(mach_task_self(), gJailbreakdPort);
-		gJailbreakdPort = MACH_PORT_NULL;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (destroyLocalJailbreakdServerPortLocked() != 0) {
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		return -1;
+	}
+	/* Invalidate any delayed watchdog associated with the previous candidate. */
+	if (++__jailbreakd_port_generation == 0) {
+		++__jailbreakd_port_generation;
 	}
 
 	kern_return_t kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &gJailbreakdPort);
 	if (kr != KERN_SUCCESS) {
 		JBLogError("mach_port_allocate failed: %x,%s", kr, mach_error_string(kr));
 		gJailbreakdPort = MACH_PORT_NULL;
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
 		return -1;
 	}
 
@@ -63,18 +90,105 @@ int registerServerPort()
 		JBLogError("mach_port_insert_right failed: %x,%s", kr, mach_error_string(kr));
 		mach_port_destroy(mach_task_self(), gJailbreakdPort);
 		gJailbreakdPort = MACH_PORT_NULL;
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
 		return -1;
 	}
 
 	JBLogDebug("jailbreakd server port: %x", gJailbreakdPort);
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	return 0;
+}
+
+int jailbreakdServerPortCheckinComplete(void)
+{
+	if (getpid() != 1) {
+		JBLogError("jailbreakdServerPortCheckinComplete called outside launchd: pid=%d", getpid());
+		return -1;
+	}
+
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (!MACH_PORT_VALID(gJailbreakdPort)) {
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		JBLogError("jailbreakd check-in completed without a valid server port");
+		return -1;
+	}
 
 #ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
 	mach_port_t self_host = mach_host_self();
-	kr = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, gJailbreakdPort);
+	kern_return_t kr = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, gJailbreakdPort);
 	mach_port_deallocate(mach_task_self(), self_host);
+	if (kr != KERN_SUCCESS) {
+		/* Keep the checked-in service available through the launchd lookup path. */
+		JBLogError("host_set_special_port failed after jailbreakd check-in: %x,%s", kr, mach_error_string(kr));
+	}
 #endif
 
-	return kr==KERN_SUCCESS ? 0 : -1;
+	__jailbreakd_port_ready = true;
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	return 0;
+}
+
+void jailbreakdServerPortCheckinFailed(void)
+{
+	if (getpid() != 1) {
+		return;
+	}
+
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (!__jailbreakd_port_ready && destroyLocalJailbreakdServerPortLocked() != 0) {
+		JBLogError("failed to discard an unready jailbreakd server port");
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+}
+
+static void jailbreakdServerPortCheckinTimedOut(uint64_t generation)
+{
+	if (getpid() != 1) {
+		return;
+	}
+
+	bool timedOut = false;
+	mach_port_t timedOutPort = MACH_PORT_NULL;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (generation == __jailbreakd_port_generation &&
+	    !__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
+		timedOutPort = gJailbreakdPort;
+		if (destroyLocalJailbreakdServerPortLocked() == 0) {
+			if (++__jailbreakd_port_generation == 0) {
+				++__jailbreakd_port_generation;
+			}
+			timedOut = true;
+		}
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+
+	if (timedOut) {
+		JBLogError("jailbreakd check-in timed out; discarded port=%x generation=%llu",
+		           timedOutPort, (unsigned long long)generation);
+		roothide_stage_log("jailbreakd.checkin.timeout port=%x generation=%llu",
+		                   timedOutPort, (unsigned long long)generation);
+	}
+}
+
+static void scheduleJailbreakdServerPortCheckinWatchdog(void)
+{
+	uint64_t generation = 0;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (!__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
+		generation = __jailbreakd_port_generation;
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+
+	if (generation == 0) {
+		return;
+	}
+
+	roothide_stage_log("jailbreakd.checkin.watchdog.start generation=%llu timeout_seconds=60",
+	                   (unsigned long long)generation);
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60LL * 1000000000LL),
+	               dispatch_get_global_queue(0, 0), ^{
+		jailbreakdServerPortCheckinTimedOut(generation);
+	});
 }
 
 #ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
@@ -86,9 +200,24 @@ mach_port_t jailbreakdClientPortFastGet()
 	roothide_stage_log("jbd.fast_lookup.end result=%d port=%x", kr, port);
 	mach_port_deallocate(mach_task_self(), self_host);
 	if(kr != KERN_SUCCESS) {
+		if (MACH_PORT_VALID(port)) {
+			mach_port_deallocate(mach_task_self(), port);
+		}
 		JBLogError("jailbreakdClientPortFastGet failed: %x,%s", kr, mach_error_string(kr));
 		return MACH_PORT_NULL;
 	}
+	if (!MACH_PORT_VALID(port)) {
+		return MACH_PORT_NULL;
+	}
+
+	/* host_get_special_port can return a dead-name right; verify it before use. */
+	kr = mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_SEND, 1);
+	if (kr != KERN_SUCCESS) {
+		JBLogError("jailbreakdClientPortFastGet returned a dead port: %x,%s", kr, mach_error_string(kr));
+		mach_port_deallocate(mach_task_self(), port);
+		return MACH_PORT_NULL;
+	}
+	mach_port_deallocate(mach_task_self(), port); // release only the temporary validation uref
 	return port;
 }
 #endif
@@ -195,7 +324,8 @@ int spawnJailbreakd()
 	JBLogDebug("jailbreakd spawned, pid=%d\n", pid);
 
 	/* here we can't wait for jailbreakd to initialize since opainject will suspend all other threads */
-	
+	scheduleJailbreakdServerPortCheckinWatchdog();
+
 	setJailbreakdProcess(pid);
 
 	return 0;
@@ -208,27 +338,39 @@ int initJailbreakd(bool firstLoad)
 		return -1;
 	}
 
+	pthread_mutex_lock(&__jailbreakd_restart_mutex);
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
 	// launchdhook can be loaded more than once during injection or handoff.
 	// A duplicate initialization must not abort launchd.
 	if (__jailbreakd_initialized) {
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 		JBLogDebug("initJailbreakd: already initialized");
 		return 0;
 	}
 
 	__firstLoad = firstLoad;
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 
 	if(registerServerPort() != 0) {
 		JBLogError("registerServerPort failed");
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 		return -1;
 	}
+
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	__jailbreakd_initialized = true;
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 
 	int ret = spawnJailbreakd();
 	if (ret != 0) {
 		JBLogError("spawnJailbreakd failed during init: %d", ret);
+		jailbreakdServerPortCheckinFailed();
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 		return ret;
 	}
 
-	__jailbreakd_initialized = true;
+	pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 	return 0;
 }
 
@@ -239,55 +381,59 @@ mach_port_t reactiveJailbreakdPort()
 		return MACH_PORT_NULL;
 	}
 
-	//prevent jailbreakdClientPort from calling before initJailbreakd
+	mach_port_t port = MACH_PORT_NULL;
+	bool wasReady = false;
+	bool shouldRestart = false;
+
+	pthread_mutex_lock(&__jailbreakd_restart_mutex);
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
 	if (!__jailbreakd_initialized) {
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 		return MACH_PORT_NULL;
 	}
 
-	mach_port_t port = MACH_PORT_NULL;
-
-	static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-	pthread_mutex_lock(&mutex);
-
-	// lock and check if another thread has reactivated the port
-
-	kern_return_t kr = mach_port_mod_refs(mach_task_self(), gJailbreakdPort, MACH_PORT_RIGHT_SEND, 1);
-	if(kr == KERN_SUCCESS) {
-		port = gJailbreakdPort;
+	wasReady = __jailbreakd_port_ready;
+	if (wasReady && MACH_PORT_VALID(gJailbreakdPort)) {
+		kern_return_t kr = mach_port_mod_refs(mach_task_self(), gJailbreakdPort, MACH_PORT_RIGHT_SEND, 1);
+		if (kr == KERN_SUCCESS) {
+			port = gJailbreakdPort;
+		} else {
+			JBLogError("jailbreakd port is dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);
+			__jailbreakd_port_ready = false;
+			shouldRestart = true;
+		}
+	} else if (wasReady || !MACH_PORT_VALID(gJailbreakdPort)) {
+		__jailbreakd_port_ready = false;
+		shouldRestart = true;
 	}
-	else
-	{
-		//make jailbreakd crashes perceptible
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+
+	if (MACH_PORT_VALID(port) || !shouldRestart) {
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
+		return port;
+	}
+
+	if (wasReady) {
+		/* Make jailbreakd crashes perceptible, but never expose the replacement candidate. */
 		sleep(5);
-
-		//register server port before spawn jailbreakd
-		if(registerServerPort() == 0)
-		{
-			//acquire the send right first
-			kr = mach_port_mod_refs(mach_task_self(), gJailbreakdPort, MACH_PORT_RIGHT_SEND, 1);
-			if(kr == KERN_SUCCESS)
-			{
-				port = gJailbreakdPort;
-
-				// Try to restart jailbreakd
-				if(spawnJailbreakd() != 0) {
-					JBLogError("loadJailbreakd failed");
-				}
-			}
-			else
-			{
-				JBLogError("jailbreakdClientPort failed");
-			}
-		}
-		else
-		{
-			JBLogError("registerServerPort failed");
-		}
 	}
 
-	pthread_mutex_unlock(&mutex);
+	if (registerServerPort() != 0) {
+		JBLogError("registerServerPort failed while restarting jailbreakd");
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
+		return MACH_PORT_NULL;
+	}
 
-	return port;
+	int ret = spawnJailbreakd();
+	if (ret != 0) {
+		JBLogError("spawnJailbreakd failed while restarting: %d", ret);
+		jailbreakdServerPortCheckinFailed();
+	}
+
+	/* The candidate remains private until the daemon checks in successfully. */
+	pthread_mutex_unlock(&__jailbreakd_restart_mutex);
+	return MACH_PORT_NULL;
 }
 
 mach_port_t jailbreakdServerPort()
@@ -296,7 +442,10 @@ mach_port_t jailbreakdServerPort()
 		return MACH_PORT_NULL;
 	}
 
-	return gJailbreakdPort;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	mach_port_t port = gJailbreakdPort;
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	return port;
 }
 
 mach_port_t jailbreakdClientPort()
@@ -305,11 +454,21 @@ mach_port_t jailbreakdClientPort()
 
 	if(getpid() == 1)
 	{
-		kern_return_t kr = mach_port_mod_refs(mach_task_self(), gJailbreakdPort, MACH_PORT_RIGHT_SEND, 1);
-		if(kr == KERN_SUCCESS) {
-			port = gJailbreakdPort;
-		} else {
-			JBLogError("jailbreakd port dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);		
+		bool shouldRestart = false;
+		pthread_mutex_lock(&__jailbreakd_port_mutex);
+		if (__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
+			kern_return_t kr = mach_port_mod_refs(mach_task_self(), gJailbreakdPort, MACH_PORT_RIGHT_SEND, 1);
+			if (kr == KERN_SUCCESS) {
+				port = gJailbreakdPort;
+			} else {
+				JBLogError("jailbreakd port dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);
+				shouldRestart = true;
+			}
+		} else if (__jailbreakd_initialized && !MACH_PORT_VALID(gJailbreakdPort)) {
+			shouldRestart = true;
+		}
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		if (shouldRestart) {
 			port = reactiveJailbreakdPort();
 		}
 	}
