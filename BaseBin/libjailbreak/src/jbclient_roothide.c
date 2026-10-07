@@ -3,6 +3,7 @@
 #include "jbclient_xpc.h"
 #include "jbserver.h"
 
+#include "roothide_stage.h"
 #include "roothider/log.h"
 #include "roothider/xpc_private.h"
 
@@ -43,14 +44,20 @@ mach_port_t jbclient_jailbreakd_checkin()
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_CHECKIN, NULL);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
+		xpc_object_t portobj = xpc_dictionary_get_value(xreply, "port");
+		roothide_stage_log("jailbreakd.checkin.reply result=%lld has_port=%d type=%s",
+		                   (long long)result, portobj != NULL,
+		                   portobj ? xpc_type_get_name(xpc_get_type(portobj)) : "none");
 		if(result == 0) {
-			xpc_object_t portobj = xpc_dictionary_get_value(xreply, "port");
 			if (portobj) {
 				port = xpc_mach_recv_extract_right(portobj);
 			}
 		}
 		xpc_release(xreply);
+	} else {
+		roothide_stage_log("jailbreakd.checkin.reply missing");
 	}
+	roothide_stage_log("jailbreakd.checkin.port value=%x valid=%d", port, MACH_PORT_VALID(port));
 	return port;
 }
 

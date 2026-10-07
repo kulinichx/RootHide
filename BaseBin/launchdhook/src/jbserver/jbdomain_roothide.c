@@ -3,6 +3,7 @@
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
+#include <libjailbreak/roothide_stage.h>
 #include <libjailbreak/codesign.h>
 #include <os/log.h>
 #include <limits.h>
@@ -222,12 +223,25 @@ static int roothide_jailbreakd_lookup(audit_token_t *callerToken, xpc_object_t *
 }
 static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t *portOut)
 {
-    if(!callerToken || !portOut) return -1;
+    if(!callerToken || !portOut) {
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=missing_argument");
+        return -1;
+    }
     *portOut = NULL;
 
     pid_t pid = audit_token_to_pid(*callerToken);
     uid_t uid = audit_token_to_euid(*callerToken);
-    if(uid != 0 || pid <= 1 || isBlacklistedToken(callerToken)) return -1;
+    bool blacklisted = isBlacklistedToken(callerToken);
+    roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                            "jailbreakd.checkin.handler.begin pid=%d uid=%u blacklisted=%d",
+                            pid, (unsigned)uid, blacklisted);
+    if(uid != 0 || pid <= 1 || blacklisted) {
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=identity pid=%d uid=%u blacklisted=%d",
+                                pid, (unsigned)uid, blacklisted);
+        return -1;
+    }
 
     const char *processPath = proc_get_path(pid, NULL);
     const char *expectedPath = JBROOT_PATH("/basebin/jailbreakd");
@@ -235,6 +249,11 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
     char normalizedExpectedPath[PATH_MAX] = {0};
     bool processPathResolved = processPath && realpath(processPath, normalizedProcessPath) != NULL;
     bool expectedPathResolved = expectedPath && realpath(expectedPath, normalizedExpectedPath) != NULL;
+    roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                            "jailbreakd.checkin.handler.path pid=%d process_resolved=%d expected_resolved=%d process=%s expected=%s",
+                            pid, processPathResolved, expectedPathResolved,
+                            processPathResolved ? normalizedProcessPath : (processPath ? processPath : "<unknown>"),
+                            expectedPathResolved ? normalizedExpectedPath : (expectedPath ? expectedPath : "<unknown>"));
     if(!processPathResolved || !expectedPathResolved ||
        strcmp(normalizedProcessPath, normalizedExpectedPath) != 0) {
         JBLogError("jailbreakd checkin: denying caller pid=%d path=%s normalized=%s expected=%s normalizedExpected=%s",
@@ -243,18 +262,29 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
                    processPathResolved ? normalizedProcessPath : "<unresolved>",
                    expectedPath ? expectedPath : "<unknown>",
                    expectedPathResolved ? normalizedExpectedPath : "<unresolved>");
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=path pid=%d",
+                                pid);
         return -1;
     }
 
     mach_port_t port = jailbreakdServerPort();
+    roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                            "jailbreakd.checkin.handler.server_port port=%x valid=%d",
+                            port, MACH_PORT_VALID(port));
     if(!MACH_PORT_VALID(port)) {
         JBLogError("Invalid jailbreakd server port: %x", port);
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=server_port");
         return -1;
     }
 
     setJailbreakdProcess(pid);
     *portOut = xpc_mach_recv_create(port);
-    return 0;
+    roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                            "jailbreakd.checkin.handler.reply mach_recv=%d",
+                            *portOut != NULL);
+    return *portOut ? 0 : -1;
 }
 
 static int roothide_dyld_patch_enabled(audit_token_t *callerToken, bool* enabled)
