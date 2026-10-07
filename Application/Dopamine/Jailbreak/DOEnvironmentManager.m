@@ -309,6 +309,34 @@ extern char **environ;
         return r;
     }
 
+    // The App no longer retains saved root credentials after cleanup on
+    // iOS 17.  Apply the root persona to jbctl itself instead of relying on
+    // runAsRoot(), while retaining the --waitfor handoff below.
+    r = posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
+    if (r != 0) {
+        posix_spawnattr_destroy(&attr);
+        posix_spawn_file_actions_destroy(&actions);
+        for (int y = 0; y < i; y++) free(argBuf[y]);
+        free(argBuf);
+        return r;
+    }
+    r = posix_spawnattr_set_persona_uid_np(&attr, 0);
+    if (r != 0) {
+        posix_spawnattr_destroy(&attr);
+        posix_spawn_file_actions_destroy(&actions);
+        for (int y = 0; y < i; y++) free(argBuf[y]);
+        free(argBuf);
+        return r;
+    }
+    r = posix_spawnattr_set_persona_gid_np(&attr, 0);
+    if (r != 0) {
+        posix_spawnattr_destroy(&attr);
+        posix_spawn_file_actions_destroy(&actions);
+        for (int y = 0; y < i; y++) free(argBuf[y]);
+        free(argBuf);
+        return r;
+    }
+
     int waitPipe[2] = {-1, -1};
 
     if (!needsLegacySolution) {
@@ -343,19 +371,17 @@ extern char **environ;
         }
     }
 
-    [self runAsRoot:^{
-        [self runUnsandboxed:^{
-            roothide_stage_log("jbctl.posix_spawn.begin uid=%d euid=%d gid=%d", getuid(), geteuid(), getgid());
-            spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
-            roothide_stage_log("jbctl.posix_spawn.end result=%d pid=%d", spawnResult, pid);
-            if (needsLegacySolution && spawnResult == 0) {
-                // Compatibility only: Dopamine <3.0.5 jbctl has no --waitfor support.
-                kill(pid, SIGCONT);
-            }
-        }];
-        // For the normal 3.0.7 path, the child remains blocked on fd 3 until
-        // both the temporary sandbox and credential changes have been restored.
+    [self runUnsandboxed:^{
+        roothide_stage_log("jbctl.posix_spawn.begin uid=%d euid=%d gid=%d", getuid(), geteuid(), getgid());
+        spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
+        roothide_stage_log("jbctl.posix_spawn.end result=%d pid=%d", spawnResult, pid);
+        if (needsLegacySolution && spawnResult == 0) {
+            // Compatibility only: Dopamine <3.0.5 jbctl has no --waitfor support.
+            kill(pid, SIGCONT);
+        }
     }];
+    // For the normal 3.0.7 path, the child remains blocked on fd 3 until
+    // the temporary sandbox label has been restored.
 
     if (!needsLegacySolution && spawnResult == 0) {
         char token = 'w';
@@ -416,15 +442,9 @@ extern char **environ;
         // Append on App relaunch so an incomplete activation is still visible.
         int logResult = roothide_stage_begin(logPath.fileSystemRepresentation, true);
         roothide_stage_log("userspace_reboot.request log_open_result=%d", logResult);
-        // The App has already dropped its saved root credentials by this
-        // point (iOS 17 reports uid/euid/gid 501).  Calling the generic
-        // spawn helper would therefore fail in runAsRoot() before it ever
-        // reaches posix_spawn().  exec_cmd_root() applies the root persona
-        // directly to the child and does not depend on setuid(0) here.
         roothide_stage_log("userspace_reboot.spawn.begin uid=%d euid=%d gid=%d",
                            getuid(), geteuid(), getgid());
-        int result = exec_cmd_root(JBROOT_PATH("/basebin/jbctl"),
-                                   "reboot_userspace", NULL);
+        int result = [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
         roothide_stage_log("userspace_reboot.spawn.end result=%d", result);
         roothide_stage_log("userspace_reboot.return result=%d", result);
         roothide_stage_end();

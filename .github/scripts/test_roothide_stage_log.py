@@ -131,9 +131,12 @@ def main():
     reboot = environment.split('- (void)rebootUserspace', 1)[1].split('- (void)refreshJailbreakApps', 1)[0]
     assert 'dispatch_get_global_queue' in reboot and 'if (requestInFlight) return' in reboot
     assert 'Userspace_Reboot_Failed_Format' in reboot and 'userspace_reboot.return result=%d' in reboot
-    assert 'exec_cmd_root(JBROOT_PATH("/basebin/jbctl"),' in reboot
-    assert '"reboot_userspace", NULL' in reboot
-    assert 'spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]' not in reboot
+    assert 'spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]' in reboot
+    assert 'posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE)' in environment
+    helper = environment.split('- (int)spawnJbctlAsRootWithArgs:', 1)[1].split('- (int)runTrollStoreAction:', 1)[0]
+    assert '[self runAsRoot:^' not in helper
+    assert 'posix_spawnattr_set_persona_uid_np(&attr, 0)' in helper
+    assert 'posix_spawnattr_set_persona_gid_np(&attr, 0)' in helper
     main_ui = (ROOT / 'Application/Dopamine/UI/DOMainViewController.m').read_text(encoding='utf-8')
     assert '[self fadeToBlack:^{\n                [[DOEnvironmentManager sharedManager] rebootUserspace];' not in main_ui
     assert '[self fadeToBlack:^{\n            [[DOEnvironmentManager sharedManager] rebootUserspace];' not in main_ui
