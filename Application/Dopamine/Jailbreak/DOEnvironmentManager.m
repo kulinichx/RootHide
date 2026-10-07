@@ -234,26 +234,37 @@ extern char **environ;
 
 - (void)runAsRoot:(void (^)(void))rootBlock
 {
-    uint32_t orgUser = getuid();
-    uint32_t orgGroup = getgid();
-    roothide_stage_log("privilege.enter uid=%u euid=%u gid=%u", orgUser, (unsigned)geteuid(), orgGroup);
-    if (geteuid() == 0 && orgGroup == 0) {
+    uid_t originalUser = geteuid();
+    gid_t originalGroup = getegid();
+    roothide_stage_log("privilege.enter uid=%u euid=%u gid=%u egid=%u",
+                       (unsigned)getuid(), (unsigned)originalUser,
+                       (unsigned)getgid(), (unsigned)originalGroup);
+    if (originalUser == 0 && originalGroup == 0) {
         rootBlock();
         return;
     }
 
     int ur = 0, gr = 0;
-    if (orgUser != 0) ur = setuid(0);
-    int userErrno = ur != 0 ? errno : 0;
-    if (orgGroup != 0) gr = setgid(0);
-    roothide_stage_log("privilege.set_root user_result=%d user_errno=%d group_result=%d group_errno=%d", ur, userErrno, gr, gr != 0 ? errno : 0);
+    int userErrno = 0, groupErrno = 0;
+    if (originalUser != 0) {
+        ur = seteuid(0);
+        userErrno = ur != 0 ? errno : 0;
+    }
+    if (ur == 0 && originalGroup != 0) {
+        gr = setegid(0);
+        groupErrno = gr != 0 ? errno : 0;
+    }
+    roothide_stage_log("privilege.set_root user_result=%d user_errno=%d group_result=%d group_errno=%d",
+                       ur, userErrno, gr, groupErrno);
     if (ur == 0 && gr == 0) {
         rootBlock();
     }
     
-    if (gr == 0 && orgGroup != 0) setgid(orgGroup);
-    if (ur == 0 && orgUser != 0) seteuid(orgUser);
-    roothide_stage_log("privilege.leave uid=%u euid=%u gid=%u", (unsigned)getuid(), (unsigned)geteuid(), (unsigned)getgid());
+    if (gr == 0 && originalGroup != 0) setegid(originalGroup);
+    if (ur == 0 && originalUser != 0) seteuid(originalUser);
+    roothide_stage_log("privilege.leave uid=%u euid=%u gid=%u egid=%u",
+                       (unsigned)getuid(), (unsigned)geteuid(),
+                       (unsigned)getgid(), (unsigned)getegid());
 }
 
 - (int)spawnJbctlAsRootWithArgs:(NSArray *)args
@@ -309,34 +320,6 @@ extern char **environ;
         return r;
     }
 
-    // The App no longer retains saved root credentials after cleanup on
-    // iOS 17.  Apply the root persona to jbctl itself instead of relying on
-    // runAsRoot(), while retaining the --waitfor handoff below.
-    r = posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
-    if (r != 0) {
-        posix_spawnattr_destroy(&attr);
-        posix_spawn_file_actions_destroy(&actions);
-        for (int y = 0; y < i; y++) free(argBuf[y]);
-        free(argBuf);
-        return r;
-    }
-    r = posix_spawnattr_set_persona_uid_np(&attr, 0);
-    if (r != 0) {
-        posix_spawnattr_destroy(&attr);
-        posix_spawn_file_actions_destroy(&actions);
-        for (int y = 0; y < i; y++) free(argBuf[y]);
-        free(argBuf);
-        return r;
-    }
-    r = posix_spawnattr_set_persona_gid_np(&attr, 0);
-    if (r != 0) {
-        posix_spawnattr_destroy(&attr);
-        posix_spawn_file_actions_destroy(&actions);
-        for (int y = 0; y < i; y++) free(argBuf[y]);
-        free(argBuf);
-        return r;
-    }
-
     int waitPipe[2] = {-1, -1};
 
     if (!needsLegacySolution) {
@@ -371,17 +354,19 @@ extern char **environ;
         }
     }
 
-    [self runUnsandboxed:^{
-        roothide_stage_log("jbctl.posix_spawn.begin uid=%d euid=%d gid=%d", getuid(), geteuid(), getgid());
-        spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
-        roothide_stage_log("jbctl.posix_spawn.end result=%d pid=%d", spawnResult, pid);
-        if (needsLegacySolution && spawnResult == 0) {
-            // Compatibility only: Dopamine <3.0.5 jbctl has no --waitfor support.
-            kill(pid, SIGCONT);
-        }
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            roothide_stage_log("jbctl.posix_spawn.begin uid=%d euid=%d gid=%d", getuid(), geteuid(), getgid());
+            spawnResult = posix_spawn(&pid, argBuf[0], &actions, &attr, argBuf, environ);
+            roothide_stage_log("jbctl.posix_spawn.end result=%d pid=%d", spawnResult, pid);
+            if (needsLegacySolution && spawnResult == 0) {
+                // Compatibility only: Dopamine <3.0.5 jbctl has no --waitfor support.
+                kill(pid, SIGCONT);
+            }
+        }];
     }];
     // For the normal 3.0.7 path, the child remains blocked on fd 3 until
-    // the temporary sandbox label has been restored.
+    // both the temporary sandbox label and effective credentials are restored.
 
     if (!needsLegacySolution && spawnResult == 0) {
         char token = 'w';
