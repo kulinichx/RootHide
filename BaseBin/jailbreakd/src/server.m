@@ -1,10 +1,34 @@
 #include <Foundation/Foundation.h>
 #include <bsm/libbsm.h>
 #include <libproc.h>
+#include <errno.h>
+#include <limits.h>
+#include <signal.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
 #include <libjailbreak/roothide_stage.h>
+
+/* Do not truncate an untrusted XPC integer into pid_t: a wrapped PID could
+ * otherwise pass the parent check for an unrelated process. */
+static bool jailbreakd_get_child_pid(xpc_object_t message, pid_t *childPid)
+{
+	xpc_object_t value = xpc_dictionary_get_value(message, "pid");
+	if (!value || !childPid) return false;
+	uint64_t candidate = 0;
+	if (xpc_get_type(value) == XPC_TYPE_INT64) {
+		int64_t signedPid = xpc_dictionary_get_int64(message, "pid");
+		if (signedPid <= 1 || signedPid > INT_MAX) return false;
+		candidate = (uint64_t)signedPid;
+	} else if (xpc_get_type(value) == XPC_TYPE_UINT64) {
+		candidate = xpc_dictionary_get_uint64(message, "pid");
+	} else {
+		return false;
+	}
+	if (candidate <= 1 || candidate > INT_MAX) return false;
+	*childPid = (pid_t)candidate;
+	return true;
+}
 
 void jailbreakd_reply_message(JBD_MESSAGE_ID msgId, xpc_object_t reply)
 {
@@ -18,6 +42,51 @@ void jailbreakd_reply_message(JBD_MESSAGE_ID msgId, xpc_object_t reply)
 	}
 }
 
+/* Keep potentially slow kernel patch work off the Mach receive source's
+ * main queue. A serial queue preserves the old one-patch-at-a-time behavior
+ * without preventing jailbreakd from receiving unrelated RPCs. */
+static dispatch_queue_t jailbreakd_spawn_patch_queue(void)
+{
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.roothide.jailbreakd.spawn-patch", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
+static int64_t jailbreakd_patch_spawn_child(pid_t clientPid, pid_t pid, bool resume, bool forceDyldPatch)
+{
+    pid_t ppid = proc_get_ppid(pid);
+    JBLogDebug("spawn patch: client pid=%d, child pid=%d, child's parent pid=%d, child proc=%s",
+               clientPid, pid, ppid, proc_get_path(pid, NULL));
+    roothide_stage_log("jailbreakd.patch.request client=%d child=%d parent=%d resume=%d force_dyld=%d",
+                       clientPid, pid, ppid, resume, forceDyldPatch);
+    if (ppid != clientPid) {
+        JBLogError("spawn patch denied: %d", pid);
+        return -1;
+    }
+    if (ppid == 1 && !resume) {
+        /* Preserve launchd's existing no-resume workaround. */
+        return proc_patch_csflags(pid);
+    }
+
+    roothide_stage_log("jailbreakd.patch.begin child=%d", pid);
+    int patchResult = roothide_patch_proc_ex(pid, forceDyldPatch);
+    roothide_stage_log("jailbreakd.patch.end child=%d result=%d", pid, patchResult);
+    if (patchResult != 0) {
+        JBLogError("spawn patch failed: %d", pid);
+        return -1;
+    }
+    if (resume && kill(pid, SIGCONT) != 0) {
+        int resumeErrno = errno;
+        JBLogError("spawn patch resume failed for pid=%d errno=%d", pid, resumeErrno);
+        roothide_stage_log("jailbreakd.patch.resume_failed child=%d errno=%d", pid, resumeErrno);
+        return -1;
+    }
+    return 0;
+}
+
 void jailbreakd_received_message(mach_port_t port)
 {
 	@autoreleasepool {
@@ -26,10 +95,21 @@ void jailbreakd_received_message(mach_port_t port)
 		roothide_stage_log("jailbreakd.receive result=%d", err);
 		if (err != 0) {
 			JBLogError("xpc_pipe_receive error %d", err);
+			if (message) xpc_release(message);
+			return;
+		}
+		if (!message || xpc_get_type(message) != XPC_TYPE_DICTIONARY) {
+			JBLogError("dropping malformed jailbreakd XPC request");
+			if (message) xpc_release(message);
 			return;
 		}
 
 		xpc_object_t reply = xpc_dictionary_create_reply(message);
+		if (!reply) {
+			JBLogError("jailbreakd XPC request has no reply context");
+			xpc_release(message);
+			return;
+		}
 
 		JBD_MESSAGE_ID msgId = xpc_dictionary_get_uint64(message, "id");
 		roothide_stage_log("jailbreakd.message id=%llu", (unsigned long long)msgId);
@@ -71,34 +151,29 @@ void jailbreakd_received_message(mach_port_t port)
 				}
 
 				case JBD_MSG_SPAWN_PATCH_CHILD: {
-					int64_t result = 0;
-					pid_t pid = xpc_dictionary_get_int64(message, "pid");
+					pid_t pid = 0;
+					if (!jailbreakd_get_child_pid(message, &pid)) {
+						roothide_stage_log("jailbreakd.patch.invalid_child_pid client=%d", clientPid);
+						xpc_dictionary_set_int64(reply, "result", -1);
+						break;
+					}
 					bool resume = xpc_dictionary_get_bool(message, "resume");
 					bool forceDyldPatch = xpc_dictionary_get_bool(message, "force-dyld-patch");
-					pid_t ppid = proc_get_ppid(pid);
-					JBLogDebug("spawn patch: client pid=%d, child pid=%d, child's parent pid=%d, child proc=%s", clientPid, pid, ppid, proc_get_path(pid,NULL));
-					roothide_stage_log("jailbreakd.patch.request client=%d child=%d parent=%d resume=%d force_dyld=%d", clientPid, pid, ppid, resume, forceDyldPatch);
-					if(ppid == clientPid) {
-						if(ppid==1 && resume==false) {
-							//`frida -f` sucks with proc_patch_dyld on ios15
-							result = proc_patch_csflags(pid);
-						}
-						else {
-							roothide_stage_log("jailbreakd.patch.begin child=%d", pid);
-							int patchResult = roothide_patch_proc_ex(pid, forceDyldPatch);
-							roothide_stage_log("jailbreakd.patch.end child=%d result=%d", pid, patchResult);
-							if(patchResult == 0) {
-								if(resume) kill(pid, SIGCONT);
-							} else {
-								JBLogError("spawn patch failed: %d", pid);
-								result = -1;
-							}
-						}
-					} else {
-						JBLogError("spawn patch denied: %d", pid);
-						result = -1;
+					dispatch_queue_t patchQueue = jailbreakd_spawn_patch_queue();
+					if (!patchQueue) {
+						xpc_dictionary_set_int64(reply, "result", -1);
+						break;
 					}
-					xpc_dictionary_set_int64(reply, "result", result);
+					/* This block owns the reply after the receiver exits. Do not issue
+					 * an immediate success response before the patch actually finishes. */
+					xpc_object_t asyncReply = reply;
+					reply = nil;
+					dispatch_async(patchQueue, ^{
+						int64_t result = jailbreakd_patch_spawn_child(clientPid, pid, resume, forceDyldPatch);
+						xpc_dictionary_set_int64(asyncReply, "result", result);
+						jailbreakd_reply_message(msgId, asyncReply);
+						xpc_release(asyncReply);
+					});
 					break;
 				}
 
@@ -121,16 +196,20 @@ void jailbreakd_received_message(mach_port_t port)
 
 				case JBD_MSG_EXEC_TRACE_START: {
 					//dead lock: jbd->ptrace->kernel->amfi port->launchd->spawn amfid->jdb
+					xpc_object_t asyncMessage = xpc_retain(message);
+					xpc_object_t asyncReply = reply;
+					reply = nil; //reply later; keep owned objects alive in the worker
 					dispatch_async(dispatch_get_global_queue(0, 0), ^{
 						int64_t result = -1;
-						uint64_t traced = xpc_dictionary_get_uint64(message, "traced");
-						const char* execfile = xpc_dictionary_get_string(message, "execfile");
+						uint64_t traced = xpc_dictionary_get_uint64(asyncMessage, "traced");
+						const char* execfile = xpc_dictionary_get_string(asyncMessage, "execfile");
 						JBLogDebug("exec trace start: %d %s", clientPid, execfile);
 						result = execTraceProcess(clientPid, traced);
-						xpc_dictionary_set_int64(reply, "result", result);
-						jailbreakd_reply_message(msgId, reply);
+						xpc_dictionary_set_int64(asyncReply, "result", result);
+						jailbreakd_reply_message(msgId, asyncReply);
+						xpc_release(asyncReply);
+						xpc_release(asyncMessage);
 					});
-					reply = nil; //reply later
 					break;
 				}
 
@@ -183,6 +262,8 @@ void jailbreakd_received_message(mach_port_t port)
 		}
 		if (reply) {
 			jailbreakd_reply_message(msgId, reply);
+			xpc_release(reply);
 		}
+		xpc_release(message);
 	}
 }

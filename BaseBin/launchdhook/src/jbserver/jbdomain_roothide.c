@@ -219,6 +219,10 @@ static int roothide_jailbreakd_lookup(audit_token_t *callerToken, xpc_object_t *
         return -1;
     }
     *portOut = xpc_mach_send_create(port);
+    if (!*portOut) {
+        JBLogError("failed to create jailbreakd send-right XPC object");
+        return -1;
+    }
     return 0;
 }
 static int roothide_jailbreakd_checkin(audit_token_t *callerToken, const char *checkinToken, xpc_object_t *portOut)

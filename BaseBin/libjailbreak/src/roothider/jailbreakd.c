@@ -41,6 +41,9 @@ extern char **environ;
 static bool __firstLoad = false;
 static bool __jailbreakd_initialized = false;
 static bool __jailbreakd_port_ready = false;
+/* Tracks ownership of HOST_LAUNCHCTL_PORT even when a dead daemon has
+ * already caused the READY flag to be cleared during restart. */
+static bool __jailbreakd_port_published = false;
 static pthread_mutex_t __jailbreakd_port_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t __jailbreakd_restart_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t __jailbreakd_process_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -59,7 +62,24 @@ mach_port_t gJailbreakdPort = MACH_PORT_NULL;
 
 static int destroyLocalJailbreakdServerPortLocked(void)
 {
+	/* Fast lookup bypasses the launchd READY flag. Revoke the published host
+	 * right before destroying a committed service; never publish a candidate. */
 	__jailbreakd_port_ready = false;
+#ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
+	if (__jailbreakd_port_published) {
+		mach_port_t self_host = mach_host_self();
+		kern_return_t revokeResult = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, MACH_PORT_NULL);
+		mach_port_deallocate(mach_task_self(), self_host);
+		if (revokeResult == KERN_SUCCESS) {
+			__jailbreakd_port_published = false;
+		} else {
+			/* Keep the published flag so a later teardown can retry revocation;
+			 * destroying the old local right still invalidates that endpoint. */
+			JBLogError("failed to revoke published jailbreakd special port: %x,%s",
+			           revokeResult, mach_error_string(revokeResult));
+		}
+	}
+#endif
 	if (!MACH_PORT_VALID(gJailbreakdPort)) {
 		gJailbreakdPort = MACH_PORT_NULL;
 		return 0;
@@ -280,10 +300,17 @@ int jailbreakdServerPortCheckinAbort(pid_t pid, const char *token, jailbreakd_ch
     size_t tokenLength = strlen(token);
     pthread_mutex_lock(&__jailbreakd_port_mutex);
     uint64_t generation = __jailbreakd_port_generation;
-    if (!__jailbreakd_initialized || !__jailbreakd_candidate_pending ||
-        __jailbreakd_port_ready || !__jailbreakd_checkin_in_progress ||
-        pid != __jailbreakd_expected_pid || tokenLength != 32 ||
-        strcmp(token, __jailbreakd_checkin_token) != 0 || !MACH_PORT_VALID(gJailbreakdPort)) {
+    /* An ACK may have been committed while all three XPC replies were lost.
+     * The same daemon must be allowed to withdraw that committed READY. */
+    bool matchingReady = __jailbreakd_initialized && __jailbreakd_port_ready &&
+        pid == __jailbreakd_ready_pid && generation == __jailbreakd_ready_generation &&
+        tokenLength == 32 && strcmp(token, __jailbreakd_ready_token) == 0 &&
+        MACH_PORT_VALID(gJailbreakdPort);
+    bool matchingPending = __jailbreakd_initialized && __jailbreakd_candidate_pending &&
+        !__jailbreakd_port_ready && __jailbreakd_checkin_in_progress &&
+        pid == __jailbreakd_expected_pid && tokenLength == 32 &&
+        strcmp(token, __jailbreakd_checkin_token) == 0 && MACH_PORT_VALID(gJailbreakdPort);
+    if (!matchingReady && !matchingPending) {
         pthread_mutex_unlock(&__jailbreakd_port_mutex);
         JBLogError("rejecting jailbreakd check-in abort pid=%d generation=%llu",
                    pid, (unsigned long long)generation);
@@ -303,6 +330,11 @@ static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket
 	       ticket->generation == __jailbreakd_port_generation &&
 	       MACH_PORT_VALID(ticket->port) && ticket->port == gJailbreakdPort;
 }
+
+/* An unacknowledged READY can outlive its daemon when ABORT never reaches
+ * launchd. Observe the receive right periodically rather than relying on a
+ * later client lookup to retire a dead published endpoint. */
+static void scheduleJailbreakdReadyLivenessWatchdog(uint64_t generation);
 
 int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket)
 {
@@ -324,16 +356,6 @@ int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticke
 		return -1;
 	}
 
-#ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
-	mach_port_t self_host = mach_host_self();
-	kern_return_t kr = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, ticket->port);
-	mach_port_deallocate(mach_task_self(), self_host);
-	if (kr != KERN_SUCCESS) {
-		/* Keep the checked-in service available through the launchd lookup path. */
-		JBLogError("host_set_special_port failed after jailbreakd check-in: %x,%s", kr, mach_error_string(kr));
-	}
-#endif
-
 	__jailbreakd_candidate_pending = false;
 	__jailbreakd_expected_pid = 0;
 	__jailbreakd_child_pid = ticket->pid;
@@ -343,7 +365,21 @@ int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticke
 	__jailbreakd_checkin_in_progress = false;
 	memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 	__jailbreakd_port_ready = true;
+#ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
+	/* Publish only after all launchd-side READY fields have been committed.
+	 * Keep the mutex held so an ABORT cannot be followed by a late publish. */
+	mach_port_t self_host = mach_host_self();
+	kern_return_t kr = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, ticket->port);
+	mach_port_deallocate(mach_task_self(), self_host);
+	if (kr == KERN_SUCCESS) {
+		__jailbreakd_port_published = true;
+	} else {
+		/* The guarded launchd fallback is still available. */
+		JBLogError("host_set_special_port failed after jailbreakd check-in: %x,%s", kr, mach_error_string(kr));
+	}
+#endif
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	scheduleJailbreakdReadyLivenessWatchdog(ticket->generation);
 	return 0;
 }
 
@@ -353,15 +389,24 @@ void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket
 
 	pid_t failedPid = 0;
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
-	if (jailbreakdCheckinTicketMatchesLocked(ticket)) {
+	bool matchingPending = jailbreakdCheckinTicketMatchesLocked(ticket);
+	bool matchingReady = __jailbreakd_initialized && __jailbreakd_port_ready &&
+	                     ticket->pid == __jailbreakd_ready_pid &&
+	                     ticket->generation == __jailbreakd_ready_generation &&
+	                     ticket->generation == __jailbreakd_port_generation &&
+	                     MACH_PORT_VALID(ticket->port) && ticket->port == gJailbreakdPort;
+	if (matchingPending || matchingReady) {
 		failedPid = ticket->pid;
 		__jailbreakd_candidate_pending = false;
 		__jailbreakd_expected_pid = 0;
 		__jailbreakd_checkin_in_progress = false;
 		memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 		if (destroyLocalJailbreakdServerPortLocked() != 0) {
-			JBLogError("failed to discard failed jailbreakd candidate port=%x", ticket->port);
+			JBLogError("failed to discard aborted jailbreakd port=%x", ticket->port);
 		}
+		__jailbreakd_ready_pid = 0;
+		__jailbreakd_ready_generation = 0;
+		memset(__jailbreakd_ready_token, 0, sizeof(__jailbreakd_ready_token));
 		advanceJailbreakdPortGenerationLocked();
 	}
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
@@ -448,6 +493,75 @@ static void jailbreakdServerPortCheckinTimedOut(uint64_t generation)
 		roothide_stage_log("jailbreakd.checkin.timeout port=%x generation=%llu",
 		                   timedOutPort, (unsigned long long)generation);
 	}
+}
+
+/* A completed READY can lose all acknowledgements, including ABORT. If its
+ * daemon subsequently tears down the receive right, Mach turns our send
+ * right into a dead name. This probe does not issue a synchronous XPC RPC.
+ *
+ * Generation checking is essential: an older delayed probe may not revoke
+ * a new daemon that reuses the same Mach port name. A live daemon is not
+ * reaped merely for failing to answer an application-layer request. */
+static void jailbreakdReadyLivenessTick(uint64_t generation)
+{
+	if (getpid() != 1) return;
+
+	bool monitorAgain = false;
+	bool retired = false;
+	pid_t stalePid = 0;
+	mach_port_t stalePort = MACH_PORT_NULL;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (__jailbreakd_initialized && __jailbreakd_port_ready &&
+	    generation == __jailbreakd_port_generation &&
+	    generation == __jailbreakd_ready_generation &&
+	    MACH_PORT_VALID(gJailbreakdPort)) {
+		mach_port_type_t portType = 0;
+		kern_return_t kr = mach_port_type(mach_task_self(), gJailbreakdPort, &portType);
+		bool dead = kr == KERN_INVALID_NAME ||
+		            (kr == KERN_SUCCESS && !(portType & MACH_PORT_TYPE_SEND));
+		if (dead) {
+			stalePid = __jailbreakd_ready_pid;
+			stalePort = gJailbreakdPort;
+			__jailbreakd_candidate_pending = false;
+			__jailbreakd_expected_pid = 0;
+			__jailbreakd_checkin_in_progress = false;
+			memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
+			if (destroyLocalJailbreakdServerPortLocked() != 0) {
+				JBLogError("failed to retire dead READY jailbreakd port=%x", stalePort);
+			}
+			__jailbreakd_ready_pid = 0;
+			__jailbreakd_ready_generation = 0;
+			memset(__jailbreakd_ready_token, 0, sizeof(__jailbreakd_ready_token));
+			advanceJailbreakdPortGenerationLocked();
+			retired = true;
+		} else {
+			/* A transient Mach error must not kill an otherwise live daemon. */
+			if (kr != KERN_SUCCESS) {
+				JBLogError("READY jailbreakd liveness probe failed port=%x kr=%x", gJailbreakdPort, kr);
+			}
+			monitorAgain = true;
+		}
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+
+	if (retired) {
+		roothide_stage_log("jailbreakd.ready.dead_port generation=%llu port=%x pid=%d",
+		                   (unsigned long long)generation, stalePort, stalePid);
+		terminateJailbreakdChild(stalePid);
+		/* Normal guarded lookup can create the next private candidate. Do not
+		 * spawn from this watchdog or block launchd's global worker queue. */
+	} else if (monitorAgain) {
+		scheduleJailbreakdReadyLivenessWatchdog(generation);
+	}
+}
+
+static void scheduleJailbreakdReadyLivenessWatchdog(uint64_t generation)
+{
+	if (getpid() != 1 || generation == 0) return;
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5LL * 1000000000LL),
+	               dispatch_get_global_queue(0, 0), ^{
+			jailbreakdReadyLivenessTick(generation);
+		});
 }
 
 static void scheduleJailbreakdServerPortCheckinWatchdog(void)

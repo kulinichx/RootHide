@@ -42,7 +42,7 @@ assert 'JBS_ROOTHIDE_JAILBREAKD_READY' in real_client
 assert 'xpc_dictionary_get_value(xreply, "result")' in real_client
 assert 'unsetenv("JAILBREAKD_CHECKIN_TOKEN")' in real_client
 assert '__jailbreakd_port_ready' in real_server_ready and '__jailbreakd_ready_pid' in real_server_ready
-assert '__jailbreakd_port_ready || !__jailbreakd_checkin_in_progress' in real_server_abort
+assert 'bool matchingReady' in real_server_abort and 'bool matchingPending' in real_server_abort
 assert 'if (alreadyComplete) return 0;' in real_server_complete
 assert 'jailbreakdServerPortCheckinAbort(pid, checkinToken, &ticket)' in real_handler
 assert 'jailbreakdServerPortCheckinComplete(&ticket)' in real_handler
@@ -174,8 +174,10 @@ static xpc_object_t jbserver_xpc_send(uint64_t domain, uint64_t action, xpc_obje
         if (!reject_server_result) mock_server_ready = 1;
     } else {
         ++abort_deliveries;
+        /* This mock models the corrected server's authorized READY rollback. */
+        if (!reject_server_result) mock_server_ready = 0;
     }
-    int server_result = reject_server_result ? -1 : (!args->ready && mock_server_ready ? -1 : 0);
+    int server_result = reject_server_result ? -1 : 0;
     if (mode == MODE_DROP_ALL ||
         (mode == MODE_DROP_FIRST && request_count == 1) ||
         (mode == MODE_DROP_TWO && request_count <= 2)) return NULL;
@@ -240,12 +242,12 @@ static void test_all_replies_lost(void)
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
     assert(mock_server_ready && request_count == 3 && client_token_present == 1);
     mode=MODE_NORMAL;
-    assert(jbclient_jailbreakd_report_readiness(false) != 0);
-    assert(mock_server_ready && abort_deliveries == 1);
+    assert(jbclient_jailbreakd_report_readiness(false) == 0);
+    assert(!mock_server_ready && abort_deliveries == 1);
     assert(logged("mode=ready status=unconfirmed requests=3 result=-1") &&
-            logged("mode=abort attempt=1 status=server_rejected") &&
-            logged("mode=abort status=server_rejected requests=1 result=-1"));
-    puts("ALL_THREE_REPLIES_LOST=KNOWN_RISK requests=3 abort_rejected=1");
+            logged("mode=abort attempt=1 status=success") &&
+            logged("mode=abort status=success requests=1 result=0"));
+    puts("ALL_THREE_REPLIES_LOST_ABORT_RECOVERY=PASS requests=3 abort_accepted=1");
 }
 static void test_malformed_then_good(void)
 {

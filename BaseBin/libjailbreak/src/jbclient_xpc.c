@@ -44,6 +44,10 @@ xpc_object_t jbserver_xpc_send_dict(xpc_object_t xdict)
 	roothide_stage_log("jbserver.request.begin domain=%llu action=%llu custom_port=%x",
 		(unsigned long long)(isDictionary ? xpc_dictionary_get_uint64(xdict, "jb-domain") : 0),
 		(unsigned long long)(isDictionary ? xpc_dictionary_get_uint64(xdict, "action") : 0), gJBServerCustomPort);
+	if (!isDictionary) {
+		roothide_stage_log("jbserver.request.invalid_dictionary");
+		return NULL;
+	}
 	xpc_object_t xreply = NULL;
 
 	xpc_object_t xpipe = NULL;
@@ -54,6 +58,10 @@ xpc_object_t jbserver_xpc_send_dict(xpc_object_t xdict)
 	else {
 		// Else, communicate with launchd
 		struct xpc_global_data* globalData = os_alloc_once(OS_ALLOC_ONCE_KEY_LIBXPC, 472, NULL);
+		if (!globalData) {
+			roothide_stage_log("jbserver.bootstrap_data.failed");
+			return NULL;
+		}
 		if (!globalData->xpc_bootstrap_pipe) {
 			mach_port_t launchdPort = jbclient_mach_get_launchd_port();
 			if (launchdPort != MACH_PORT_NULL) {
@@ -74,6 +82,14 @@ xpc_object_t jbserver_xpc_send_dict(xpc_object_t xdict)
 	roothide_stage_log("jbserver.rpc.end error=%d reply=%d", err, xreply != NULL);
 	xpc_release(xpipe);
 	if (err != 0) {
+		/* The transport may return an error *and* an owned reply. */
+		if (xreply) xpc_release(xreply);
+		return NULL;
+	}
+	/* All callers expect an XPC dictionary, not XPC_TYPE_ERROR or a scalar. */
+	if (xreply && xpc_get_type(xreply) != XPC_TYPE_DICTIONARY) {
+		roothide_stage_log("jbserver.rpc.invalid_reply_type");
+		xpc_release(xreply);
 		return NULL;
 	}
 	return xreply;
@@ -85,6 +101,10 @@ xpc_object_t jbserver_xpc_send(uint64_t domain, uint64_t action, xpc_object_t xa
 	if (!xargs) {
 		xargs = xpc_dictionary_create_empty();
 		ownsXargs = true;
+	}
+	if (!xargs || xpc_get_type(xargs) != XPC_TYPE_DICTIONARY) {
+		roothide_stage_log("jbserver.request.arguments_invalid");
+		return NULL;
 	}
 
 	xpc_dictionary_set_uint64(xargs, "jb-domain", domain);
