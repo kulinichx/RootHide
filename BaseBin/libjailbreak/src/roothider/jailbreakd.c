@@ -7,6 +7,9 @@
 #include <mach/mach.h>
 #include <bsm/libbsm.h>
 #include <sys/param.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #include "../libjailbreak.h"
 #include "jailbreakd.h"
@@ -38,6 +41,9 @@ static bool __jailbreakd_port_ready = false;
 static pthread_mutex_t __jailbreakd_port_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t __jailbreakd_restart_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t __jailbreakd_port_generation = 0;
+static pid_t __jailbreakd_expected_pid = 0;
+static pid_t __jailbreakd_child_pid = 0;
+static bool __jailbreakd_candidate_pending = false;
 mach_port_t gJailbreakdPort = MACH_PORT_NULL;
 
 #define JAILBREAKD_CLIENT_PORT_FAST_GET
@@ -60,6 +66,54 @@ static int destroyLocalJailbreakdServerPortLocked(void)
 	return 0;
 }
 
+static void advanceJailbreakdPortGenerationLocked(void)
+{
+    if (++__jailbreakd_port_generation == 0) {
+        ++__jailbreakd_port_generation;
+    }
+}
+
+/* Must be called with __jailbreakd_port_mutex held; never wait for a live child. */
+static bool reapJailbreakdChildIfExitedLocked(void)
+{
+    if (__jailbreakd_child_pid <= 1) return true;
+
+    pid_t child = __jailbreakd_child_pid;
+    int status = 0;
+    pid_t result = waitpid(child, &status, WNOHANG);
+    if (result == child || (result == -1 && errno == ECHILD)) {
+        __jailbreakd_child_pid = 0;
+        if (__jailbreakd_expected_pid == child) {
+            __jailbreakd_expected_pid = 0;
+            __jailbreakd_candidate_pending = false;
+            __jailbreakd_port_ready = false;
+            advanceJailbreakdPortGenerationLocked();
+        }
+        return true;
+    }
+    if (result == 0 || (result == -1 && errno == EINTR)) return false;
+
+    JBLogError("waitpid(WNOHANG) failed for jailbreakd pid=%d errno=%d", child, errno);
+    return false;
+}
+
+static void terminateJailbreakdChild(pid_t pid)
+{
+    if (pid <= 1) return;
+
+    pthread_mutex_lock(&__jailbreakd_port_mutex);
+    if (__jailbreakd_child_pid == pid && !reapJailbreakdChildIfExitedLocked()) {
+        if (kill(pid, SIGKILL) != 0 && errno != ESRCH) {
+            JBLogError("failed to terminate stale jailbreakd pid=%d errno=%d", pid, errno);
+        } else {
+            JBLogError("sent SIGKILL to stale jailbreakd pid=%d", pid);
+            /* Reap immediately if the child has already completed signal exit. */
+            reapJailbreakdChildIfExitedLocked();
+        }
+    }
+    pthread_mutex_unlock(&__jailbreakd_port_mutex);
+}
+
 int registerServerPort()
 {
 	if (getpid() != 1) {
@@ -68,14 +122,20 @@ int registerServerPort()
 	}
 
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (!reapJailbreakdChildIfExitedLocked()) {
+		JBLogError("refusing to register a jailbreakd port while prior child pid=%d remains alive",
+		           __jailbreakd_child_pid);
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		return EBUSY;
+	}
 	if (destroyLocalJailbreakdServerPortLocked() != 0) {
 		pthread_mutex_unlock(&__jailbreakd_port_mutex);
 		return -1;
 	}
-	/* Invalidate any delayed watchdog associated with the previous candidate. */
-	if (++__jailbreakd_port_generation == 0) {
-		++__jailbreakd_port_generation;
-	}
+	/* Invalidate any delayed watchdog and ticket for the previous candidate. */
+	advanceJailbreakdPortGenerationLocked();
+	__jailbreakd_expected_pid = 0;
+	__jailbreakd_candidate_pending = false;
 
 	kern_return_t kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &gJailbreakdPort);
 	if (kr != KERN_SUCCESS) {
@@ -95,27 +155,64 @@ int registerServerPort()
 	}
 
 	JBLogDebug("jailbreakd server port: %x", gJailbreakdPort);
+	__jailbreakd_candidate_pending = true;
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 	return 0;
 }
 
-int jailbreakdServerPortCheckinComplete(void)
+int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *ticket)
 {
-	if (getpid() != 1) {
-		JBLogError("jailbreakdServerPortCheckinComplete called outside launchd: pid=%d", getpid());
+	if (getpid() != 1 || pid <= 1 || !ticket) {
+		JBLogError("invalid jailbreakd check-in begin: launchd_pid=%d caller_pid=%d ticket=%d",
+		           getpid(), pid, ticket != NULL);
 		return -1;
 	}
 
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
-	if (!MACH_PORT_VALID(gJailbreakdPort)) {
+	pid_t expectedPid = __jailbreakd_expected_pid;
+	uint64_t generation = __jailbreakd_port_generation;
+	if (!__jailbreakd_initialized || !__jailbreakd_candidate_pending ||
+	    __jailbreakd_port_ready || pid != expectedPid ||
+	    !MACH_PORT_VALID(gJailbreakdPort)) {
 		pthread_mutex_unlock(&__jailbreakd_port_mutex);
-		JBLogError("jailbreakd check-in completed without a valid server port");
+		JBLogError("rejecting jailbreakd check-in begin pid=%d generation=%llu",
+		           pid, (unsigned long long)generation);
+		return -1;
+	}
+
+	ticket->pid = pid;
+	ticket->generation = __jailbreakd_port_generation;
+	ticket->port = gJailbreakdPort;
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	return 0;
+}
+
+static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket_t *ticket)
+{
+	return ticket && ticket->pid > 1 && __jailbreakd_candidate_pending &&
+	       !__jailbreakd_port_ready && ticket->pid == __jailbreakd_expected_pid &&
+	       ticket->generation == __jailbreakd_port_generation &&
+	       MACH_PORT_VALID(ticket->port) && ticket->port == gJailbreakdPort;
+}
+
+int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket)
+{
+	if (getpid() != 1 || !ticket) {
+		JBLogError("jailbreakdServerPortCheckinComplete called with invalid context");
+		return -1;
+	}
+
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (!jailbreakdCheckinTicketMatchesLocked(ticket)) {
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		JBLogError("rejecting stale jailbreakd check-in completion pid=%d generation=%llu port=%x",
+		           ticket->pid, (unsigned long long)ticket->generation, ticket->port);
 		return -1;
 	}
 
 #ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
 	mach_port_t self_host = mach_host_self();
-	kern_return_t kr = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, gJailbreakdPort);
+	kern_return_t kr = host_set_special_port(self_host, HOST_LAUNCHCTL_PORT, ticket->port);
 	mach_port_deallocate(mach_task_self(), self_host);
 	if (kr != KERN_SUCCESS) {
 		/* Keep the checked-in service available through the launchd lookup path. */
@@ -123,20 +220,45 @@ int jailbreakdServerPortCheckinComplete(void)
 	}
 #endif
 
+	__jailbreakd_candidate_pending = false;
+	__jailbreakd_expected_pid = 0;
 	__jailbreakd_port_ready = true;
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 	return 0;
 }
 
-void jailbreakdServerPortCheckinFailed(void)
+void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket)
 {
-	if (getpid() != 1) {
-		return;
+	if (getpid() != 1 || !ticket) return;
+
+	pid_t failedPid = 0;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (jailbreakdCheckinTicketMatchesLocked(ticket)) {
+		failedPid = ticket->pid;
+		__jailbreakd_candidate_pending = false;
+		__jailbreakd_expected_pid = 0;
+		if (destroyLocalJailbreakdServerPortLocked() != 0) {
+			JBLogError("failed to discard failed jailbreakd candidate port=%x", ticket->port);
+		}
+		advanceJailbreakdPortGenerationLocked();
 	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	terminateJailbreakdChild(failedPid);
+}
+
+void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port)
+{
+	if (getpid() != 1) return;
 
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
-	if (!__jailbreakd_port_ready && destroyLocalJailbreakdServerPortLocked() != 0) {
-		JBLogError("failed to discard an unready jailbreakd server port");
+	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready &&
+	    __jailbreakd_expected_pid == 0 && generation == __jailbreakd_port_generation &&
+	    MACH_PORT_VALID(port) && port == gJailbreakdPort) {
+		__jailbreakd_candidate_pending = false;
+		if (destroyLocalJailbreakdServerPortLocked() != 0) {
+			JBLogError("failed to discard abandoned jailbreakd candidate port=%x", port);
+		}
+		advanceJailbreakdPortGenerationLocked();
 	}
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 }
@@ -149,20 +271,24 @@ static void jailbreakdServerPortCheckinTimedOut(uint64_t generation)
 
 	bool timedOut = false;
 	mach_port_t timedOutPort = MACH_PORT_NULL;
+	pid_t timedOutPid = 0;
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
 	if (generation == __jailbreakd_port_generation &&
-	    !__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
+	    __jailbreakd_candidate_pending && !__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
 		timedOutPort = gJailbreakdPort;
-		if (destroyLocalJailbreakdServerPortLocked() == 0) {
-			if (++__jailbreakd_port_generation == 0) {
-				++__jailbreakd_port_generation;
-			}
-			timedOut = true;
+		timedOutPid = __jailbreakd_expected_pid;
+		__jailbreakd_expected_pid = 0;
+		__jailbreakd_candidate_pending = false;
+		if (destroyLocalJailbreakdServerPortLocked() != 0) {
+			JBLogError("failed to destroy timed-out jailbreakd port=%x", timedOutPort);
 		}
+		advanceJailbreakdPortGenerationLocked();
+		timedOut = true;
 	}
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 
 	if (timedOut) {
+		terminateJailbreakdChild(timedOutPid);
 		JBLogError("jailbreakd check-in timed out; discarded port=%x generation=%llu",
 		           timedOutPort, (unsigned long long)generation);
 		roothide_stage_log("jailbreakd.checkin.timeout port=%x generation=%llu",
@@ -174,7 +300,7 @@ static void scheduleJailbreakdServerPortCheckinWatchdog(void)
 {
 	uint64_t generation = 0;
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
-	if (!__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
+	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready && MACH_PORT_VALID(gJailbreakdPort)) {
 		generation = __jailbreakd_port_generation;
 	}
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
@@ -231,7 +357,8 @@ void setJailbreakdProcess(pid_t pid)
 		pid_t oldpid = atoi(pidenv);
 		if(oldpid != pid)
 		{
-			waitpid(oldpid, NULL, 0);
+			/* Reaping is non-blocking; launchd must never wait on a stuck daemon. */
+			waitpid(oldpid, NULL, WNOHANG);
 			unsetenv("JAILBREAKD_PID");
 		}
 	}
@@ -304,29 +431,87 @@ int spawnJailbreakd()
 		dispatch_resume(source);
 	});
 
+	uint64_t candidateGeneration = 0;
+	mach_port_t candidatePort = MACH_PORT_NULL;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready &&
+	    __jailbreakd_expected_pid == 0 && __jailbreakd_child_pid == 0 &&
+	    MACH_PORT_VALID(gJailbreakdPort)) {
+		candidateGeneration = __jailbreakd_port_generation;
+		candidatePort = gJailbreakdPort;
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	if (candidateGeneration == 0) {
+		JBLogError("spawnJailbreakd called without an available check-in candidate");
+		return EBUSY;
+	}
+
 	pid_t pid;
 	posix_spawnattr_t attr = NULL;
 	int attrResult = posix_spawnattr_init(&attr);
 	if (attrResult != 0) {
+		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
+		return attrResult;
+	}
+	attrResult = posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+	if (attrResult != 0) {
+		posix_spawnattr_destroy(&attr);
+		JBLogError("posix_spawnattr_setflags failed for suspended jailbreakd: %d", attrResult);
+		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
 		return attrResult;
 	}
 	// posix_spawnattr_setspecialport_np(&attr, bootstraport, TASK_BOOTSTRAP_PORT);
 	// posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ bootstraport, MACH_PORT_NULL }, 3);
-	posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstraport }, 3);
+	attrResult = posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstraport }, 3);
+	if (attrResult != 0) {
+		posix_spawnattr_destroy(&attr);
+		JBLogError("posix_spawnattr_set_registered_ports_np failed: %d", attrResult);
+		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
+		return attrResult;
+	}
 	int ret = posix_spawn(&pid, JBROOT_PATH("/basebin/jailbreakd"), NULL, &attr, (char*[]){"jailbreakd",NULL}, __firstLoad ? NULL :  ((char*[]){"RESPAWN_REQUIRED=1", NULL}));
 	posix_spawnattr_destroy(&attr);
 
 	if (ret != 0) {
 		JBLogError("posix_spawn jailbreakd failed: %d\n", ret);
+		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
 		return ret;
 	}
 
 	JBLogDebug("jailbreakd spawned, pid=%d\n", pid);
 
-	/* here we can't wait for jailbreakd to initialize since opainject will suspend all other threads */
-	scheduleJailbreakdServerPortCheckinWatchdog();
+	/* The child is still suspended: publish its identity before it can check in. */
+	bool registered = false;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready &&
+	    __jailbreakd_port_generation == candidateGeneration && gJailbreakdPort == candidatePort &&
+	    __jailbreakd_expected_pid == 0 && __jailbreakd_child_pid == 0) {
+		__jailbreakd_expected_pid = pid;
+		__jailbreakd_child_pid = pid;
+		registered = true;
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	if (!registered) {
+		kill(pid, SIGKILL);
+		waitpid(pid, NULL, WNOHANG);
+		JBLogError("discarded suspended jailbreakd pid=%d after candidate changed", pid);
+		return EAGAIN;
+	}
 
 	setJailbreakdProcess(pid);
+	/* here we can't wait for jailbreakd to initialize since opainject will suspend all other threads */
+	scheduleJailbreakdServerPortCheckinWatchdog();
+	if (kill(pid, SIGCONT) != 0) {
+		int resumeError = errno;
+		jailbreakd_checkin_ticket_t ticket = {
+			.pid = pid,
+			.generation = candidateGeneration,
+			.port = candidatePort,
+		};
+		jailbreakdServerPortCheckinFailed(&ticket);
+		JBLogError("failed to resume suspended jailbreakd pid=%d errno=%d", pid, resumeError);
+		return resumeError;
+	}
 
 	return 0;
 }
@@ -365,7 +550,6 @@ int initJailbreakd(bool firstLoad)
 	int ret = spawnJailbreakd();
 	if (ret != 0) {
 		JBLogError("spawnJailbreakd failed during init: %d", ret);
-		jailbreakdServerPortCheckinFailed();
 		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 		return ret;
 	}
@@ -384,6 +568,7 @@ mach_port_t reactiveJailbreakdPort()
 	mach_port_t port = MACH_PORT_NULL;
 	bool wasReady = false;
 	bool shouldRestart = false;
+	pid_t childToStop = 0;
 
 	pthread_mutex_lock(&__jailbreakd_restart_mutex);
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
@@ -401,9 +586,13 @@ mach_port_t reactiveJailbreakdPort()
 		} else {
 			JBLogError("jailbreakd port is dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);
 			__jailbreakd_port_ready = false;
+			__jailbreakd_candidate_pending = false;
+			__jailbreakd_expected_pid = 0;
+			childToStop = __jailbreakd_child_pid;
+			advanceJailbreakdPortGenerationLocked();
 			shouldRestart = true;
 		}
-	} else if (wasReady || !MACH_PORT_VALID(gJailbreakdPort)) {
+	} else if (wasReady || !MACH_PORT_VALID(gJailbreakdPort) || !__jailbreakd_candidate_pending) {
 		__jailbreakd_port_ready = false;
 		shouldRestart = true;
 	}
@@ -413,10 +602,21 @@ mach_port_t reactiveJailbreakdPort()
 		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
 		return port;
 	}
+	terminateJailbreakdChild(childToStop);
 
 	if (wasReady) {
 		/* Make jailbreakd crashes perceptible, but never expose the replacement candidate. */
 		sleep(5);
+	}
+
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	bool previousChildExited = reapJailbreakdChildIfExitedLocked();
+	pid_t previousChildPid = __jailbreakd_child_pid;
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	if (!previousChildExited) {
+		JBLogError("deferring jailbreakd restart while prior child remains alive pid=%d", previousChildPid);
+		pthread_mutex_unlock(&__jailbreakd_restart_mutex);
+		return MACH_PORT_NULL;
 	}
 
 	if (registerServerPort() != 0) {
@@ -428,7 +628,6 @@ mach_port_t reactiveJailbreakdPort()
 	int ret = spawnJailbreakd();
 	if (ret != 0) {
 		JBLogError("spawnJailbreakd failed while restarting: %d", ret);
-		jailbreakdServerPortCheckinFailed();
 	}
 
 	/* The candidate remains private until the daemon checks in successfully. */
@@ -464,7 +663,8 @@ mach_port_t jailbreakdClientPort()
 				JBLogError("jailbreakd port dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);
 				shouldRestart = true;
 			}
-		} else if (__jailbreakd_initialized && !MACH_PORT_VALID(gJailbreakdPort)) {
+		} else if (__jailbreakd_initialized &&
+		           (!MACH_PORT_VALID(gJailbreakdPort) || !__jailbreakd_candidate_pending)) {
 			shouldRestart = true;
 		}
 		pthread_mutex_unlock(&__jailbreakd_port_mutex);

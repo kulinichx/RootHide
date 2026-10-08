@@ -30,9 +30,15 @@ global_end = source.index("#define JAILBREAKD_CLIENT_PORT_FAST_GET", global_star
 globals_block = source[global_start:global_end]
 function_signatures = [
     "static int destroyLocalJailbreakdServerPortLocked(void)",
+    "static void advanceJailbreakdPortGenerationLocked(void)",
+    "static bool reapJailbreakdChildIfExitedLocked(void)",
+    "static void terminateJailbreakdChild(pid_t pid)",
     "int registerServerPort()",
-    "int jailbreakdServerPortCheckinComplete(void)",
-    "void jailbreakdServerPortCheckinFailed(void)",
+    "int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *ticket)",
+    "static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket_t *ticket)",
+    "int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket)",
+    "void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket)",
+    "void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port)",
     "static void jailbreakdServerPortCheckinTimedOut(uint64_t generation)",
     "mach_port_t jailbreakdClientPortFastGet()",
     "int initJailbreakd(bool firstLoad)",
@@ -44,12 +50,13 @@ functions = "\n\n".join(extract_function(source, signature) for signature in fun
 checkin = extract_function(domain_source, "static int roothide_jailbreakd_checkin(")
 lookup = extract_function(domain_source, "static int roothide_jailbreakd_lookup(")
 
-# Keep the cross-file check-in order under test as well as compiling the real lifecycle C.
+# Keep the cross-file ticket capture and candidate-scoped cleanup under test.
+begin_at = checkin.index("jailbreakdServerPortCheckinBegin(pid, &ticket)")
 recv_create_at = checkin.index("*portOut = xpc_mach_recv_create(port);")
 recv_failure_at = checkin.index("if (!*portOut)", recv_create_at)
-ready_at = checkin.index("jailbreakdServerPortCheckinComplete()", recv_failure_at)
-failed_at = checkin.index("jailbreakdServerPortCheckinFailed();", recv_failure_at)
-assert recv_create_at < recv_failure_at < failed_at < ready_at
+ready_at = checkin.index("jailbreakdServerPortCheckinComplete(&ticket)", recv_failure_at)
+assert begin_at < recv_create_at < recv_failure_at < ready_at
+assert "jailbreakdServerPortCheckinFailed(&ticket);" in checkin[recv_failure_at:]
 assert "xpc_release(*portOut);" in checkin[ready_at:]
 assert "MACH_PORT_VALID(port)" in lookup and "xpc_mach_send_create(port)" in lookup
 spawn_start = source.index("int spawnJailbreakd()")
@@ -57,6 +64,12 @@ spawn_end = source.index("int initJailbreakd(bool firstLoad)", spawn_start)
 spawn_source = source[spawn_start:spawn_end]
 assert "scheduleJailbreakdServerPortCheckinWatchdog();" in spawn_source
 assert spawn_source.index("if (ret != 0)") < spawn_source.index("scheduleJailbreakdServerPortCheckinWatchdog();")
+assert "POSIX_SPAWN_START_SUSPENDED" in spawn_source
+assert spawn_source.index("__jailbreakd_expected_pid = pid;") < spawn_source.index("kill(pid, SIGCONT)")
+assert "waitpid(oldpid, NULL, 0)" not in source
+assert "waitpid(child, &status, WNOHANG)" in source
+assert "waitpid(oldpid, NULL, WNOHANG)" in source
+assert "waitpid(pid, NULL, WNOHANG)" in source
 
 if "--static-only" in sys.argv[1:]:
     print("PASS: jailbreakd check-in/readiness/watchdog source contract")
@@ -69,10 +82,18 @@ harness = r'''#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
 
 typedef uint32_t mach_port_t;
+typedef struct {
+    pid_t pid;
+    uint64_t generation;
+    mach_port_t port;
+} jailbreakd_checkin_ticket_t;
 typedef int kern_return_t;
 enum {
     KERN_SUCCESS = 0,
@@ -91,6 +112,8 @@ static void fake_log(const char *format, ...) { (void)format; }
 #define JBLogDebug(...) fake_log(__VA_ARGS__)
 #define JBLogError(...) fake_log(__VA_ARGS__)
 #define roothide_stage_log(...) fake_log(__VA_ARGS__)
+
+/* INJECT_REAL_GLOBALS */
 
 typedef struct {
     bool allocated;
@@ -113,10 +136,38 @@ static int spawn_result;
 static int spawn_calls;
 static int lookup_calls;
 static mach_port_t lookup_result = 700;
+static pid_t next_fake_pid = 500;
+static pid_t fake_tracked_pid;
+static bool fake_child_alive;
+static bool fake_hold_child_after_kill;
+static int fake_kill_calls;
 
 static pid_t fake_getpid(void) { return (pid_t)launchd_pid; }
 #define getpid fake_getpid
+#define waitpid fake_waitpid
+#define kill fake_kill
 #define sleep(seconds) do { (void)(seconds); } while (0)
+
+static pid_t fake_waitpid(pid_t pid, int *status, int options)
+{
+    assert(options & WNOHANG);
+    if (pid != fake_tracked_pid) {
+        errno = ECHILD;
+        return -1;
+    }
+    if (fake_child_alive) return 0;
+    if (status) *status = 0;
+    return pid;
+}
+
+static int fake_kill(pid_t pid, int signal_number)
+{
+    assert(signal_number == SIGKILL);
+    fake_kill_calls++;
+    if (pid == fake_tracked_pid && !fake_hold_child_after_kill)
+        fake_child_alive = false;
+    return 0;
+}
 
 static mach_port_t mach_task_self(void) { return 1; }
 static mach_port_t mach_host_self(void) { return 2; }
@@ -192,9 +243,19 @@ static const char *mach_error_string(kern_return_t error)
     (void)error;
     return "mock";
 }
+void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port);
 static int spawnJailbreakd(void)
 {
     spawn_calls++;
+    if (spawn_result != 0) {
+        jailbreakdServerPortAbandonCandidate(__jailbreakd_port_generation, gJailbreakdPort);
+        return spawn_result;
+    }
+    pid_t pid = next_fake_pid++;
+    __jailbreakd_expected_pid = pid;
+    __jailbreakd_child_pid = pid;
+    fake_tracked_pid = pid;
+    fake_child_alive = true;
     return spawn_result;
 }
 static mach_port_t jbclient_jailbreakd_lookup(void)
@@ -222,7 +283,29 @@ main = r'''static void reset_case(void)
     __jailbreakd_initialized = false;
     __jailbreakd_port_ready = false;
     __jailbreakd_port_generation = 0;
+    __jailbreakd_expected_pid = 0;
+    __jailbreakd_child_pid = 0;
+    __jailbreakd_candidate_pending = false;
+    next_fake_pid = 500;
+    fake_tracked_pid = 0;
+    fake_child_alive = false;
+    fake_hold_child_after_kill = false;
+    fake_kill_calls = 0;
     gJailbreakdPort = MACH_PORT_NULL;
+}
+
+static int complete_current_candidate(void)
+{
+    jailbreakd_checkin_ticket_t ticket = {0};
+    assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, &ticket) == 0);
+    return jailbreakdServerPortCheckinComplete(&ticket);
+}
+
+static void fail_current_candidate(void)
+{
+    jailbreakd_checkin_ticket_t ticket = {0};
+    assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, &ticket) == 0);
+    jailbreakdServerPortCheckinFailed(&ticket);
 }
 
 static void test_unready_port_is_not_returned_and_becomes_ready_after_checkin(void)
@@ -236,7 +319,7 @@ static void test_unready_port_is_not_returned_and_becomes_ready_after_checkin(vo
     assert(jailbreakdClientPort() == MACH_PORT_NULL);
     assert(spawn_calls == 1);
 
-    assert(jailbreakdServerPortCheckinComplete() == 0);
+    assert(complete_current_candidate() == 0);
     assert(__jailbreakd_port_ready);
     assert(host_special_port == candidate);
     jailbreakdServerPortCheckinTimedOut(__jailbreakd_port_generation);
@@ -268,7 +351,7 @@ static void test_initial_spawn_failure_rolls_back_and_retries(void)
     assert(jailbreakdClientPort() == MACH_PORT_NULL);
     assert(spawn_calls == 2); /* do not spawn a second daemon while check-in is pending */
 
-    assert(jailbreakdServerPortCheckinComplete() == 0);
+    assert(complete_current_candidate() == 0);
     assert(jailbreakdClientPort() == candidate);
 }
 
@@ -277,7 +360,7 @@ static void test_checkin_failure_discards_only_the_unready_candidate(void)
     reset_case();
     assert(initJailbreakd(true) == 0);
     mach_port_t candidate = gJailbreakdPort;
-    jailbreakdServerPortCheckinFailed();
+    fail_current_candidate();
     assert(gJailbreakdPort == MACH_PORT_NULL);
     assert(!__jailbreakd_port_ready);
     assert(fake_ports[candidate].destroy_count == 1);
@@ -308,22 +391,63 @@ static void test_stale_timeout_cannot_discard_a_new_generation(void)
     reset_case();
     assert(initJailbreakd(true) == 0);
     uint64_t stale_generation = __jailbreakd_port_generation;
-    jailbreakdServerPortCheckinFailed();
-    assert(registerServerPort() == 0);
+    jailbreakd_checkin_ticket_t stale_ticket = {0};
+    assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, &stale_ticket) == 0);
+    jailbreakdServerPortCheckinTimedOut(stale_generation);
+    assert(gJailbreakdPort == MACH_PORT_NULL);
+
+    assert(jailbreakdClientPort() == MACH_PORT_NULL);
     mach_port_t current_candidate = gJailbreakdPort;
+    assert(current_candidate != MACH_PORT_NULL);
+    jailbreakd_checkin_ticket_t current_ticket = {0};
+    assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, &current_ticket) == 0);
     assert(__jailbreakd_port_generation != stale_generation);
 
-    jailbreakdServerPortCheckinTimedOut(stale_generation);
+    assert(jailbreakdServerPortCheckinComplete(&stale_ticket) != 0);
     assert(gJailbreakdPort == current_candidate);
-    assert(fake_ports[current_candidate].destroy_count == 0);
     assert(!__jailbreakd_port_ready);
+    int kills_before_stale_failure = fake_kill_calls;
+    jailbreakdServerPortCheckinFailed(&stale_ticket);
+    assert(gJailbreakdPort == current_candidate);
+    assert(!__jailbreakd_port_ready);
+    assert(fake_ports[current_candidate].destroy_count == 0);
+    assert(fake_kill_calls == kills_before_stale_failure);
+    assert(jailbreakdServerPortCheckinComplete(&current_ticket) == 0);
+    assert(__jailbreakd_port_ready);
+}
+
+static void test_live_timed_out_child_never_blocks_restart(void)
+{
+    reset_case();
+    assert(initJailbreakd(true) == 0);
+    pid_t old_pid = __jailbreakd_expected_pid;
+    fake_hold_child_after_kill = true;
+    mach_port_t old_port = gJailbreakdPort;
+    uint64_t old_generation = __jailbreakd_port_generation;
+
+    jailbreakdServerPortCheckinTimedOut(old_generation);
+    assert(fake_kill_calls == 1);
+    assert(fake_child_alive);
+    assert(gJailbreakdPort == MACH_PORT_NULL);
+
+    /* Retry uses waitpid(WNOHANG): it returns rather than waiting for the live child. */
+    assert(jailbreakdClientPort() == MACH_PORT_NULL);
+    assert(spawn_calls == 1);
+    assert(__jailbreakd_child_pid == old_pid);
+    assert(fake_ports[old_port].destroy_count == 1);
+
+    fake_child_alive = false;
+    assert(jailbreakdClientPort() == MACH_PORT_NULL);
+    assert(spawn_calls == 2);
+    assert(gJailbreakdPort != MACH_PORT_NULL);
+    assert(__jailbreakd_child_pid != old_pid);
 }
 
 static void test_failed_restart_rolls_back_and_retry_waits_for_checkin(void)
 {
     reset_case();
     assert(initJailbreakd(true) == 0);
-    assert(jailbreakdServerPortCheckinComplete() == 0);
+    assert(complete_current_candidate() == 0);
     mach_port_t old_port = gJailbreakdPort;
     fake_ports[old_port].send = false;
     fake_ports[old_port].receive = false;
@@ -345,7 +469,7 @@ static void test_failed_restart_rolls_back_and_retry_waits_for_checkin(void)
     assert(jailbreakdClientPort() == MACH_PORT_NULL);
     assert(spawn_calls == 3);
 
-    assert(jailbreakdServerPortCheckinComplete() == 0);
+    assert(complete_current_candidate() == 0);
     assert(host_special_port == new_port);
     assert(jailbreakdClientPort() == new_port);
 }
@@ -354,7 +478,7 @@ static void test_dead_fast_special_port_falls_back_to_launchd_lookup(void)
 {
     reset_case();
     assert(initJailbreakd(true) == 0);
-    assert(jailbreakdServerPortCheckinComplete() == 0);
+    assert(complete_current_candidate() == 0);
     mach_port_t old_port = gJailbreakdPort;
     fake_ports[old_port].send = false;
     fake_ports[old_port].receive = false;
@@ -373,7 +497,7 @@ static void test_special_port_publish_failure_keeps_xpc_lookup_available(void)
     assert(initJailbreakd(true) == 0);
     mach_port_t candidate = gJailbreakdPort;
     fail_host_set = true;
-    assert(jailbreakdServerPortCheckinComplete() == 0);
+    assert(complete_current_candidate() == 0);
     assert(__jailbreakd_port_ready);
     assert(host_special_port == MACH_PORT_NULL);
     assert(jailbreakdClientPort() == candidate);
@@ -403,6 +527,7 @@ int main(void)
     test_checkin_failure_discards_only_the_unready_candidate();
     test_startup_timeout_discards_failed_candidate_and_allows_retry();
     test_stale_timeout_cannot_discard_a_new_generation();
+    test_live_timed_out_child_never_blocks_restart();
     test_failed_restart_rolls_back_and_retry_waits_for_checkin();
     test_dead_fast_special_port_falls_back_to_launchd_lookup();
     test_special_port_publish_failure_keeps_xpc_lookup_available();
@@ -415,7 +540,7 @@ with tempfile.TemporaryDirectory() as directory:
     directory = Path(directory)
     c_file = directory / "jailbreakd_lifecycle.c"
     executable = directory / "jailbreakd_lifecycle"
-    c_file.write_text(harness + globals_block + "\n" + functions + "\n" + main)
+    c_file.write_text(harness.replace("/* INJECT_REAL_GLOBALS */", globals_block) + "\n" + functions + "\n" + main)
     subprocess.run(
         ["xcrun", "clang", "-std=c11", "-Wall", "-Wextra", "-Werror",
          "-fsanitize=address,undefined", str(c_file), "-o", str(executable)],
@@ -423,4 +548,4 @@ with tempfile.TemporaryDirectory() as directory:
     )
     subprocess.run([str(executable)], check=True)
 
-print("PASS: jailbreakd ready-gate, startup timeout, rollback, restart, and dead-port fallback")
+print("PASS: jailbreakd readiness, stale check-in tickets, timeout child reaping, restart, and dead-port fallback")

@@ -1,6 +1,8 @@
 #ifndef JAILBREAKD_H
 #define JAILBREAKD_H
 
+#include <mach/mach.h>
+#include <stdint.h>
 #include <unistd.h>
 
 typedef enum {
@@ -14,6 +16,13 @@ typedef enum {
 	JBD_MSG_SPINLOCK_FIX_ONLY = 1006,
 } JBD_MESSAGE_ID;
 
+/* Snapshot identity for one launchd-owned jailbreakd check-in candidate. */
+typedef struct {
+	pid_t pid;
+	uint64_t generation;
+	mach_port_t port;
+} jailbreakd_checkin_ticket_t;
+
 void enableJBDLog(void* debugLog, void* errorLog);
 
 int initJailbreakd(bool firstLoad);
@@ -22,8 +31,10 @@ void setJailbreakdProcess(pid_t pid);
 
 mach_port_t jailbreakdClientPort();
 mach_port_t jailbreakdServerPort();
-int jailbreakdServerPortCheckinComplete(void);
-void jailbreakdServerPortCheckinFailed(void);
+int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *ticket);
+int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket);
+void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket);
+void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port);
 
 int jbdTestCall(int value);
 int jbdSystemwideLog(const char* fmt, ...);

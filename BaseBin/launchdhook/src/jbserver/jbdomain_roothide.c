@@ -268,19 +268,24 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
         return -1;
     }
 
-    mach_port_t port = jailbreakdServerPort();
+    jailbreakd_checkin_ticket_t ticket = {0};
+    if (jailbreakdServerPortCheckinBegin(pid, &ticket) != 0) {
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.reject reason=candidate_identity pid=%d", pid);
+        return -1;
+    }
+    mach_port_t port = ticket.port;
     roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
-                            "jailbreakd.checkin.handler.server_port port=%x valid=%d",
-                            port, MACH_PORT_VALID(port));
+                            "jailbreakd.checkin.handler.server_port pid=%d port=%x generation=%llu valid=%d",
+                            pid, port, (unsigned long long)ticket.generation, MACH_PORT_VALID(port));
     if(!MACH_PORT_VALID(port)) {
         JBLogError("Invalid jailbreakd server port: %x", port);
         roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                                 "jailbreakd.checkin.handler.reject reason=server_port");
-        jailbreakdServerPortCheckinFailed();
+        jailbreakdServerPortCheckinFailed(&ticket);
         return -1;
     }
 
-    setJailbreakdProcess(pid);
     *portOut = xpc_mach_recv_create(port);
     roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                             "jailbreakd.checkin.handler.reply mach_recv=%d",
@@ -288,16 +293,16 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
     if (!*portOut) {
         roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                                 "jailbreakd.checkin.handler.reject reason=mach_recv_create");
-        jailbreakdServerPortCheckinFailed();
+        jailbreakdServerPortCheckinFailed(&ticket);
         return -1;
     }
 
-    if (jailbreakdServerPortCheckinComplete() != 0) {
+    if (jailbreakdServerPortCheckinComplete(&ticket) != 0) {
         xpc_release(*portOut);
         *portOut = NULL;
         roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                                 "jailbreakd.checkin.handler.reject reason=ready_publish");
-        jailbreakdServerPortCheckinFailed();
+        jailbreakdServerPortCheckinFailed(&ticket);
         return -1;
     }
 
