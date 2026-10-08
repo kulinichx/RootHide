@@ -1,5 +1,6 @@
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
+#include <stdlib.h>
 #include "jbclient_xpc.h"
 #include "jbserver.h"
 
@@ -41,7 +42,12 @@ mach_port_t jbclient_jailbreakd_lookup()
 mach_port_t jbclient_jailbreakd_checkin()
 {
 	mach_port_t port = MACH_PORT_NULL;
-	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_CHECKIN, NULL);
+	xpc_object_t xargs = xpc_dictionary_create_empty();
+	if (!xargs) return port;
+	const char *checkinToken = getenv("JAILBREAKD_CHECKIN_TOKEN");
+	if (checkinToken) xpc_dictionary_set_string(xargs, "checkin-token", checkinToken);
+	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_CHECKIN, xargs);
+	xpc_release(xargs);
 	if (xreply) {
 		int64_t result = xpc_dictionary_get_int64(xreply, "result");
 		xpc_object_t portobj = xpc_dictionary_get_value(xreply, "port");

@@ -221,9 +221,9 @@ static int roothide_jailbreakd_lookup(audit_token_t *callerToken, xpc_object_t *
     *portOut = xpc_mach_send_create(port);
     return 0;
 }
-static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t *portOut)
+static int roothide_jailbreakd_checkin(audit_token_t *callerToken, const char *checkinToken, xpc_object_t *portOut)
 {
-    if(!callerToken || !portOut) {
+    if(!callerToken || !checkinToken || !portOut) {
         roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                                 "jailbreakd.checkin.handler.reject reason=missing_argument");
         return -1;
@@ -269,7 +269,7 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
     }
 
     jailbreakd_checkin_ticket_t ticket = {0};
-    if (jailbreakdServerPortCheckinBegin(pid, &ticket) != 0) {
+    if (jailbreakdServerPortCheckinBegin(pid, checkinToken, &ticket) != 0) {
         roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                                 "jailbreakd.checkin.handler.reject reason=candidate_identity pid=%d", pid);
         return -1;
@@ -306,6 +306,7 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, xpc_object_t 
         return -1;
     }
 
+    setJailbreakdProcess(pid);
     roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
                             "jailbreakd.checkin.handler.ready=1 pid=%d", pid);
     return 0;
@@ -391,6 +392,7 @@ struct jbserver_domain gRootHideDomain = {
             .handler = roothide_jailbreakd_checkin,
             .args = (jbserver_arg[]) {
                     { .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
+                    { .name = "checkin-token", .type = JBS_TYPE_STRING, .out = false },
                     { .name = "port", .type = JBS_TYPE_XPC_GENERIC, .out = true },
                     { 0 },
             },

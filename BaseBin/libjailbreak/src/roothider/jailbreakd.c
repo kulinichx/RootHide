@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../libjailbreak.h"
 #include "jailbreakd.h"
@@ -34,6 +36,7 @@ void enableJBDLog(void* debugLog, void* errorLog)
 
 int posix_spawnattr_setspecialport_np(posix_spawnattr_t *attr, mach_port_t new_port, int which);
 int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr, mach_port_t portarray[], uint32_t count);
+extern char **environ;
 
 static bool __firstLoad = false;
 static bool __jailbreakd_initialized = false;
@@ -44,6 +47,8 @@ static uint64_t __jailbreakd_port_generation = 0;
 static pid_t __jailbreakd_expected_pid = 0;
 static pid_t __jailbreakd_child_pid = 0;
 static bool __jailbreakd_candidate_pending = false;
+static bool __jailbreakd_checkin_in_progress = false;
+static char __jailbreakd_checkin_token[33] = {0};
 mach_port_t gJailbreakdPort = MACH_PORT_NULL;
 
 #define JAILBREAKD_CLIENT_PORT_FAST_GET
@@ -81,7 +86,13 @@ static bool reapJailbreakdChildIfExitedLocked(void)
     pid_t child = __jailbreakd_child_pid;
     int status = 0;
     pid_t result = waitpid(child, &status, WNOHANG);
-    if (result == child || (result == -1 && errno == ECHILD)) {
+    bool childExited = result == child;
+    if (result == -1 && errno == ECHILD) {
+        /* A respawned daemon may still be parented to the bootstrap process. */
+        if (kill(child, 0) == 0 || errno != ESRCH) return false;
+        childExited = true;
+    }
+    if (childExited) {
         __jailbreakd_child_pid = 0;
         if (__jailbreakd_expected_pid == child) {
             __jailbreakd_expected_pid = 0;
@@ -136,6 +147,8 @@ int registerServerPort()
 	advanceJailbreakdPortGenerationLocked();
 	__jailbreakd_expected_pid = 0;
 	__jailbreakd_candidate_pending = false;
+	__jailbreakd_checkin_in_progress = false;
+	memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 
 	kern_return_t kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &gJailbreakdPort);
 	if (kr != KERN_SUCCESS) {
@@ -160,19 +173,38 @@ int registerServerPort()
 	return 0;
 }
 
-int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *ticket)
+int jailbreakdServerPortSetCheckinToken(uint64_t generation, mach_port_t port, const char *token)
 {
-	if (getpid() != 1 || pid <= 1 || !ticket) {
+	if (getpid() != 1 || !token || strlen(token) != 32) return -1;
+	for (size_t i = 0; i < 32; i++) {
+		if (!((token[i] >= '0' && token[i] <= '9') || (token[i] >= 'a' && token[i] <= 'f'))) return -1;
+	}
+
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (!__jailbreakd_candidate_pending || __jailbreakd_port_ready ||
+	    generation != __jailbreakd_port_generation || !MACH_PORT_VALID(port) ||
+	    port != gJailbreakdPort || __jailbreakd_checkin_token[0] != '\0') {
+		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		return -1;
+	}
+	memcpy(__jailbreakd_checkin_token, token, sizeof(__jailbreakd_checkin_token));
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	return 0;
+}
+
+int jailbreakdServerPortCheckinBegin(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)
+{
+	if (getpid() != 1 || pid <= 1 || !token || !ticket) {
 		JBLogError("invalid jailbreakd check-in begin: launchd_pid=%d caller_pid=%d ticket=%d",
 		           getpid(), pid, ticket != NULL);
 		return -1;
 	}
 
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
-	pid_t expectedPid = __jailbreakd_expected_pid;
 	uint64_t generation = __jailbreakd_port_generation;
 	if (!__jailbreakd_initialized || !__jailbreakd_candidate_pending ||
-	    __jailbreakd_port_ready || pid != expectedPid ||
+	    __jailbreakd_port_ready || __jailbreakd_checkin_in_progress ||
+	    strlen(token) != 32 || strcmp(token, __jailbreakd_checkin_token) != 0 ||
 	    !MACH_PORT_VALID(gJailbreakdPort)) {
 		pthread_mutex_unlock(&__jailbreakd_port_mutex);
 		JBLogError("rejecting jailbreakd check-in begin pid=%d generation=%llu",
@@ -183,6 +215,9 @@ int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *tic
 	ticket->pid = pid;
 	ticket->generation = __jailbreakd_port_generation;
 	ticket->port = gJailbreakdPort;
+	__jailbreakd_expected_pid = pid;
+	__jailbreakd_child_pid = pid;
+	__jailbreakd_checkin_in_progress = true;
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 	return 0;
 }
@@ -190,7 +225,7 @@ int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *tic
 static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket_t *ticket)
 {
 	return ticket && ticket->pid > 1 && __jailbreakd_candidate_pending &&
-	       !__jailbreakd_port_ready && ticket->pid == __jailbreakd_expected_pid &&
+	       !__jailbreakd_port_ready && __jailbreakd_checkin_in_progress && ticket->pid == __jailbreakd_expected_pid &&
 	       ticket->generation == __jailbreakd_port_generation &&
 	       MACH_PORT_VALID(ticket->port) && ticket->port == gJailbreakdPort;
 }
@@ -222,6 +257,9 @@ int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticke
 
 	__jailbreakd_candidate_pending = false;
 	__jailbreakd_expected_pid = 0;
+	__jailbreakd_child_pid = ticket->pid;
+	__jailbreakd_checkin_in_progress = false;
+	memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 	__jailbreakd_port_ready = true;
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 	return 0;
@@ -237,6 +275,8 @@ void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket
 		failedPid = ticket->pid;
 		__jailbreakd_candidate_pending = false;
 		__jailbreakd_expected_pid = 0;
+		__jailbreakd_checkin_in_progress = false;
+		memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 		if (destroyLocalJailbreakdServerPortLocked() != 0) {
 			JBLogError("failed to discard failed jailbreakd candidate port=%x", ticket->port);
 		}
@@ -255,6 +295,8 @@ void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port)
 	    __jailbreakd_expected_pid == 0 && generation == __jailbreakd_port_generation &&
 	    MACH_PORT_VALID(port) && port == gJailbreakdPort) {
 		__jailbreakd_candidate_pending = false;
+		__jailbreakd_checkin_in_progress = false;
+		memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 		if (destroyLocalJailbreakdServerPortLocked() != 0) {
 			JBLogError("failed to discard abandoned jailbreakd candidate port=%x", port);
 		}
@@ -279,6 +321,8 @@ static void jailbreakdServerPortCheckinTimedOut(uint64_t generation)
 		timedOutPid = __jailbreakd_expected_pid;
 		__jailbreakd_expected_pid = 0;
 		__jailbreakd_candidate_pending = false;
+		__jailbreakd_checkin_in_progress = false;
+		memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 		if (destroyLocalJailbreakdServerPortLocked() != 0) {
 			JBLogError("failed to destroy timed-out jailbreakd port=%x", timedOutPort);
 		}
@@ -469,7 +513,44 @@ int spawnJailbreakd()
 		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
 		return attrResult;
 	}
-	int ret = posix_spawn(&pid, JBROOT_PATH("/basebin/jailbreakd"), NULL, &attr, (char*[]){"jailbreakd",NULL}, __firstLoad ? NULL :  ((char*[]){"RESPAWN_REQUIRED=1", NULL}));
+	uint8_t tokenBytes[16];
+	char checkinToken[33];
+	char tokenEnvironment[64];
+	char respawnEnvironment[] = "RESPAWN_REQUIRED=1";
+	arc4random_buf(tokenBytes, sizeof(tokenBytes));
+	snprintf(checkinToken, sizeof(checkinToken),
+	         "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+	         tokenBytes[0], tokenBytes[1], tokenBytes[2], tokenBytes[3],
+	         tokenBytes[4], tokenBytes[5], tokenBytes[6], tokenBytes[7],
+	         tokenBytes[8], tokenBytes[9], tokenBytes[10], tokenBytes[11],
+	         tokenBytes[12], tokenBytes[13], tokenBytes[14], tokenBytes[15]);
+	snprintf(tokenEnvironment, sizeof(tokenEnvironment), "JAILBREAKD_CHECKIN_TOKEN=%s", checkinToken);
+	if (jailbreakdServerPortSetCheckinToken(candidateGeneration, candidatePort, checkinToken) != 0) {
+		posix_spawnattr_destroy(&attr);
+		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
+		return EAGAIN;
+	}
+
+	size_t inheritedCount = 0;
+	if (__firstLoad && environ) while (environ[inheritedCount]) inheritedCount++;
+	char **spawnEnvironment = calloc(inheritedCount + 3, sizeof(char *));
+	if (!spawnEnvironment) {
+		posix_spawnattr_destroy(&attr);
+		jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
+		return ENOMEM;
+	}
+	size_t environmentIndex = 0;
+	for (size_t i = 0; i < inheritedCount; i++) {
+		if (strncmp(environ[i], "JAILBREAKD_CHECKIN_TOKEN=", 25) == 0 ||
+		    strncmp(environ[i], "RESPAWN_REQUIRED=", 17) == 0) continue;
+		spawnEnvironment[environmentIndex++] = environ[i];
+	}
+	spawnEnvironment[environmentIndex++] = tokenEnvironment;
+	if (!__firstLoad) spawnEnvironment[environmentIndex++] = respawnEnvironment;
+	spawnEnvironment[environmentIndex] = NULL;
+	int ret = posix_spawn(&pid, JBROOT_PATH("/basebin/jailbreakd"), NULL, &attr,
+	                      (char*[]){"jailbreakd",NULL}, spawnEnvironment);
+	free(spawnEnvironment);
 	posix_spawnattr_destroy(&attr);
 
 	if (ret != 0) {

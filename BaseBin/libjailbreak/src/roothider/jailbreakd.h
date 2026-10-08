@@ -31,7 +31,8 @@ void setJailbreakdProcess(pid_t pid);
 
 mach_port_t jailbreakdClientPort();
 mach_port_t jailbreakdServerPort();
-int jailbreakdServerPortCheckinBegin(pid_t pid, jailbreakd_checkin_ticket_t *ticket);
+int jailbreakdServerPortSetCheckinToken(uint64_t generation, mach_port_t port, const char *token);
+int jailbreakdServerPortCheckinBegin(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket);
 int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket);
 void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket);
 void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port);
