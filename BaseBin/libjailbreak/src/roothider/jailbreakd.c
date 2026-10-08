@@ -43,6 +43,7 @@ static bool __jailbreakd_initialized = false;
 static bool __jailbreakd_port_ready = false;
 static pthread_mutex_t __jailbreakd_port_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t __jailbreakd_restart_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t __jailbreakd_process_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t __jailbreakd_port_generation = 0;
 static pid_t __jailbreakd_expected_pid = 0;
 static pid_t __jailbreakd_child_pid = 0;
@@ -482,6 +483,10 @@ void setJailbreakdProcess(pid_t pid)
         return;
     }
 
+    /* Ready actions may be delivered concurrently when the daemon retries an
+     * acknowledgement whose original XPC reply was lost. */
+    pthread_mutex_lock(&__jailbreakd_process_mutex);
+
     /* Only wait for a strictly validated positive PID; waitpid(0) could reap
      * an unrelated child in launchd's process group. */
     const char *pidenv = getenv("JAILBREAKD_PID");
@@ -514,6 +519,7 @@ void setJailbreakdProcess(pid_t pid)
     if (setenv("JAILBREAKD_PID", buf, 1) != 0) {
         JBLogError("failed to update JAILBREAKD_PID for pid=%d errno=%d", pid, errno);
     }
+    pthread_mutex_unlock(&__jailbreakd_process_mutex);
 }
 
 static kern_return_t prepareJailbreakdBootstrapPort(mach_port_t *bootstrapPort)

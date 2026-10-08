@@ -152,6 +152,8 @@ assert "while (result == -1 && errno == EINTR)" in set_process_source
 assert "atoi(pidenv)" not in set_process_source
 assert "scheduleJailbreakdParentReap(oldpid, 50)" in set_process_source
 assert "dispatch_after" in deferred_parent_reaper
+assert "pthread_mutex_lock(&__jailbreakd_process_mutex)" in set_process_source
+assert "pthread_mutex_unlock(&__jailbreakd_process_mutex)" in set_process_source
 assert "waitpid(pid, &status, WNOHANG)" in deferred_parent_reaper
 assert "retriesRemaining > 0" in deferred_parent_reaper
 assert "waitpid(pid, &status, 0)" not in deferred_parent_reaper
@@ -590,6 +592,30 @@ static void test_previous_pid_environment_is_validated_before_waitpid(void)
     assert(strcmp(fake_jailbreakd_pid_env, "803") == 0);
 }
 
+static void *call_set_jailbreakd_process(void *argument)
+{
+    setJailbreakdProcess(*(pid_t *)argument);
+    return NULL;
+}
+
+static void test_duplicate_ready_pid_updates_are_serialized(void)
+{
+    reset_case();
+    strcpy(fake_jailbreakd_pid_env, "324");
+    fake_tracked_pid = 324;
+    fake_child_alive = true;
+    pid_t readyPid = 812;
+    pthread_t first;
+    pthread_t second;
+    assert(pthread_create(&first, NULL, call_set_jailbreakd_process, &readyPid) == 0);
+    assert(pthread_create(&second, NULL, call_set_jailbreakd_process, &readyPid) == 0);
+    assert(pthread_join(first, NULL) == 0);
+    assert(pthread_join(second, NULL) == 0);
+    assert(fake_waitpid_nonblocking_calls == 1);
+    assert(fake_deferred_reap_calls == 1 && fake_deferred_reap_pid == 324);
+    assert(strcmp(fake_jailbreakd_pid_env, "812") == 0);
+}
+
 static void test_bootstrap_port_setup_retries_and_cleans_partial_rights(void)
 {
     reset_case();
@@ -895,6 +921,7 @@ static void test_insert_right_failure_does_not_leave_a_candidate(void)
 int main(void)
 {
     test_previous_pid_environment_is_validated_before_waitpid();
+    test_duplicate_ready_pid_updates_are_serialized();
     test_bootstrap_port_setup_retries_and_cleans_partial_rights();
     test_spawn_attribute_failures_destroy_initialized_attributes();
     test_suspended_respawn_cleanup_never_leaves_a_blocking_wait();
