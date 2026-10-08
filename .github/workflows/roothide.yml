@@ -175,6 +175,9 @@ jobs:
       - name: RootHide jailbreakd port lifecycle regressions
         run: python3 .github/scripts/test_jailbreakd_port_lifecycle.py
 
+      - name: RootHide jailbreakd ready ACK loss regressions
+        run: python3 .github/scripts/test_jailbreakd_ack_loss.py
+
       - name: iOS 17 host safety regressions
         run: python3 .github/scripts/test_ios17_health.py
 

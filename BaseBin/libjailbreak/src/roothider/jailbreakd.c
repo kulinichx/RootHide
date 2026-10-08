@@ -368,6 +368,34 @@ void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket
 	terminateJailbreakdChild(failedPid);
 }
 
+/* A failed SIGCONT happens before check-in begins, so the check-in failure
+ * handler (which requires checkin_in_progress) cannot dispose of it. Keep
+ * this path separate: it must never revoke a begun or ready check-in. */
+static void jailbreakdServerPortSpawnResumeFailed(const jailbreakd_checkin_ticket_t *ticket)
+{
+	if (getpid() != 1 || !ticket || ticket->pid <= 1) return;
+
+	pid_t failedPid = 0;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready &&
+	    !__jailbreakd_checkin_in_progress &&
+	    ticket->pid == __jailbreakd_expected_pid &&
+	    ticket->pid == __jailbreakd_child_pid &&
+	    ticket->generation == __jailbreakd_port_generation &&
+	    MACH_PORT_VALID(ticket->port) && ticket->port == gJailbreakdPort) {
+		failedPid = ticket->pid;
+		__jailbreakd_candidate_pending = false;
+		__jailbreakd_expected_pid = 0;
+		memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
+		if (destroyLocalJailbreakdServerPortLocked() != 0) {
+			JBLogError("failed to discard unresumed jailbreakd candidate port=%x", ticket->port);
+		}
+		advanceJailbreakdPortGenerationLocked();
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	terminateJailbreakdChild(failedPid);
+}
+
 void jailbreakdServerPortAbandonCandidate(uint64_t generation, mach_port_t port)
 {
 	if (getpid() != 1) return;
@@ -767,7 +795,7 @@ int spawnJailbreakd()
 			.generation = candidateGeneration,
 			.port = candidatePort,
 		};
-		jailbreakdServerPortCheckinFailed(&ticket);
+		jailbreakdServerPortSpawnResumeFailed(&ticket);
 		JBLogError("failed to resume suspended jailbreakd pid=%d errno=%d", pid, resumeError);
 		return resumeError;
 	}
