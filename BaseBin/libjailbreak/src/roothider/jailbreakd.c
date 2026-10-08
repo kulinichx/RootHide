@@ -49,6 +49,9 @@ static pid_t __jailbreakd_child_pid = 0;
 static bool __jailbreakd_candidate_pending = false;
 static bool __jailbreakd_checkin_in_progress = false;
 static char __jailbreakd_checkin_token[33] = {0};
+static pid_t __jailbreakd_ready_pid = 0;
+static uint64_t __jailbreakd_ready_generation = 0;
+static char __jailbreakd_ready_token[33] = {0};
 mach_port_t gJailbreakdPort = MACH_PORT_NULL;
 
 #define JAILBREAKD_CLIENT_PORT_FAST_GET
@@ -93,6 +96,11 @@ static bool reapJailbreakdChildIfExitedLocked(void)
         childExited = true;
     }
     if (childExited) {
+        if (__jailbreakd_ready_pid == child) {
+            __jailbreakd_ready_pid = 0;
+            __jailbreakd_ready_generation = 0;
+            memset(__jailbreakd_ready_token, 0, sizeof(__jailbreakd_ready_token));
+        }
         __jailbreakd_child_pid = 0;
         if (__jailbreakd_expected_pid == child) {
             __jailbreakd_expected_pid = 0;
@@ -145,6 +153,9 @@ int registerServerPort()
 	}
 	/* Invalidate any delayed watchdog and ticket for the previous candidate. */
 	advanceJailbreakdPortGenerationLocked();
+	__jailbreakd_ready_pid = 0;
+	__jailbreakd_ready_generation = 0;
+	memset(__jailbreakd_ready_token, 0, sizeof(__jailbreakd_ready_token));
 	__jailbreakd_expected_pid = 0;
 	__jailbreakd_candidate_pending = false;
 	__jailbreakd_checkin_in_progress = false;
@@ -229,11 +240,25 @@ int jailbreakdServerPortCheckinReady(pid_t pid, const char *token, jailbreakd_ch
         return -1;
     }
 
+    size_t tokenLength = strlen(token);
     pthread_mutex_lock(&__jailbreakd_port_mutex);
     uint64_t generation = __jailbreakd_port_generation;
+    /* XPC replies can be lost after the server committed readiness. Accept an
+     * exact duplicate so the daemon can retry without being torn down. */
+    if (__jailbreakd_initialized && __jailbreakd_port_ready &&
+        pid == __jailbreakd_ready_pid && generation == __jailbreakd_ready_generation &&
+        tokenLength == 32 && strcmp(token, __jailbreakd_ready_token) == 0 &&
+        MACH_PORT_VALID(gJailbreakdPort)) {
+        ticket->pid = pid;
+        ticket->generation = generation;
+        ticket->port = gJailbreakdPort;
+        pthread_mutex_unlock(&__jailbreakd_port_mutex);
+        return 0;
+    }
+
     if (!__jailbreakd_initialized || !__jailbreakd_candidate_pending ||
         __jailbreakd_port_ready || !__jailbreakd_checkin_in_progress ||
-        pid != __jailbreakd_expected_pid || strlen(token) != 32 ||
+        pid != __jailbreakd_expected_pid || tokenLength != 32 ||
         strcmp(token, __jailbreakd_checkin_token) != 0 || !MACH_PORT_VALID(gJailbreakdPort)) {
         pthread_mutex_unlock(&__jailbreakd_port_mutex);
         JBLogError("rejecting jailbreakd ready acknowledgement pid=%d generation=%llu",
@@ -265,7 +290,12 @@ int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticke
 
 	pthread_mutex_lock(&__jailbreakd_port_mutex);
 	if (!jailbreakdCheckinTicketMatchesLocked(ticket)) {
+		bool alreadyComplete = __jailbreakd_initialized && __jailbreakd_port_ready &&
+		                       ticket->pid == __jailbreakd_ready_pid &&
+		                       ticket->generation == __jailbreakd_ready_generation &&
+		                       ticket->port == gJailbreakdPort && MACH_PORT_VALID(ticket->port);
 		pthread_mutex_unlock(&__jailbreakd_port_mutex);
+		if (alreadyComplete) return 0;
 		JBLogError("rejecting stale jailbreakd check-in completion pid=%d generation=%llu port=%x",
 		           ticket->pid, (unsigned long long)ticket->generation, ticket->port);
 		return -1;
@@ -284,6 +314,9 @@ int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticke
 	__jailbreakd_candidate_pending = false;
 	__jailbreakd_expected_pid = 0;
 	__jailbreakd_child_pid = ticket->pid;
+	__jailbreakd_ready_pid = ticket->pid;
+	__jailbreakd_ready_generation = ticket->generation;
+	memcpy(__jailbreakd_ready_token, __jailbreakd_checkin_token, sizeof(__jailbreakd_ready_token));
 	__jailbreakd_checkin_in_progress = false;
 	memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
 	__jailbreakd_port_ready = true;

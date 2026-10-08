@@ -72,16 +72,19 @@ int jbclient_jailbreakd_ready(void)
     const char *checkinToken = getenv("JAILBREAKD_CHECKIN_TOKEN");
     if (!checkinToken) return -1;
 
-    xpc_object_t xargs = xpc_dictionary_create_empty();
-    if (!xargs) return -1;
-    xpc_dictionary_set_string(xargs, "checkin-token", checkinToken);
-    xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_READY, xargs);
-    xpc_release(xargs);
-
     int result = -1;
-    if (xreply) {
-        result = (int)xpc_dictionary_get_int64(xreply, "result");
-        xpc_release(xreply);
+    for (unsigned int attempt = 0; attempt < 2; attempt++) {
+        xpc_object_t xargs = xpc_dictionary_create_empty();
+        if (!xargs) break;
+        xpc_dictionary_set_string(xargs, "checkin-token", checkinToken);
+        xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_READY, xargs);
+        xpc_release(xargs);
+        if (xreply) {
+            xpc_object_t resultObject = xpc_dictionary_get_value(xreply, "result");
+            if (resultObject && xpc_get_type(resultObject) == XPC_TYPE_INT64) result = (int)xpc_dictionary_get_int64(xreply, "result");
+            xpc_release(xreply);
+            break;
+        }
     }
     if (result == 0) unsetenv("JAILBREAKD_CHECKIN_TOKEN");
     return result;

@@ -84,6 +84,8 @@ assert "MACH_PORT_VALID(port)" in lookup and "xpc_mach_send_create(port)" in loo
 ready_client = extract_function(client_source, "int jbclient_jailbreakd_ready(void)")
 assert "JBS_ROOTHIDE_JAILBREAKD_READY" in ready_client
 assert "unsetenv(\"JAILBREAKD_CHECKIN_TOKEN\")" in ready_client
+assert "attempt < 2" in ready_client
+assert "XPC_TYPE_INT64" in ready_client
 server_resume_at = daemon_main_source.index("dispatch_resume(source);")
 server_ack_at = daemon_main_source.index("jbclient_jailbreakd_ready()", server_resume_at)
 server_main_at = daemon_main_source.index("dispatch_main();", server_resume_at)
@@ -463,6 +465,9 @@ main = r'''static void reset_case(void)
     __jailbreakd_candidate_pending = false;
     __jailbreakd_checkin_in_progress = false;
     memset(__jailbreakd_checkin_token, 0, sizeof(__jailbreakd_checkin_token));
+    __jailbreakd_ready_pid = 0;
+    __jailbreakd_ready_generation = 0;
+    memset(__jailbreakd_ready_token, 0, sizeof(__jailbreakd_ready_token));
     next_fake_pid = 500;
     fake_tracked_pid = 0;
     fake_unadopted_pid = 0;
@@ -704,6 +709,13 @@ static void test_ready_ack_requires_current_pid_token_and_candidate(void)
     assert(ready.pid == begun.pid && ready.generation == begun.generation && ready.port == begun.port);
     assert(jailbreakdServerPortCheckinComplete(&ready) == 0);
     assert(__jailbreakd_port_ready);
+    jailbreakd_checkin_ticket_t retry = {0};
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_ready_pid, fake_checkin_token, &retry) == 0);
+    assert(retry.pid == ready.pid && retry.generation == ready.generation && retry.port == ready.port);
+    assert(jailbreakdServerPortCheckinComplete(&retry) == 0);
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_ready_pid + 1, fake_checkin_token, &retry) != 0);
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_ready_pid,
+                                            "ffffffffffffffffffffffffffffffff", &retry) != 0);
 }
 
 static void test_checkin_failure_discards_only_the_unready_candidate(void)
