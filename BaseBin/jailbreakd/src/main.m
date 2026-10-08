@@ -1,8 +1,12 @@
 #include <Foundation/Foundation.h>
+#include <errno.h>
 #include <kern_memorystatus.h>
 #include <mach-o/dyld.h>
 #include <libproc.h>
 #include <spawn.h>
+#include <signal.h>
+#include <string.h>
+#include <sys/wait.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
@@ -23,6 +27,40 @@ void setJetsamLimit(uint32_t sizeInMB, bool is_fatal_limit)
 }
 
 void enableXPCLog(void* debugLog, void* errorLog);
+
+static void terminateRespawnedJailbreakdChild(pid_t pid)
+{
+	if (pid <= 1) return;
+
+	int signalResult;
+	do {
+		signalResult = kill(pid, SIGKILL);
+	} while (signalResult != 0 && errno == EINTR);
+	if (signalResult != 0 && errno != ESRCH) {
+		int signalError = errno;
+		JBLogError("failed to terminate suspended jailbreakd pid=%d errno=%d", pid, signalError);
+		int status = 0;
+		pid_t result;
+		do {
+			result = waitpid(pid, &status, WNOHANG);
+		} while (result == -1 && errno == EINTR);
+		if (result == 0) {
+			JBLogError("suspended jailbreakd pid=%d remains alive after termination failure", pid);
+		} else if (result == -1 && errno != ECHILD) {
+			JBLogError("nonblocking reap failed for jailbreakd pid=%d errno=%d", pid, errno);
+		}
+		return;
+	}
+
+	int status = 0;
+	pid_t result;
+	do {
+		result = waitpid(pid, &status, 0);
+	} while (result == -1 && errno == EINTR);
+	if (result == -1 && errno != ECHILD) {
+		JBLogError("reap failed for terminated jailbreakd pid=%d errno=%d", pid, errno);
+	}
+}
 
 int main(int argc, char* argv[])
 {
@@ -85,7 +123,11 @@ int main(int argc, char* argv[])
 
 			char selfPath[PATH_MAX]={0};
 			uint32_t selfPathSize = sizeof(selfPath);
-			_NSGetExecutablePath(selfPath, &selfPathSize);
+			int pathResult = _NSGetExecutablePath(selfPath, &selfPathSize);
+			if (pathResult != 0) {
+				JBLogError("_NSGetExecutablePath failed for jailbreakd: %d", pathResult);
+				return 4;
+			}
 	
 			pid_t pid;
 			posix_spawnattr_t attr = NULL;
@@ -94,10 +136,20 @@ int main(int argc, char* argv[])
 				JBLogError("posix_spawnattr_init jailbreakd failed: %d, %s", attrError, strerror(attrError));
 				return 4;
 			}
-			posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+			attrError = posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+			if(attrError != 0) {
+				posix_spawnattr_destroy(&attr);
+				JBLogError("posix_spawnattr_setflags jailbreakd failed: %d, %s", attrError, strerror(attrError));
+				return 4;
+			}
 			// posix_spawnattr_setspecialport_np(&attr, bootstraport, TASK_BOOTSTRAP_PORT);
 			// posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ bootstraport, MACH_PORT_NULL }, 3);
-			posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstraport }, 3);
+			attrError = posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstraport }, 3);
+			if(attrError != 0) {
+				posix_spawnattr_destroy(&attr);
+				JBLogError("posix_spawnattr_set_registered_ports_np jailbreakd failed: %d, %s", attrError, strerror(attrError));
+				return 4;
+			}
 			int ret = posix_spawn(&pid, selfPath, NULL, &attr, argv, environ);
 			posix_spawnattr_destroy(&attr);
 
@@ -108,17 +160,23 @@ int main(int argc, char* argv[])
 
 			JBLogDebug("jailbreakd respawned: %d", pid);
 	
-			if(unrestrict(pid, proc_patch_dyld, false) != 0) {
-				JBLogError("Failed to unrestrict process %d", pid);
+			int unrestrictResult = unrestrict(pid, proc_patch_dyld, false);
+			if(unrestrictResult != 0) {
+				JBLogError("Failed to unrestrict process %d: %d", pid, unrestrictResult);
+				terminateRespawnedJailbreakdChild(pid);
 				return 5;
 			}
 
 			if(dyld_patch_enabled()) {
-				kill(pid, SIGCONT);
+				if (kill(pid, SIGCONT) != 0) {
+					int resumeError = errno;
+					JBLogError("Failed to resume respawned jailbreakd pid=%d errno=%d", pid, resumeError);
+					terminateRespawnedJailbreakdChild(pid);
+					return 7;
+				}
 				return 0;
 			} else {
-				kill(pid, SIGKILL);
-				waitpid(pid, NULL, 0);
+				terminateRespawnedJailbreakdChild(pid);
 			}
 		}
 
