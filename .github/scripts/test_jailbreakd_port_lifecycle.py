@@ -50,6 +50,7 @@ function_signatures = [
     "mach_port_t reactiveJailbreakdPort()",
     "mach_port_t jailbreakdServerPort()",
     "mach_port_t jailbreakdClientPort()",
+    "void setJailbreakdProcess(pid_t pid)",
 ]
 functions = "\n\n".join(extract_function(source, signature) for signature in function_signatures)
 respawn_cleanup = extract_function(daemon_main_source, "static void terminateRespawnedJailbreakdChild(pid_t pid)")
@@ -115,7 +116,19 @@ assert "waitpid(oldpid, NULL, 0)" not in source
 assert "waitpid(child, &status, WNOHANG)" in source
 assert "kill(child, 0)" in source
 assert "waitpid(oldpid, NULL, WNOHANG)" in source
+server_source_start = daemon_main_source.index("dispatch_source_t source = dispatch_source_create(")
+server_source_end = daemon_main_source.index("dispatch_source_set_event_handler(source", server_source_start)
+server_source_setup = daemon_main_source[server_source_start:server_source_end]
+assert "if (!source)" in server_source_setup
+assert "mach_port_destroy(mach_task_self(), serverPort)" in server_source_setup
+assert "return 8;" in server_source_setup
 assert "waitpid(pid, NULL, WNOHANG)" in source
+set_process_source = extract_function(source, "void setJailbreakdProcess(pid_t pid)")
+assert "strtol(pidenv, &end, 10)" in set_process_source
+assert "parsedOldPid <= 1" in set_process_source
+assert "waitpid(oldpid, NULL, WNOHANG)" in set_process_source
+assert "while (result == -1 && errno == EINTR)" in set_process_source
+assert "atoi(pidenv)" not in set_process_source
 
 if "--static-only" in sys.argv[1:]:
     print("PASS: jailbreakd check-in, watchdog, bootstrap, and respawn source contracts")
@@ -126,6 +139,7 @@ harness = r'''#include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -196,6 +210,7 @@ static bool fake_fail_kill;
 static int fake_kill_calls;
 static int fake_waitpid_nonblocking_calls;
 static int fake_waitpid_blocking_calls;
+static char fake_jailbreakd_pid_env[64];
 static struct fake_spawn_attributes fake_spawn_attributes;
 static int fake_attr_init_error;
 static int fake_attr_flags_error;
@@ -206,7 +221,20 @@ static int fake_attr_ports_calls;
 static mach_port_t fake_expected_bootstrap_port;
 
 static pid_t fake_getpid(void) { return (pid_t)launchd_pid; }
+static char *fake_getenv(const char *name)
+{
+    assert(strcmp(name, "JAILBREAKD_PID") == 0);
+    return fake_jailbreakd_pid_env[0] ? fake_jailbreakd_pid_env : NULL;
+}
+static int fake_setenv(const char *name, const char *value, int overwrite)
+{
+    assert(strcmp(name, "JAILBREAKD_PID") == 0 && overwrite == 1);
+    int written = snprintf(fake_jailbreakd_pid_env, sizeof(fake_jailbreakd_pid_env), "%s", value);
+    return written < 0 || (size_t)written >= sizeof(fake_jailbreakd_pid_env) ? -1 : 0;
+}
 #define getpid fake_getpid
+#define getenv fake_getenv
+#define setenv fake_setenv
 #define waitpid fake_waitpid
 #define kill fake_kill
 #define sleep(seconds) do { (void)(seconds); } while (0)
@@ -415,6 +443,7 @@ main = r'''static void reset_case(void)
     fake_kill_calls = 0;
     fake_waitpid_nonblocking_calls = 0;
     fake_waitpid_blocking_calls = 0;
+    fake_jailbreakd_pid_env[0] = '\0';
     memset(&fake_spawn_attributes, 0, sizeof(fake_spawn_attributes));
     fake_attr_init_error = 0;
     fake_attr_flags_error = 0;
@@ -483,6 +512,39 @@ static void test_suspended_respawn_cleanup_never_leaves_a_blocking_wait(void)
     assert(fake_child_alive);
     assert(fake_waitpid_blocking_calls == 0);
     assert(fake_waitpid_nonblocking_calls == 1);
+}
+
+static void test_previous_pid_environment_is_validated_before_waitpid(void)
+{
+    reset_case();
+    strcpy(fake_jailbreakd_pid_env, "0");
+    int waitsBefore = fake_waitpid_nonblocking_calls;
+    setJailbreakdProcess(800);
+    assert(fake_waitpid_nonblocking_calls == waitsBefore);
+    assert(strcmp(fake_jailbreakd_pid_env, "800") == 0);
+
+    reset_case();
+    strcpy(fake_jailbreakd_pid_env, "not-a-pid");
+    setJailbreakdProcess(801);
+    assert(fake_waitpid_nonblocking_calls == 0);
+    assert(strcmp(fake_jailbreakd_pid_env, "801") == 0);
+
+    reset_case();
+    strcpy(fake_jailbreakd_pid_env, "321");
+    fake_tracked_pid = 321;
+    setJailbreakdProcess(802);
+    assert(fake_waitpid_nonblocking_calls == 1);
+    assert(fake_waitpid_blocking_calls == 0);
+    assert(strcmp(fake_jailbreakd_pid_env, "802") == 0);
+
+    reset_case();
+    strcpy(fake_jailbreakd_pid_env, "322");
+    fake_tracked_pid = 322;
+    fake_child_alive = true;
+    setJailbreakdProcess(803);
+    assert(fake_waitpid_nonblocking_calls == 1);
+    assert(fake_waitpid_blocking_calls == 0);
+    assert(strcmp(fake_jailbreakd_pid_env, "803") == 0);
 }
 
 static void test_bootstrap_port_setup_retries_and_cleans_partial_rights(void)
@@ -761,6 +823,7 @@ static void test_insert_right_failure_does_not_leave_a_candidate(void)
 
 int main(void)
 {
+    test_previous_pid_environment_is_validated_before_waitpid();
     test_bootstrap_port_setup_retries_and_cleans_partial_rights();
     test_spawn_attribute_failures_destroy_initialized_attributes();
     test_suspended_respawn_cleanup_never_leaves_a_blocking_wait();

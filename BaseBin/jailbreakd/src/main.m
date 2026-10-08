@@ -204,7 +204,13 @@ int main(int argc, char* argv[])
 		JBLogDebug("starting jailbreakd server, port=%x", serverPort);
 
 		dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, (uintptr_t)serverPort, 0, dispatch_get_main_queue());
-		dispatch_source_set_event_handler(source, ^{
+		if (!source) {
+		JBLogError("failed to create jailbreakd server receive source for port=%x", serverPort);
+		kern_return_t destroyResult = mach_port_destroy(mach_task_self(), serverPort);
+		if (destroyResult != KERN_SUCCESS) JBLogError("failed to destroy jailbreakd receive port after source failure: %x", destroyResult);
+		return 8;
+	}
+	dispatch_source_set_event_handler(source, ^{
 			jailbreakd_received_message(serverPort);
 		});
 		dispatch_resume(source);

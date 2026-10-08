@@ -394,22 +394,42 @@ mach_port_t jailbreakdClientPortFastGet()
 
 void setJailbreakdProcess(pid_t pid)
 {
-	//Reclaim the previous jailbreakd zombie process
-	const char *pidenv = getenv("JAILBREAKD_PID");
-	if (pidenv) 
-	{
-		pid_t oldpid = atoi(pidenv);
-		if(oldpid != pid)
-		{
-			/* Reaping is non-blocking; launchd must never wait on a stuck daemon. */
-			waitpid(oldpid, NULL, WNOHANG);
-			unsetenv("JAILBREAKD_PID");
-		}
-	}
+    if (pid <= 1) {
+        JBLogError("refusing to record invalid jailbreakd pid=%d", pid);
+        return;
+    }
 
-	char buf[32];
-	snprintf(buf, sizeof(buf), "%d", pid);
-	setenv("JAILBREAKD_PID", buf, 1);
+    /* Only wait for a strictly validated positive PID; waitpid(0) could reap
+     * an unrelated child in launchd's process group. */
+    const char *pidenv = getenv("JAILBREAKD_PID");
+    if (pidenv) {
+        errno = 0;
+        char *end = NULL;
+        long parsedOldPid = strtol(pidenv, &end, 10);
+        if (errno != 0 || end == pidenv || *end != '\0' || parsedOldPid <= 1 ||
+            (long)(pid_t)parsedOldPid != parsedOldPid) {
+            JBLogError("ignoring invalid previous jailbreakd pid environment value");
+        } else {
+            pid_t oldpid = (pid_t)parsedOldPid;
+            if (oldpid != pid) {
+                pid_t result;
+                do {
+                    result = waitpid(oldpid, NULL, WNOHANG);
+                } while (result == -1 && errno == EINTR);
+                if (result == 0) {
+                    JBLogError("previous jailbreakd pid=%d has not exited at the nonblocking handoff check", oldpid);
+                } else if (result == -1 && errno != ECHILD) {
+                    JBLogError("waitpid failed for previous jailbreakd pid=%d errno=%d", oldpid, errno);
+                }
+            }
+        }
+    }
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", pid);
+    if (setenv("JAILBREAKD_PID", buf, 1) != 0) {
+        JBLogError("failed to update JAILBREAKD_PID for pid=%d errno=%d", pid, errno);
+    }
 }
 
 static kern_return_t prepareJailbreakdBootstrapPort(mach_port_t *bootstrapPort)
