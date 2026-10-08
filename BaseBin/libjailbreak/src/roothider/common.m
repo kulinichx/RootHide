@@ -831,7 +831,7 @@ int ensure_dyld_trustcache(const char* path)
 
     trustcache_file_v1 *dyldTCFile = NULL;
     roothide_stage_log("dyld.trustcache.build.begin");
-    int buildResult = trustcache_file_build_from_cdhashes(cdhash, 1, &dyldTCFile);
+    int buildResult = trustcache_file_build_from_cdhashes(&cdhash, 1, &dyldTCFile);
     roothide_stage_log("dyld.trustcache.build.end result=%d", buildResult);
     if (buildResult != 0) {
         JBLogError("Failed to build dyld trustcache");

@@ -526,6 +526,34 @@ static void scheduleJailbreakdParentReap(pid_t pid, unsigned int retriesRemainin
     });
 }
 
+/* The candidate can change while a newly spawned child is still suspended.
+ * Such a child was never recorded in __jailbreakd_child_pid, so it cannot be
+ * reaped by the registered-child cleanup path. Never block launchd here. */
+static void terminateUnregisteredJailbreakdChild(pid_t pid)
+{
+    if (pid <= 1) return;
+
+    int signalResult;
+    do {
+        signalResult = kill(pid, SIGKILL);
+    } while (signalResult != 0 && errno == EINTR);
+    if (signalResult != 0 && errno != ESRCH) {
+        JBLogError("failed to kill unregistered jailbreakd pid=%d errno=%d", pid, errno);
+    }
+
+    int status = 0;
+    pid_t reapResult;
+    do {
+        reapResult = waitpid(pid, &status, WNOHANG);
+    } while (reapResult == -1 && errno == EINTR);
+    if (reapResult == 0) {
+        /* SIGKILL is asynchronous: arrange bounded nonblocking reap retries. */
+        scheduleJailbreakdParentReap(pid, 50);
+    } else if (reapResult == -1 && errno != ECHILD) {
+        JBLogError("failed to reap unregistered jailbreakd pid=%d errno=%d", pid, errno);
+    }
+}
+
 void setJailbreakdProcess(pid_t pid)
 {
     if (pid <= 1) {
@@ -779,8 +807,7 @@ int spawnJailbreakd()
 	}
 	pthread_mutex_unlock(&__jailbreakd_port_mutex);
 	if (!registered) {
-		kill(pid, SIGKILL);
-		waitpid(pid, NULL, WNOHANG);
+		terminateUnregisteredJailbreakdChild(pid);
 		JBLogError("discarded suspended jailbreakd pid=%d after candidate changed", pid);
 		return EAGAIN;
 	}

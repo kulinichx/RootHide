@@ -73,20 +73,29 @@ static int jbclient_jailbreakd_report_readiness(bool ready)
     if (!checkinToken) return -1;
 
     int result = -1;
-    for (unsigned int attempt = 0; attempt < 2; attempt++) {
+    /* READY is idempotent for the same PID, generation and check-in token on
+     * launchd. A successful commit can lose its reply; allow the next request
+     * to confirm it. This is bounded recovery, not a delivery guarantee. */
+    for (unsigned int attempt = 0; attempt < 3; attempt++) {
         xpc_object_t xargs = xpc_dictionary_create_empty();
         if (!xargs) break;
         xpc_dictionary_set_string(xargs, "checkin-token", checkinToken);
         xpc_dictionary_set_bool(xargs, "ready", ready);
         xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_READY, xargs);
         xpc_release(xargs);
-        if (xreply) {
+        if (!xreply) continue;
+
+        /* A non-dictionary reply, or a dictionary without a typed result,
+         * must not end the retry loop as though launchd rejected readiness. */
+        if (xpc_get_type(xreply) == XPC_TYPE_DICTIONARY) {
             xpc_object_t resultObject = xpc_dictionary_get_value(xreply, "result");
-            if (resultObject && xpc_get_type(resultObject) == XPC_TYPE_INT64)
+            if (resultObject && xpc_get_type(resultObject) == XPC_TYPE_INT64) {
                 result = (int)xpc_dictionary_get_int64(xreply, "result");
-            xpc_release(xreply);
-            break;
+                xpc_release(xreply);
+                break; /* Authoritative success or explicit server rejection. */
+            }
         }
+        xpc_release(xreply);
     }
     if (ready && result == 0) unsetenv("JAILBREAKD_CHECKIN_TOKEN");
     return result;

@@ -93,7 +93,7 @@ ready_client = extract_function(client_source, "static int jbclient_jailbreakd_r
 assert "JBS_ROOTHIDE_JAILBREAKD_READY" in ready_client
 assert "xpc_dictionary_set_bool(xargs, \"ready\", ready)" in ready_client
 assert "unsetenv(\"JAILBREAKD_CHECKIN_TOKEN\")" in ready_client
-assert "attempt < 2" in ready_client
+assert "attempt < 3" in ready_client
 assert "XPC_TYPE_INT64" in ready_client
 assert "jbclient_jailbreakd_checkin_failed" in client_source
 server_resume_at = daemon_main_source.index("dispatch_resume(source);")
@@ -163,7 +163,7 @@ assert daemon_main_source.count("mach_port_destruct(mach_task_self(), serverPort
 assert "jbclient_jailbreakd_checkin_failed()" in server_source_setup
 assert server_source_setup.index("jbclient_jailbreakd_checkin_failed()") < server_source_setup.index("return 8;")
 assert "return 8;" in server_source_setup
-assert "waitpid(pid, NULL, WNOHANG)" in source
+assert "terminateUnregisteredJailbreakdChild(pid);" in source
 set_process_source = extract_function(source, "void setJailbreakdProcess(pid_t pid)")
 assert "strtol(pidenv, &end, 10)" in set_process_source
 assert "parsedOldPid <= 1" in set_process_source

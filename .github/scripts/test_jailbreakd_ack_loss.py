@@ -36,7 +36,8 @@ real_server_complete = extract_function(server, 'int jailbreakdServerPortCheckin
 real_handler = extract_function(handler, 'static int roothide_jailbreakd_ready(')
 
 # Tie fault injection to the current production protocol rather than a copied toy routine.
-assert 'for (unsigned int attempt = 0; attempt < 2; attempt++)' in real_client
+assert 'for (unsigned int attempt = 0; attempt < 3; attempt++)' in real_client
+assert 'xpc_get_type(xreply) == XPC_TYPE_DICTIONARY' in real_client
 assert 'JBS_ROOTHIDE_JAILBREAKD_READY' in real_client
 assert 'xpc_dictionary_get_value(xreply, "result")' in real_client
 assert 'unsetenv("JAILBREAKD_CHECKIN_TOKEN")' in real_client
@@ -58,16 +59,20 @@ harness = r'''
 #include <stdio.h>
 
 typedef struct MockXpc {
-    int is_reply;
-    int result_type;
+    int type;
     int64_t result;
     bool ready;
     const char *token;
+    struct MockXpc *value;
 } *xpc_object_t;
 
-enum { XPC_TYPE_INT64=101, XPC_TYPE_STRING=102, JBS_DOMAIN_ROOTHIDE=7,
-       JBS_ROOTHIDE_JAILBREAKD_READY=10, MODE_NORMAL=0, MODE_DROP_FIRST=1,
-       MODE_DROP_ALL=2, MODE_MALFORMED=3, MODE_REJECTED=4 };
+enum {
+    XPC_TYPE_DICTIONARY=100, XPC_TYPE_INT64=101, XPC_TYPE_STRING=102,
+    JBS_DOMAIN_ROOTHIDE=7, JBS_ROOTHIDE_JAILBREAKD_READY=10,
+    MODE_NORMAL=0, MODE_DROP_FIRST=1, MODE_DROP_TWO=2, MODE_DROP_ALL=3,
+    MODE_MALFORMED_FIRST=4, MODE_MALFORMED_ALL=5, MODE_REJECTED=6,
+    MODE_NONDICT_FIRST=7, MODE_NO_RESULT_FIRST=8
+};
 
 static int mode;
 static int client_token_present;
@@ -94,7 +99,9 @@ static int fake_unsetenv(const char *name)
 
 static xpc_object_t xpc_dictionary_create_empty(void)
 {
-    return calloc(1,sizeof(struct MockXpc));
+    xpc_object_t o = calloc(1, sizeof(struct MockXpc));
+    if (o) o->type = XPC_TYPE_DICTIONARY;
+    return o;
 }
 static void xpc_dictionary_set_string(xpc_object_t o, const char *name, const char *value)
 {
@@ -108,19 +115,23 @@ static void xpc_dictionary_set_bool(xpc_object_t o, const char *name, bool value
 }
 static xpc_object_t xpc_dictionary_get_value(xpc_object_t o, const char *name)
 {
-    assert(o && strcmp(name,"result") == 0);
-    return o->is_reply ? o : NULL;
+    assert(o && o->type == XPC_TYPE_DICTIONARY && strcmp(name,"result") == 0);
+    return o->value;
 }
-static int xpc_get_type(xpc_object_t o) { return o->result_type; }
+static int xpc_get_type(xpc_object_t o) { assert(o); return o->type; }
 static int64_t xpc_dictionary_get_int64(xpc_object_t o, const char *name)
 {
-    assert(o && strcmp(name,"result") == 0);
-    return o->result;
+    assert(o && o->value && o->value->type == XPC_TYPE_INT64 && strcmp(name,"result") == 0);
+    return o->value->result;
 }
-static void xpc_release(xpc_object_t o) { free(o); }
+static void xpc_release(xpc_object_t o)
+{
+    if (o) { free(o->value); free(o); }
+}
 
-/* The model deliberately applies a server-side commit before dropping an ACK.
- * It does NOT simulate Mach port ownership, dead-name notifications or XPC dispatch. */
+/* The simulated server commits first, then may drop an ACK. It models
+ * idempotence of repeat READY with the same identity, but NOT Mach, dispatch,
+ * PID reuse, or a real transport. */
 static xpc_object_t jbserver_xpc_send(uint64_t domain, uint64_t action, xpc_object_t args)
 {
     assert(domain == JBS_DOMAIN_ROOTHIDE && action == JBS_ROOTHIDE_JAILBREAKD_READY);
@@ -133,58 +144,94 @@ static xpc_object_t jbserver_xpc_send(uint64_t domain, uint64_t action, xpc_obje
         ++abort_deliveries;
     }
     int server_result = reject_server_result ? -1 : (!args->ready && mock_server_ready ? -1 : 0);
-    if (mode == MODE_DROP_ALL || (mode == MODE_DROP_FIRST && request_count == 1))
-        return NULL;
+    if (mode == MODE_DROP_ALL ||
+        (mode == MODE_DROP_FIRST && request_count == 1) ||
+        (mode == MODE_DROP_TWO && request_count <= 2)) return NULL;
+
     xpc_object_t reply = xpc_dictionary_create_empty();
     assert(reply);
-    reply->is_reply = 1;
-    reply->result_type = mode == MODE_MALFORMED ? XPC_TYPE_STRING : XPC_TYPE_INT64;
-    reply->result = server_result;
+    if (mode == MODE_NONDICT_FIRST && request_count == 1)
+        reply->type = XPC_TYPE_STRING;
+    if (!(mode == MODE_NO_RESULT_FIRST && request_count == 1)) {
+        reply->value = calloc(1, sizeof(struct MockXpc));
+        assert(reply->value);
+        reply->value->type = ((mode == MODE_MALFORMED_ALL) ||
+                              (mode == MODE_MALFORMED_FIRST && request_count == 1))
+                             ? XPC_TYPE_STRING : XPC_TYPE_INT64;
+        reply->value->result = server_result;
+    }
     return reply;
 }
 /* INSERT_CLIENT_FUNCTION */
 
 static void reset_case(int requested_mode)
 {
-    mode=requested_mode;
-    client_token_present=1;
-    request_count=0;
-    ready_deliveries=0;
-    abort_deliveries=0;
-    mock_server_ready=0;
-    reject_server_result=0;
+    mode = requested_mode;
+    client_token_present = 1;
+    request_count = 0;
+    ready_deliveries = 0;
+    abort_deliveries = 0;
+    mock_server_ready = 0;
+    reject_server_result = 0;
 }
 static void test_normal_reply(void)
 {
     reset_case(MODE_NORMAL);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(mock_server_ready && request_count == 1 && client_token_present == 0);
-    puts("NORMAL_ACK=PASS requests=1 server_ready=1 client_success=1");
+    puts("NORMAL_ACK=PASS requests=1");
 }
 static void test_one_lost_reply(void)
 {
     reset_case(MODE_DROP_FIRST);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(mock_server_ready && request_count == 2 && client_token_present == 0);
-    puts("FIRST_REPLY_LOST=PASS requests=2 server_ready=1 client_success=1");
+    puts("FIRST_REPLY_LOST=PASS requests=2");
 }
 static void test_two_lost_replies(void)
 {
+    reset_case(MODE_DROP_TWO);
+    assert(jbclient_jailbreakd_report_readiness(true) == 0);
+    assert(mock_server_ready && request_count == 3 && client_token_present == 0);
+    puts("BOTH_REPLIES_LOST_THIRD_SUCCEEDS=PASS requests=3");
+}
+static void test_all_replies_lost(void)
+{
     reset_case(MODE_DROP_ALL);
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
-    assert(mock_server_ready && request_count == 2 && client_token_present == 1);
-    /* Daemon's abort is rejected once the hypothetical server commit succeeded. */
+    assert(mock_server_ready && request_count == 3 && client_token_present == 1);
     mode=MODE_NORMAL;
     assert(jbclient_jailbreakd_report_readiness(false) != 0);
     assert(mock_server_ready && abort_deliveries == 1);
-    puts("BOTH_REPLIES_LOST=REPRODUCED requests=2 server_ready=1 client_failure=1 abort_rejected=1");
+    puts("ALL_THREE_REPLIES_LOST=KNOWN_RISK requests=3 abort_rejected=1");
 }
-static void test_malformed_reply_does_not_retry(void)
+static void test_malformed_then_good(void)
 {
-    reset_case(MODE_MALFORMED);
+    reset_case(MODE_MALFORMED_FIRST);
+    assert(jbclient_jailbreakd_report_readiness(true) == 0);
+    assert(mock_server_ready && request_count == 2 && client_token_present == 0);
+    puts("MALFORMED_FIRST_REPLY_RECOVERS=PASS requests=2");
+}
+static void test_all_malformed(void)
+{
+    reset_case(MODE_MALFORMED_ALL);
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
-    assert(mock_server_ready && request_count == 1 && client_token_present == 1);
-    puts("MALFORMED_REPLY=REPRODUCED requests=1 server_ready=1 client_failure=1");
+    assert(request_count == 3 && client_token_present == 1);
+    puts("ALL_MALFORMED_REPLIES=KNOWN_RISK requests=3");
+}
+static void test_nondictionary_then_good(void)
+{
+    reset_case(MODE_NONDICT_FIRST);
+    assert(jbclient_jailbreakd_report_readiness(true) == 0);
+    assert(request_count == 2 && client_token_present == 0);
+    puts("NON_DICTIONARY_FIRST_REPLY_RECOVERS=PASS requests=2");
+}
+static void test_missing_result_then_good(void)
+{
+    reset_case(MODE_NO_RESULT_FIRST);
+    assert(jbclient_jailbreakd_report_readiness(true) == 0);
+    assert(request_count == 2 && client_token_present == 0);
+    puts("MISSING_RESULT_FIRST_REPLY_RECOVERS=PASS requests=2");
 }
 static void test_explicit_server_rejection(void)
 {
@@ -192,24 +239,36 @@ static void test_explicit_server_rejection(void)
     reject_server_result = 1;
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
     assert(!mock_server_ready && request_count == 1 && client_token_present == 1);
-    puts("EXPLICIT_REJECTION=PASS requests=1 server_ready=0 client_failure=1");
+    puts("EXPLICIT_REJECTION=PASS requests=1");
 }
 static void test_missing_token_no_delivery(void)
 {
     reset_case(MODE_NORMAL);
-    client_token_present=0;
+    client_token_present = 0;
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
     assert(request_count == 0 && !mock_server_ready);
-    puts("MISSING_TOKEN=PASS requests=0 server_ready=0 client_failure=1");
+    puts("MISSING_TOKEN=PASS requests=0");
+}
+static void test_checkin_failed_ack(void)
+{
+    reset_case(MODE_NORMAL);
+    assert(jbclient_jailbreakd_report_readiness(false) == 0);
+    assert(request_count == 1 && abort_deliveries == 1 && client_token_present == 1);
+    puts("CHECKIN_ABORT_NORMAL=PASS requests=1");
 }
 int main(void)
 {
     test_normal_reply();
     test_one_lost_reply();
     test_two_lost_replies();
-    test_malformed_reply_does_not_retry();
+    test_all_replies_lost();
+    test_malformed_then_good();
+    test_all_malformed();
+    test_nondictionary_then_good();
+    test_missing_result_then_good();
     test_explicit_server_rejection();
     test_missing_token_no_delivery();
+    test_checkin_failed_ack();
     return 0;
 }
 '''

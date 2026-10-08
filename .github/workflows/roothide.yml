@@ -178,6 +178,9 @@ jobs:
       - name: RootHide jailbreakd ready ACK loss regressions
         run: python3 .github/scripts/test_jailbreakd_ack_loss.py
 
+      - name: RootHide jailbreakd unregistered-child cleanup regressions
+        run: python3 .github/scripts/test_jailbreakd_p3_cleanup.py
+
       - name: iOS 17 host safety regressions
         run: python3 .github/scripts/test_ios17_health.py
 
