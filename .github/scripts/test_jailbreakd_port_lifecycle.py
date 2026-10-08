@@ -225,6 +225,14 @@ static void fake_log(const char *format, ...) { (void)format; }
 
 /* INJECT_REAL_GLOBALS */
 
+/* The asynchronous production watchdog is covered by its separate host test.
+ * Lifecycle tests execute check-in synchronously, so do not schedule it here. */
+static void scheduleJailbreakdReadyLivenessWatchdog(uint64_t generation)
+{
+    (void)generation;
+}
+
+
 typedef struct {
     bool allocated;
     bool receive;
@@ -425,7 +433,11 @@ static kern_return_t host_set_special_port(mach_port_t host, int which, mach_por
 {
     (void)host; (void)which;
     if (fail_host_set) return KERN_FAILURE;
-    if (name == MACH_PORT_NULL || name >= MAX_FAKE_PORTS ||
+    if (name == MACH_PORT_NULL) {
+        host_special_port = MACH_PORT_NULL;
+        return KERN_SUCCESS;
+    }
+    if (name >= MAX_FAKE_PORTS ||
         !fake_ports[name].allocated || !fake_ports[name].send || fake_ports[name].dead)
         return KERN_INVALID_RIGHT;
     host_special_port = name;
@@ -489,6 +501,7 @@ main = r'''static void reset_case(void)
     __firstLoad = false;
     __jailbreakd_initialized = false;
     __jailbreakd_port_ready = false;
+    __jailbreakd_port_published = false;
     __jailbreakd_port_generation = 0;
     __jailbreakd_expected_pid = 0;
     __jailbreakd_child_pid = 0;
@@ -986,14 +999,14 @@ static void test_failed_restart_rolls_back_and_retry_waits_for_checkin(void)
     assert(gJailbreakdPort == MACH_PORT_NULL);
     assert(!__jailbreakd_port_ready);
     assert(fake_ports[old_port + 1].destroy_count == 1);
-    assert(host_special_port == old_port); /* no unverified special-port clearing */
+    assert(host_special_port == MACH_PORT_NULL); /* published port is revoked */
 
     spawn_result = 0;
     assert(jailbreakdClientPort() == MACH_PORT_NULL);
     mach_port_t new_port = gJailbreakdPort;
     assert(new_port == old_port + 2);
     assert(!__jailbreakd_port_ready);
-    assert(host_special_port == old_port);
+    assert(host_special_port == MACH_PORT_NULL);
     assert(jailbreakdClientPort() == MACH_PORT_NULL);
     assert(spawn_calls == 3);
 
