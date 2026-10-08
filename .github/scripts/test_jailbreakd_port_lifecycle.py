@@ -41,6 +41,7 @@ function_signatures = [
     "int jailbreakdServerPortSetCheckinToken(uint64_t generation, mach_port_t port, const char *token)",
     "int jailbreakdServerPortCheckinBegin(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)",
     "int jailbreakdServerPortCheckinReady(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)",
+    "int jailbreakdServerPortCheckinAbort(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)",
     "static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket_t *ticket)",
     "int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket)",
     "void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket)",
@@ -72,7 +73,11 @@ assert "jailbreakdServerPortCheckinFailed(&ticket);" in checkin[recv_failure_at:
 assert "jailbreakdServerPortCheckinComplete" not in checkin
 assert "setJailbreakdProcess" not in checkin
 ready_handler = extract_function(domain_source, "static int roothide_jailbreakd_ready(")
+abort_validate_at = ready_handler.index("jailbreakdServerPortCheckinAbort(pid, checkinToken, &ticket)")
+abort_cleanup_at = ready_handler.index("jailbreakdServerPortCheckinFailed(&ticket)", abort_validate_at)
 ready_validate_at = ready_handler.index("jailbreakdServerPortCheckinReady(pid, checkinToken, &ticket)")
+assert abort_validate_at < abort_cleanup_at < ready_validate_at
+assert "bool ready" in ready_handler
 ready_complete_at = ready_handler.index("jailbreakdServerPortCheckinComplete(&ticket)")
 ready_publish_at = ready_handler.index("setJailbreakdProcess(pid)")
 assert ready_validate_at < ready_complete_at < ready_publish_at
@@ -80,16 +85,21 @@ assert "audit_token_to_pid(*callerToken)" in ready_handler
 assert "JBS_ROOTHIDE_JAILBREAKD_READY = 10" in (ROOT / "BaseBin/libjailbreak/src/jbserver_domains.h").read_text()
 domain_table = domain_source[domain_source.index("struct jbserver_domain gRootHideDomain"):]
 assert domain_table.index(".handler = roothide_set_dyld_patch") < domain_table.index(".handler = roothide_jailbreakd_ready") < domain_table.rfind("\t\t{ 0 },")
+assert '{ .name = "ready", .type = JBS_TYPE_BOOL, .out = false }' in domain_table
 assert "MACH_PORT_VALID(port)" in lookup and "xpc_mach_send_create(port)" in lookup
-ready_client = extract_function(client_source, "int jbclient_jailbreakd_ready(void)")
+ready_client = extract_function(client_source, "static int jbclient_jailbreakd_report_readiness(bool ready)")
 assert "JBS_ROOTHIDE_JAILBREAKD_READY" in ready_client
+assert "xpc_dictionary_set_bool(xargs, \"ready\", ready)" in ready_client
 assert "unsetenv(\"JAILBREAKD_CHECKIN_TOKEN\")" in ready_client
 assert "attempt < 2" in ready_client
 assert "XPC_TYPE_INT64" in ready_client
+assert "jbclient_jailbreakd_checkin_failed" in client_source
 server_resume_at = daemon_main_source.index("dispatch_resume(source);")
 server_ack_at = daemon_main_source.index("jbclient_jailbreakd_ready()", server_resume_at)
 server_main_at = daemon_main_source.index("dispatch_main();", server_resume_at)
 assert server_resume_at < server_ack_at < server_main_at
+ready_failure_end = daemon_main_source.index("return 9;", server_ack_at)
+assert "jbclient_jailbreakd_checkin_failed()" in daemon_main_source[server_ack_at:ready_failure_end]
 spawn_start = source.index("int spawnJailbreakd()")
 spawn_end = source.index("int initJailbreakd(bool firstLoad)", spawn_start)
 spawn_source = source[spawn_start:spawn_end]
@@ -142,6 +152,8 @@ server_source_end = daemon_main_source.index("dispatch_source_set_event_handler(
 server_source_setup = daemon_main_source[server_source_start:server_source_end]
 assert "if (!source)" in server_source_setup
 assert "mach_port_destroy(mach_task_self(), serverPort)" in server_source_setup
+assert "jbclient_jailbreakd_checkin_failed()" in server_source_setup
+assert server_source_setup.index("jbclient_jailbreakd_checkin_failed()") < server_source_setup.index("return 8;")
 assert "return 8;" in server_source_setup
 assert "waitpid(pid, NULL, WNOHANG)" in source
 set_process_source = extract_function(source, "void setJailbreakdProcess(pid_t pid)")
@@ -510,6 +522,7 @@ static void fail_current_candidate(void)
 {
     jailbreakd_checkin_ticket_t ticket = {0};
     assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, fake_checkin_token, &ticket) == 0);
+    assert(jailbreakdServerPortCheckinAbort(__jailbreakd_expected_pid, fake_checkin_token, &ticket) == 0);
     jailbreakdServerPortCheckinFailed(&ticket);
 }
 
@@ -744,6 +757,21 @@ static void test_ready_ack_requires_current_pid_token_and_candidate(void)
                                             "ffffffffffffffffffffffffffffffff", &retry) != 0);
 }
 
+static void test_checkin_abort_requires_current_pid_and_token(void)
+{
+    reset_case();
+    assert(initJailbreakd(true) == 0);
+    jailbreakd_checkin_ticket_t ticket = {0};
+    assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, fake_checkin_token, &ticket) == 0);
+    assert(jailbreakdServerPortCheckinAbort(__jailbreakd_expected_pid + 1, fake_checkin_token, &ticket) != 0);
+    assert(jailbreakdServerPortCheckinAbort(__jailbreakd_expected_pid,
+                                            "ffffffffffffffffffffffffffffffff", &ticket) != 0);
+    assert(__jailbreakd_candidate_pending && !__jailbreakd_port_ready);
+    assert(jailbreakdServerPortCheckinAbort(__jailbreakd_expected_pid, fake_checkin_token, &ticket) == 0);
+    jailbreakdServerPortCheckinFailed(&ticket);
+    assert(gJailbreakdPort == MACH_PORT_NULL && !__jailbreakd_port_ready);
+}
+
 static void test_checkin_failure_discards_only_the_unready_candidate(void)
 {
     reset_case();
@@ -927,6 +955,7 @@ int main(void)
     test_suspended_respawn_cleanup_never_leaves_a_blocking_wait();
     test_unready_port_is_not_returned_and_becomes_ready_after_checkin();
     test_ready_ack_requires_current_pid_token_and_candidate();
+    test_checkin_abort_requires_current_pid_and_token();
     test_respawned_daemon_pid_is_bound_by_generation_token();
     test_initial_spawn_failure_rolls_back_and_retries();
     test_checkin_failure_discards_only_the_unready_candidate();

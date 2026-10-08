@@ -50,6 +50,7 @@ bool jbclient_roothide_jailbroken();
 mach_port_t jbclient_jailbreakd_lookup();
 mach_port_t jbclient_jailbreakd_checkin();
 int jbclient_jailbreakd_ready(void);
+int jbclient_jailbreakd_checkin_failed(void);
 bool jbclient_blacklist_check_pid(pid_t pid);
 bool jbclient_blacklist_check_path(const char* path);
 bool jbclient_blacklist_check_bundle(const char* bundle);

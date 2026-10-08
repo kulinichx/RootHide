@@ -305,7 +305,7 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, const char *c
     return 0;
 }
 
-static int roothide_jailbreakd_ready(audit_token_t *callerToken, const char *checkinToken)
+static int roothide_jailbreakd_ready(audit_token_t *callerToken, const char *checkinToken, bool ready)
 {
     if (!callerToken || !checkinToken) return -1;
     pid_t pid = audit_token_to_pid(*callerToken);
@@ -327,6 +327,14 @@ static int roothide_jailbreakd_ready(audit_token_t *callerToken, const char *che
     }
 
     jailbreakd_checkin_ticket_t ticket = {0};
+    if (!ready) {
+        if (jailbreakdServerPortCheckinAbort(pid, checkinToken, &ticket) != 0) return -1;
+        jailbreakdServerPortCheckinFailed(&ticket);
+        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                                "jailbreakd.checkin.handler.aborted pid=%d generation=%llu",
+                                pid, (unsigned long long)ticket.generation);
+        return 0;
+    }
     if (jailbreakdServerPortCheckinReady(pid, checkinToken, &ticket) != 0) return -1;
     if (jailbreakdServerPortCheckinComplete(&ticket) != 0) {
         jailbreakdServerPortCheckinFailed(&ticket);
@@ -469,6 +477,7 @@ struct jbserver_domain gRootHideDomain = {
             .args = (jbserver_arg[]) {
                     { .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
                     { .name = "checkin-token", .type = JBS_TYPE_STRING, .out = false },
+                    { .name = "ready", .type = JBS_TYPE_BOOL, .out = false },
                     { 0 },
             },
         },

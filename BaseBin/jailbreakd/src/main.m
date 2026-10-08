@@ -208,6 +208,7 @@ int main(int argc, char* argv[])
 		JBLogError("failed to create jailbreakd server receive source for port=%x", serverPort);
 		kern_return_t destroyResult = mach_port_destroy(mach_task_self(), serverPort);
 		if (destroyResult != KERN_SUCCESS) JBLogError("failed to destroy jailbreakd receive port after source failure: %x", destroyResult);
+		if (jbclient_jailbreakd_checkin_failed() != 0) JBLogError("launchd did not confirm check-in abort after server-source failure");
 		return 8;
 	}
 	dispatch_source_set_event_handler(source, ^{
@@ -217,6 +218,7 @@ int main(int argc, char* argv[])
 		if (jbclient_jailbreakd_ready() != 0) {
 			JBLogError("launchd rejected jailbreakd server-ready acknowledgement");
 			dispatch_source_cancel(source);
+			if (jbclient_jailbreakd_checkin_failed() != 0) JBLogError("launchd did not confirm check-in abort after ready failure");
 			kern_return_t destroyResult = mach_port_destroy(mach_task_self(), serverPort);
 			if (destroyResult != KERN_SUCCESS) JBLogError("failed to destroy port after ready acknowledgement failure: %x", destroyResult);
 			return 9;
