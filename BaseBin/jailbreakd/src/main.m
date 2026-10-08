@@ -62,6 +62,27 @@ static void terminateRespawnedJailbreakdChild(pid_t pid)
 	}
 }
 
+static int initializeRespawnedJailbreakdAttributes(posix_spawnattr_t *attr, mach_port_t bootstrapPort)
+{
+	int attrError = posix_spawnattr_init(attr);
+	if (attrError != 0) return attrError;
+
+	attrError = posix_spawnattr_setflags(attr, POSIX_SPAWN_START_SUSPENDED);
+	if (attrError != 0) {
+		JBLogError("posix_spawnattr_setflags jailbreakd failed: %d, %s", attrError, strerror(attrError));
+		posix_spawnattr_destroy(attr);
+		return attrError;
+	}
+
+	attrError = posix_spawnattr_set_registered_ports_np(attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstrapPort }, 3);
+	if (attrError != 0) {
+		JBLogError("posix_spawnattr_set_registered_ports_np jailbreakd failed: %d, %s", attrError, strerror(attrError));
+		posix_spawnattr_destroy(attr);
+		return attrError;
+	}
+	return 0;
+}
+
 int main(int argc, char* argv[])
 {
 	if (@available(iOS 17.0, *)) {
@@ -131,25 +152,13 @@ int main(int argc, char* argv[])
 	
 			pid_t pid;
 			posix_spawnattr_t attr = NULL;
-			int attrError = posix_spawnattr_init(&attr);
+			int attrError = initializeRespawnedJailbreakdAttributes(&attr, bootstraport);
 			if(attrError != 0) {
-				JBLogError("posix_spawnattr_init jailbreakd failed: %d, %s", attrError, strerror(attrError));
-				return 4;
-			}
-			attrError = posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
-			if(attrError != 0) {
-				posix_spawnattr_destroy(&attr);
-				JBLogError("posix_spawnattr_setflags jailbreakd failed: %d, %s", attrError, strerror(attrError));
+				JBLogError("failed to initialize suspended jailbreakd spawn attributes: %d, %s", attrError, strerror(attrError));
 				return 4;
 			}
 			// posix_spawnattr_setspecialport_np(&attr, bootstraport, TASK_BOOTSTRAP_PORT);
 			// posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ bootstraport, MACH_PORT_NULL }, 3);
-			attrError = posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){ MACH_PORT_NULL, MACH_PORT_NULL, bootstraport }, 3);
-			if(attrError != 0) {
-				posix_spawnattr_destroy(&attr);
-				JBLogError("posix_spawnattr_set_registered_ports_np jailbreakd failed: %d, %s", attrError, strerror(attrError));
-				return 4;
-			}
 			int ret = posix_spawn(&pid, selfPath, NULL, &attr, argv, environ);
 			posix_spawnattr_destroy(&attr);
 

@@ -53,7 +53,9 @@ function_signatures = [
 ]
 functions = "\n\n".join(extract_function(source, signature) for signature in function_signatures)
 respawn_cleanup = extract_function(daemon_main_source, "static void terminateRespawnedJailbreakdChild(pid_t pid)")
-functions += "\n\n" + respawn_cleanup
+respawn_attributes = extract_function(daemon_main_source, "static int initializeRespawnedJailbreakdAttributes(")
+bootstrap_port_setup = extract_function(source, "static kern_return_t prepareJailbreakdBootstrapPort(")
+functions += "\n\n" + respawn_cleanup + "\n\n" + respawn_attributes + "\n\n" + bootstrap_port_setup
 checkin = extract_function(domain_source, "static int roothide_jailbreakd_checkin(")
 lookup = extract_function(domain_source, "static int roothide_jailbreakd_lookup(")
 
@@ -85,16 +87,30 @@ assert 'unsetenv("JAILBREAKD_CHECKIN_TOKEN")' not in daemon_main_source
 respawn_start = daemon_main_source.index('if(getenv("RESPAWN_REQUIRED"))')
 checkin_start = daemon_main_source.index('JBLogDebug("check in jailbreakd port...")', respawn_start)
 respawn_source = daemon_main_source[respawn_start:checkin_start]
-assert "attrError = posix_spawnattr_setflags" in respawn_source
-assert "attrError = posix_spawnattr_set_registered_ports_np" in respawn_source
-assert respawn_source.index("posix_spawnattr_setflags") < respawn_source.index("posix_spawnattr_set_registered_ports_np")
-assert respawn_source.index("posix_spawnattr_set_registered_ports_np") < respawn_source.index("posix_spawn(&pid")
+assert "initializeRespawnedJailbreakdAttributes(&attr, bootstraport)" in respawn_source
+assert "posix_spawnattr_init(attr)" in respawn_attributes
+assert "posix_spawnattr_setflags" in respawn_attributes
+assert "posix_spawnattr_set_registered_ports_np" in respawn_attributes
+assert respawn_attributes.index("posix_spawnattr_setflags") < respawn_attributes.index("posix_spawnattr_set_registered_ports_np")
+assert respawn_attributes.count("posix_spawnattr_destroy(attr)") == 2
+assert respawn_source.index("initializeRespawnedJailbreakdAttributes") < respawn_source.index("posix_spawn(&pid")
 assert "if(unrestrictResult != 0)" in respawn_source
 assert "if (kill(pid, SIGCONT) != 0)" in respawn_source
 assert respawn_source.count("terminateRespawnedJailbreakdChild(pid);") == 3
 assert "waitpid(pid, &status, WNOHANG)" in respawn_cleanup
 assert "waitpid(pid, &status, 0)" in respawn_cleanup
 assert "errno != ESRCH" in respawn_cleanup
+bootstrap_start = source.index("int spawnJailbreakd()")
+bootstrap_end = source.index("	pid_t pid;", bootstrap_start)
+bootstrap_setup_source = source[bootstrap_start:bootstrap_end]
+assert "if (!bootstrapReady)" in bootstrap_setup_source
+assert "dispatch_once" not in bootstrap_setup_source
+assert "prepareJailbreakdBootstrapPort(&bootstraport)" in bootstrap_setup_source and "bootstrapError != KERN_SUCCESS" in bootstrap_setup_source
+assert "if (!source)" in bootstrap_setup_source
+assert "mach_port_destroy(mach_task_self(), bootstraport)" in bootstrap_setup_source
+assert bootstrap_setup_source.count("jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);") == 2
+assert "MACH_PORT_VALID(*bootstrapPort)" in bootstrap_port_setup
+assert "mach_port_allocate" in bootstrap_port_setup and "mach_port_insert_right" in bootstrap_port_setup
 assert "waitpid(oldpid, NULL, 0)" not in source
 assert "waitpid(child, &status, WNOHANG)" in source
 assert "kill(child, 0)" in source
@@ -102,7 +118,7 @@ assert "waitpid(oldpid, NULL, WNOHANG)" in source
 assert "waitpid(pid, NULL, WNOHANG)" in source
 
 if "--static-only" in sys.argv[1:]:
-    print("PASS: jailbreakd check-in/readiness/watchdog source contract")
+    print("PASS: jailbreakd check-in, watchdog, bootstrap, and respawn source contracts")
     raise SystemExit(0)
 
 harness = r'''#include <assert.h>
@@ -119,6 +135,8 @@ harness = r'''#include <assert.h>
 #include <pthread.h>
 
 typedef uint32_t mach_port_t;
+typedef struct fake_spawn_attributes { int flags; } *posix_spawnattr_t;
+#define POSIX_SPAWN_START_SUSPENDED 0x0080
 typedef struct {
     pid_t pid;
     uint64_t generation;
@@ -178,6 +196,14 @@ static bool fake_fail_kill;
 static int fake_kill_calls;
 static int fake_waitpid_nonblocking_calls;
 static int fake_waitpid_blocking_calls;
+static struct fake_spawn_attributes fake_spawn_attributes;
+static int fake_attr_init_error;
+static int fake_attr_flags_error;
+static int fake_attr_ports_error;
+static int fake_attr_destroy_calls;
+static int fake_attr_flags_calls;
+static int fake_attr_ports_calls;
+static mach_port_t fake_expected_bootstrap_port;
 
 static pid_t fake_getpid(void) { return (pid_t)launchd_pid; }
 #define getpid fake_getpid
@@ -220,6 +246,36 @@ static int fake_kill(pid_t pid, int signal_number)
     }
     if (pid == fake_tracked_pid && !fake_hold_child_after_kill)
         fake_child_alive = false;
+    return 0;
+}
+
+static int posix_spawnattr_init(posix_spawnattr_t *attr)
+{
+    if (fake_attr_init_error) return fake_attr_init_error;
+    fake_spawn_attributes.flags = 0;
+    *attr = &fake_spawn_attributes;
+    return 0;
+}
+static int posix_spawnattr_setflags(posix_spawnattr_t *attr, short flags)
+{
+    assert(attr && *attr == &fake_spawn_attributes);
+    fake_attr_flags_calls++;
+    if (fake_attr_flags_error) return fake_attr_flags_error;
+    (*attr)->flags = flags;
+    return 0;
+}
+static int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t *attr, mach_port_t ports[], uint32_t count)
+{
+    assert(attr && *attr == &fake_spawn_attributes);
+    fake_attr_ports_calls++;
+    assert(count == 3 && ports[0] == MACH_PORT_NULL && ports[1] == MACH_PORT_NULL);
+    assert(ports[2] == fake_expected_bootstrap_port);
+    return fake_attr_ports_error;
+}
+static int posix_spawnattr_destroy(posix_spawnattr_t *attr)
+{
+    fake_attr_destroy_calls++;
+    if (attr) *attr = NULL;
     return 0;
 }
 
@@ -359,6 +415,14 @@ main = r'''static void reset_case(void)
     fake_kill_calls = 0;
     fake_waitpid_nonblocking_calls = 0;
     fake_waitpid_blocking_calls = 0;
+    memset(&fake_spawn_attributes, 0, sizeof(fake_spawn_attributes));
+    fake_attr_init_error = 0;
+    fake_attr_flags_error = 0;
+    fake_attr_ports_error = 0;
+    fake_attr_destroy_calls = 0;
+    fake_attr_flags_calls = 0;
+    fake_attr_ports_calls = 0;
+    fake_expected_bootstrap_port = 333;
     gJailbreakdPort = MACH_PORT_NULL;
 }
 
@@ -419,6 +483,61 @@ static void test_suspended_respawn_cleanup_never_leaves_a_blocking_wait(void)
     assert(fake_child_alive);
     assert(fake_waitpid_blocking_calls == 0);
     assert(fake_waitpid_nonblocking_calls == 1);
+}
+
+static void test_bootstrap_port_setup_retries_and_cleans_partial_rights(void)
+{
+    reset_case();
+    mach_port_t bootstrapPort = MACH_PORT_NULL;
+    fail_allocate = true;
+    assert(prepareJailbreakdBootstrapPort(&bootstrapPort) == KERN_FAILURE);
+    assert(bootstrapPort == MACH_PORT_NULL);
+
+    reset_case();
+    bootstrapPort = MACH_PORT_NULL;
+    fail_insert_right = true;
+    assert(prepareJailbreakdBootstrapPort(&bootstrapPort) == KERN_FAILURE);
+    assert(bootstrapPort == MACH_PORT_NULL);
+    assert(fake_ports[100].destroy_count == 1 && !fake_ports[100].allocated);
+
+    reset_case();
+    bootstrapPort = MACH_PORT_NULL;
+    assert(prepareJailbreakdBootstrapPort(&bootstrapPort) == KERN_SUCCESS);
+    assert(bootstrapPort == 100 && fake_ports[100].receive && fake_ports[100].send);
+    assert(prepareJailbreakdBootstrapPort(&bootstrapPort) == KERN_SUCCESS);
+    assert(bootstrapPort == 101 && fake_ports[100].destroy_count == 1);
+    assert(fake_ports[101].receive && fake_ports[101].send);
+}
+
+static void test_spawn_attribute_failures_destroy_initialized_attributes(void)
+{
+    reset_case();
+    posix_spawnattr_t attr = NULL;
+    fake_attr_init_error = 11;
+    assert(initializeRespawnedJailbreakdAttributes(&attr, fake_expected_bootstrap_port) == 11);
+    assert(attr == NULL && fake_attr_destroy_calls == 0);
+    assert(fake_attr_flags_calls == 0 && fake_attr_ports_calls == 0);
+
+    reset_case();
+    attr = NULL;
+    fake_attr_flags_error = 12;
+    assert(initializeRespawnedJailbreakdAttributes(&attr, fake_expected_bootstrap_port) == 12);
+    assert(attr == NULL && fake_attr_destroy_calls == 1);
+    assert(fake_attr_flags_calls == 1 && fake_attr_ports_calls == 0);
+
+    reset_case();
+    attr = NULL;
+    fake_attr_ports_error = 13;
+    assert(initializeRespawnedJailbreakdAttributes(&attr, fake_expected_bootstrap_port) == 13);
+    assert(attr == NULL && fake_attr_destroy_calls == 1);
+    assert(fake_attr_flags_calls == 1 && fake_attr_ports_calls == 1);
+
+    reset_case();
+    attr = NULL;
+    assert(initializeRespawnedJailbreakdAttributes(&attr, fake_expected_bootstrap_port) == 0);
+    assert(attr == &fake_spawn_attributes && fake_attr_destroy_calls == 0);
+    assert(attr->flags == POSIX_SPAWN_START_SUSPENDED);
+    assert(fake_attr_flags_calls == 1 && fake_attr_ports_calls == 1);
 }
 
 static void test_respawned_daemon_pid_is_bound_by_generation_token(void)
@@ -642,6 +761,8 @@ static void test_insert_right_failure_does_not_leave_a_candidate(void)
 
 int main(void)
 {
+    test_bootstrap_port_setup_retries_and_cleans_partial_rights();
+    test_spawn_attribute_failures_destroy_initialized_attributes();
     test_suspended_respawn_cleanup_never_leaves_a_blocking_wait();
     test_unready_port_is_not_returned_and_becomes_ready_after_checkin();
     test_respawned_daemon_pid_is_bound_by_generation_token();
@@ -670,4 +791,4 @@ with tempfile.TemporaryDirectory() as directory:
     )
     subprocess.run([str(executable)], check=True)
 
-print("PASS: jailbreakd readiness, stale check-in tickets, timeout child reaping, restart, and dead-port fallback")
+print("PASS: jailbreakd lifecycle readiness, spawn cleanup, bootstrap-port rollback/retry, stale tickets, timeout reaping, and dead-port fallback")

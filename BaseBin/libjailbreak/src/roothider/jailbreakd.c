@@ -412,6 +412,37 @@ void setJailbreakdProcess(pid_t pid)
 	setenv("JAILBREAKD_PID", buf, 1);
 }
 
+static kern_return_t prepareJailbreakdBootstrapPort(mach_port_t *bootstrapPort)
+{
+    if (!bootstrapPort) return KERN_FAILURE;
+
+    if (MACH_PORT_VALID(*bootstrapPort)) {
+        kern_return_t destroyError = mach_port_destroy(mach_task_self(), *bootstrapPort);
+        if (destroyError != KERN_SUCCESS) {
+            JBLogError("failed to clean partial jailbreakd bootstrap port: %x,%s", destroyError, mach_error_string(destroyError));
+            return destroyError;
+        }
+        *bootstrapPort = MACH_PORT_NULL;
+    }
+
+    kern_return_t kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, bootstrapPort);
+    if (kr != KERN_SUCCESS) {
+        *bootstrapPort = MACH_PORT_NULL;
+        JBLogError("jailbreakd bootstrap mach_port_allocate failed: %x,%s", kr, mach_error_string(kr));
+        return kr;
+    }
+
+    kr = mach_port_insert_right(mach_task_self(), *bootstrapPort, *bootstrapPort, MACH_MSG_TYPE_MAKE_SEND);
+    if (kr != KERN_SUCCESS) {
+        JBLogError("jailbreakd bootstrap mach_port_insert_right failed: %x,%s", kr, mach_error_string(kr));
+        kern_return_t destroyError = mach_port_destroy(mach_task_self(), *bootstrapPort);
+        if (destroyError == KERN_SUCCESS) *bootstrapPort = MACH_PORT_NULL;
+        else JBLogError("failed to destroy partial bootstrap port: %x", destroyError);
+        return kr;
+    }
+    return KERN_SUCCESS;
+}
+
 int spawnJailbreakd()
 {
 	if (getpid() != 1) {
@@ -419,16 +450,44 @@ int spawnJailbreakd()
 		return -1;
 	}
 
-	static mach_port_t bootstraport = MACH_PORT_NULL;
+	uint64_t candidateGeneration = 0;
+	mach_port_t candidatePort = MACH_PORT_NULL;
+	pthread_mutex_lock(&__jailbreakd_port_mutex);
+	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready &&
+	    __jailbreakd_expected_pid == 0 && __jailbreakd_child_pid == 0 &&
+	    MACH_PORT_VALID(gJailbreakdPort)) {
+		candidateGeneration = __jailbreakd_port_generation;
+		candidatePort = gJailbreakdPort;
+	}
+	pthread_mutex_unlock(&__jailbreakd_port_mutex);
+	if (candidateGeneration == 0) {
+		JBLogError("spawnJailbreakd called without an available check-in candidate");
+		return EBUSY;
+	}
 
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-		mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &bootstraport);
-		mach_port_insert_right(mach_task_self(), bootstraport, bootstraport, MACH_MSG_TYPE_MAKE_SEND);
+
+	static mach_port_t bootstraport = MACH_PORT_NULL;
+	static dispatch_source_t source = NULL;
+	static bool bootstrapReady = false;
+
+	/* Calls are serialized by __jailbreakd_restart_mutex; keep failures retryable. */
+	if (!bootstrapReady) {
+		kern_return_t bootstrapError = prepareJailbreakdBootstrapPort(&bootstraport);
+		if (bootstrapError != KERN_SUCCESS) {
+			jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
+			return bootstrapError;
+		}
 		JBLogDebug("jailbreakd bootstrap port: %x", bootstraport);
 
-		static dispatch_source_t source; //retain the dispatch source
 		source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, (uintptr_t)bootstraport, 0, dispatch_get_global_queue(0,0));
+		if (!source) {
+			JBLogError("failed to create jailbreakd bootstrap receive source");
+			kern_return_t destroyError = mach_port_destroy(mach_task_self(), bootstraport);
+			if (destroyError != KERN_SUCCESS) JBLogError("failed to destroy bootstrap port after source failure: %x", destroyError);
+			else bootstraport = MACH_PORT_NULL;
+			jailbreakdServerPortAbandonCandidate(candidateGeneration, candidatePort);
+			return ENOMEM;
+		}
 		dispatch_source_set_event_handler(source, ^{
 			JBLogDebug("received message from jailbreakd");
 			xpc_object_t xdict = NULL;
@@ -473,22 +532,9 @@ int spawnJailbreakd()
 			}
 		});
 		dispatch_resume(source);
-	});
+		bootstrapReady = true;
+	}
 
-	uint64_t candidateGeneration = 0;
-	mach_port_t candidatePort = MACH_PORT_NULL;
-	pthread_mutex_lock(&__jailbreakd_port_mutex);
-	if (__jailbreakd_candidate_pending && !__jailbreakd_port_ready &&
-	    __jailbreakd_expected_pid == 0 && __jailbreakd_child_pid == 0 &&
-	    MACH_PORT_VALID(gJailbreakdPort)) {
-		candidateGeneration = __jailbreakd_port_generation;
-		candidatePort = gJailbreakdPort;
-	}
-	pthread_mutex_unlock(&__jailbreakd_port_mutex);
-	if (candidateGeneration == 0) {
-		JBLogError("spawnJailbreakd called without an available check-in candidate");
-		return EBUSY;
-	}
 
 	pid_t pid;
 	posix_spawnattr_t attr = NULL;
