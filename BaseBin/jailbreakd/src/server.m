@@ -95,19 +95,16 @@ void jailbreakd_received_message(mach_port_t port)
 		roothide_stage_log("jailbreakd.receive result=%d", err);
 		if (err != 0) {
 			JBLogError("xpc_pipe_receive error %d", err);
-			if (message) xpc_release(message);
 			return;
 		}
 		if (!message || xpc_get_type(message) != XPC_TYPE_DICTIONARY) {
 			JBLogError("dropping malformed jailbreakd XPC request");
-			if (message) xpc_release(message);
 			return;
 		}
 
 		xpc_object_t reply = xpc_dictionary_create_reply(message);
 		if (!reply) {
 			JBLogError("jailbreakd XPC request has no reply context");
-			xpc_release(message);
 			return;
 		}
 
@@ -172,7 +169,6 @@ void jailbreakd_received_message(mach_port_t port)
 						int64_t result = jailbreakd_patch_spawn_child(clientPid, pid, resume, forceDyldPatch);
 						xpc_dictionary_set_int64(asyncReply, "result", result);
 						jailbreakd_reply_message(msgId, asyncReply);
-						xpc_release(asyncReply);
 					});
 					break;
 				}
@@ -196,7 +192,7 @@ void jailbreakd_received_message(mach_port_t port)
 
 				case JBD_MSG_EXEC_TRACE_START: {
 					//dead lock: jbd->ptrace->kernel->amfi port->launchd->spawn amfid->jdb
-					xpc_object_t asyncMessage = xpc_retain(message);
+					xpc_object_t asyncMessage = message;
 					xpc_object_t asyncReply = reply;
 					reply = nil; //reply later; keep owned objects alive in the worker
 					dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -207,8 +203,6 @@ void jailbreakd_received_message(mach_port_t port)
 						result = execTraceProcess(clientPid, traced);
 						xpc_dictionary_set_int64(asyncReply, "result", result);
 						jailbreakd_reply_message(msgId, asyncReply);
-						xpc_release(asyncReply);
-						xpc_release(asyncMessage);
 					});
 					break;
 				}
@@ -262,8 +256,6 @@ void jailbreakd_received_message(mach_port_t port)
 		}
 		if (reply) {
 			jailbreakd_reply_message(msgId, reply);
-			xpc_release(reply);
 		}
-		xpc_release(message);
 	}
 }
