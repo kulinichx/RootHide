@@ -993,7 +993,7 @@ with tempfile.TemporaryDirectory() as directory:
     executable = directory / "jailbreakd_lifecycle"
     c_file.write_text(harness.replace("/* INJECT_REAL_GLOBALS */", globals_block) + "\n" + functions + "\n" + main)
     subprocess.run(
-        ["xcrun", "clang", "-std=c11", "-Wall", "-Wextra", "-Werror",
+        ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
          "-fsanitize=address,undefined", str(c_file), "-o", str(executable)],
         check=True,
     )
