@@ -297,18 +297,45 @@ static int roothide_jailbreakd_checkin(audit_token_t *callerToken, const char *c
         return -1;
     }
 
-    if (jailbreakdServerPortCheckinComplete(&ticket) != 0) {
-        xpc_release(*portOut);
-        *portOut = NULL;
-        roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
-                                "jailbreakd.checkin.handler.reject reason=ready_publish");
-        jailbreakdServerPortCheckinFailed(&ticket);
+    /* Readiness is committed only after the daemon attaches its receive source
+     * and returns through the explicit ready acknowledgement action. */
+    roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
+                            "jailbreakd.checkin.handler.prepared pid=%d generation=%llu",
+                            pid, (unsigned long long)ticket.generation);
+    return 0;
+}
+
+static int roothide_jailbreakd_ready(audit_token_t *callerToken, const char *checkinToken)
+{
+    if (!callerToken || !checkinToken) return -1;
+    pid_t pid = audit_token_to_pid(*callerToken);
+    uid_t uid = audit_token_to_euid(*callerToken);
+    if (uid != 0 || pid <= 1 || isBlacklistedToken(callerToken)) return -1;
+
+    const char *processPath = proc_get_path(pid, NULL);
+    const char *expectedPath = JBROOT_PATH("/basebin/jailbreakd");
+    char normalizedProcessPath[PATH_MAX] = {0};
+    char normalizedExpectedPath[PATH_MAX] = {0};
+    if (!processPath || !expectedPath ||
+        !realpath(processPath, normalizedProcessPath) ||
+        !realpath(expectedPath, normalizedExpectedPath) ||
+        strcmp(normalizedProcessPath, normalizedExpectedPath) != 0) {
+        JBLogError("jailbreakd ready: denying caller pid=%d process=%s expected=%s",
+                   pid, processPath ? processPath : "<unknown>",
+                   expectedPath ? expectedPath : "<unknown>");
         return -1;
     }
 
+    jailbreakd_checkin_ticket_t ticket = {0};
+    if (jailbreakdServerPortCheckinReady(pid, checkinToken, &ticket) != 0) return -1;
+    if (jailbreakdServerPortCheckinComplete(&ticket) != 0) {
+        jailbreakdServerPortCheckinFailed(&ticket);
+        return -1;
+    }
     setJailbreakdProcess(pid);
     roothide_stage_file_log(ROOTHIDE_JAILBREAKD_STAGE_LOG_PATH,
-                            "jailbreakd.checkin.handler.ready=1 pid=%d", pid);
+                            "jailbreakd.ready.handler.ready=1 pid=%d generation=%llu",
+                            pid, (unsigned long long)ticket.generation);
     return 0;
 }
 
@@ -434,6 +461,14 @@ struct jbserver_domain gRootHideDomain = {
             .args = (jbserver_arg[]) {
                     { .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
                     { .name = "enabled", .type = JBS_TYPE_BOOL, .out = false },
+                    { 0 },
+            },
+        },
+        {
+            .handler = roothide_jailbreakd_ready,
+            .args = (jbserver_arg[]) {
+                    { .name = "caller-token", .type = JBS_TYPE_CALLER_TOKEN, .out = false },
+                    { .name = "checkin-token", .type = JBS_TYPE_STRING, .out = false },
                     { 0 },
             },
         },

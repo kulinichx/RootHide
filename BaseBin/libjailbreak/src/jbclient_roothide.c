@@ -67,6 +67,26 @@ mach_port_t jbclient_jailbreakd_checkin()
 	return port;
 }
 
+int jbclient_jailbreakd_ready(void)
+{
+    const char *checkinToken = getenv("JAILBREAKD_CHECKIN_TOKEN");
+    if (!checkinToken) return -1;
+
+    xpc_object_t xargs = xpc_dictionary_create_empty();
+    if (!xargs) return -1;
+    xpc_dictionary_set_string(xargs, "checkin-token", checkinToken);
+    xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_READY, xargs);
+    xpc_release(xargs);
+
+    int result = -1;
+    if (xreply) {
+        result = (int)xpc_dictionary_get_int64(xreply, "result");
+        xpc_release(xreply);
+    }
+    if (result == 0) unsetenv("JAILBREAKD_CHECKIN_TOKEN");
+    return result;
+}
+
 bool jbclient_roothide_jailbroken()
 {
 	bool jailbroken = false;

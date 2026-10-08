@@ -222,6 +222,32 @@ int jailbreakdServerPortCheckinBegin(pid_t pid, const char *token, jailbreakd_ch
 	return 0;
 }
 
+int jailbreakdServerPortCheckinReady(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)
+{
+    if (getpid() != 1 || pid <= 1 || !token || !ticket) {
+        JBLogError("invalid jailbreakd ready acknowledgement pid=%d", pid);
+        return -1;
+    }
+
+    pthread_mutex_lock(&__jailbreakd_port_mutex);
+    uint64_t generation = __jailbreakd_port_generation;
+    if (!__jailbreakd_initialized || !__jailbreakd_candidate_pending ||
+        __jailbreakd_port_ready || !__jailbreakd_checkin_in_progress ||
+        pid != __jailbreakd_expected_pid || strlen(token) != 32 ||
+        strcmp(token, __jailbreakd_checkin_token) != 0 || !MACH_PORT_VALID(gJailbreakdPort)) {
+        pthread_mutex_unlock(&__jailbreakd_port_mutex);
+        JBLogError("rejecting jailbreakd ready acknowledgement pid=%d generation=%llu",
+                   pid, (unsigned long long)generation);
+        return -1;
+    }
+
+    ticket->pid = pid;
+    ticket->generation = generation;
+    ticket->port = gJailbreakdPort;
+    pthread_mutex_unlock(&__jailbreakd_port_mutex);
+    return 0;
+}
+
 static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket_t *ticket)
 {
 	return ticket && ticket->pid > 1 && __jailbreakd_candidate_pending &&
@@ -392,6 +418,30 @@ mach_port_t jailbreakdClientPortFastGet()
 }
 #endif
 
+static void scheduleJailbreakdParentReap(pid_t pid, unsigned int retriesRemaining)
+{
+    if (pid <= 1) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50LL * 1000000LL),
+                   dispatch_get_global_queue(0, 0), ^{
+        int status = 0;
+        pid_t result;
+        do {
+            result = waitpid(pid, &status, WNOHANG);
+        } while (result == -1 && errno == EINTR);
+
+        if (result == pid || (result == -1 && errno == ECHILD)) return;
+        if (result == 0 && retriesRemaining > 0) {
+            scheduleJailbreakdParentReap(pid, retriesRemaining - 1);
+            return;
+        }
+        if (result == 0) {
+            JBLogError("previous jailbreakd parent pid=%d remained alive after deferred reap retries", pid);
+        } else {
+            JBLogError("deferred waitpid failed for previous jailbreakd pid=%d errno=%d", pid, errno);
+        }
+    });
+}
+
 void setJailbreakdProcess(pid_t pid)
 {
     if (pid <= 1) {
@@ -417,7 +467,8 @@ void setJailbreakdProcess(pid_t pid)
                     result = waitpid(oldpid, NULL, WNOHANG);
                 } while (result == -1 && errno == EINTR);
                 if (result == 0) {
-                    JBLogError("previous jailbreakd pid=%d has not exited at the nonblocking handoff check", oldpid);
+                    JBLogError("previous jailbreakd pid=%d still alive at handoff; scheduling nonblocking reap", oldpid);
+                    scheduleJailbreakdParentReap(oldpid, 50);
                 } else if (result == -1 && errno != ECHILD) {
                     JBLogError("waitpid failed for previous jailbreakd pid=%d errno=%d", oldpid, errno);
                 }

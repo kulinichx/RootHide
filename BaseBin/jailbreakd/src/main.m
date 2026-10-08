@@ -214,6 +214,13 @@ int main(int argc, char* argv[])
 			jailbreakd_received_message(serverPort);
 		});
 		dispatch_resume(source);
+		if (jbclient_jailbreakd_ready() != 0) {
+			JBLogError("launchd rejected jailbreakd server-ready acknowledgement");
+			dispatch_source_cancel(source);
+			kern_return_t destroyResult = mach_port_destroy(mach_task_self(), serverPort);
+			if (destroyResult != KERN_SUCCESS) JBLogError("failed to destroy port after ready acknowledgement failure: %x", destroyResult);
+			return 9;
+		}
 		roothide_stage_log("jailbreakd.server.ready port=%x", serverPort);
 
 		dispatch_main();

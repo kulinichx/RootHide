@@ -40,6 +40,7 @@ function_signatures = [
     "int registerServerPort()",
     "int jailbreakdServerPortSetCheckinToken(uint64_t generation, mach_port_t port, const char *token)",
     "int jailbreakdServerPortCheckinBegin(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)",
+    "int jailbreakdServerPortCheckinReady(pid_t pid, const char *token, jailbreakd_checkin_ticket_t *ticket)",
     "static bool jailbreakdCheckinTicketMatchesLocked(const jailbreakd_checkin_ticket_t *ticket)",
     "int jailbreakdServerPortCheckinComplete(const jailbreakd_checkin_ticket_t *ticket)",
     "void jailbreakdServerPortCheckinFailed(const jailbreakd_checkin_ticket_t *ticket)",
@@ -56,19 +57,37 @@ functions = "\n\n".join(extract_function(source, signature) for signature in fun
 respawn_cleanup = extract_function(daemon_main_source, "static void terminateRespawnedJailbreakdChild(pid_t pid)")
 respawn_attributes = extract_function(daemon_main_source, "static int initializeRespawnedJailbreakdAttributes(")
 bootstrap_port_setup = extract_function(source, "static kern_return_t prepareJailbreakdBootstrapPort(")
+deferred_parent_reaper = extract_function(source, "static void scheduleJailbreakdParentReap(")
 functions += "\n\n" + respawn_cleanup + "\n\n" + respawn_attributes + "\n\n" + bootstrap_port_setup
 checkin = extract_function(domain_source, "static int roothide_jailbreakd_checkin(")
 lookup = extract_function(domain_source, "static int roothide_jailbreakd_lookup(")
 
-# Keep the cross-file ticket capture and candidate-scoped cleanup under test.
+# Check-in returns the receive right but cannot publish readiness; only the
+# authenticated post-dispatch acknowledgement may complete the candidate.
 begin_at = checkin.index("jailbreakdServerPortCheckinBegin(pid, checkinToken, &ticket)")
 recv_create_at = checkin.index("*portOut = xpc_mach_recv_create(port);")
 recv_failure_at = checkin.index("if (!*portOut)", recv_create_at)
-ready_at = checkin.index("jailbreakdServerPortCheckinComplete(&ticket)", recv_failure_at)
-assert begin_at < recv_create_at < recv_failure_at < ready_at
+assert begin_at < recv_create_at < recv_failure_at
 assert "jailbreakdServerPortCheckinFailed(&ticket);" in checkin[recv_failure_at:]
-assert "xpc_release(*portOut);" in checkin[ready_at:]
+assert "jailbreakdServerPortCheckinComplete" not in checkin
+assert "setJailbreakdProcess" not in checkin
+ready_handler = extract_function(domain_source, "static int roothide_jailbreakd_ready(")
+ready_validate_at = ready_handler.index("jailbreakdServerPortCheckinReady(pid, checkinToken, &ticket)")
+ready_complete_at = ready_handler.index("jailbreakdServerPortCheckinComplete(&ticket)")
+ready_publish_at = ready_handler.index("setJailbreakdProcess(pid)")
+assert ready_validate_at < ready_complete_at < ready_publish_at
+assert "audit_token_to_pid(*callerToken)" in ready_handler
+assert "JBS_ROOTHIDE_JAILBREAKD_READY = 10" in (ROOT / "BaseBin/libjailbreak/src/jbserver_domains.h").read_text()
+domain_table = domain_source[domain_source.index("struct jbserver_domain gRootHideDomain"):]
+assert domain_table.index(".handler = roothide_set_dyld_patch") < domain_table.index(".handler = roothide_jailbreakd_ready") < domain_table.rfind("\t\t{ 0 },")
 assert "MACH_PORT_VALID(port)" in lookup and "xpc_mach_send_create(port)" in lookup
+ready_client = extract_function(client_source, "int jbclient_jailbreakd_ready(void)")
+assert "JBS_ROOTHIDE_JAILBREAKD_READY" in ready_client
+assert "unsetenv(\"JAILBREAKD_CHECKIN_TOKEN\")" in ready_client
+server_resume_at = daemon_main_source.index("dispatch_resume(source);")
+server_ack_at = daemon_main_source.index("jbclient_jailbreakd_ready()", server_resume_at)
+server_main_at = daemon_main_source.index("dispatch_main();", server_resume_at)
+assert server_resume_at < server_ack_at < server_main_at
 spawn_start = source.index("int spawnJailbreakd()")
 spawn_end = source.index("int initJailbreakd(bool firstLoad)", spawn_start)
 spawn_source = source[spawn_start:spawn_end]
@@ -129,6 +148,11 @@ assert "parsedOldPid <= 1" in set_process_source
 assert "waitpid(oldpid, NULL, WNOHANG)" in set_process_source
 assert "while (result == -1 && errno == EINTR)" in set_process_source
 assert "atoi(pidenv)" not in set_process_source
+assert "scheduleJailbreakdParentReap(oldpid, 50)" in set_process_source
+assert "dispatch_after" in deferred_parent_reaper
+assert "waitpid(pid, &status, WNOHANG)" in deferred_parent_reaper
+assert "retriesRemaining > 0" in deferred_parent_reaper
+assert "waitpid(pid, &status, 0)" not in deferred_parent_reaper
 
 if "--static-only" in sys.argv[1:]:
     print("PASS: jailbreakd check-in, watchdog, bootstrap, and respawn source contracts")
@@ -211,6 +235,8 @@ static int fake_kill_calls;
 static int fake_waitpid_nonblocking_calls;
 static int fake_waitpid_blocking_calls;
 static char fake_jailbreakd_pid_env[64];
+static pid_t fake_deferred_reap_pid;
+static unsigned fake_deferred_reap_calls;
 static struct fake_spawn_attributes fake_spawn_attributes;
 static int fake_attr_init_error;
 static int fake_attr_flags_error;
@@ -231,6 +257,12 @@ static int fake_setenv(const char *name, const char *value, int overwrite)
     assert(strcmp(name, "JAILBREAKD_PID") == 0 && overwrite == 1);
     int written = snprintf(fake_jailbreakd_pid_env, sizeof(fake_jailbreakd_pid_env), "%s", value);
     return written < 0 || (size_t)written >= sizeof(fake_jailbreakd_pid_env) ? -1 : 0;
+}
+static void scheduleJailbreakdParentReap(pid_t pid, unsigned int retriesRemaining)
+{
+    assert(retriesRemaining == 50);
+    fake_deferred_reap_pid = pid;
+    fake_deferred_reap_calls++;
 }
 #define getpid fake_getpid
 #define getenv fake_getenv
@@ -444,6 +476,8 @@ main = r'''static void reset_case(void)
     fake_waitpid_nonblocking_calls = 0;
     fake_waitpid_blocking_calls = 0;
     fake_jailbreakd_pid_env[0] = '\0';
+    fake_deferred_reap_pid = 0;
+    fake_deferred_reap_calls = 0;
     memset(&fake_spawn_attributes, 0, sizeof(fake_spawn_attributes));
     fake_attr_init_error = 0;
     fake_attr_flags_error = 0;
@@ -458,8 +492,11 @@ main = r'''static void reset_case(void)
 static int complete_current_candidate(void)
 {
     jailbreakd_checkin_ticket_t ticket = {0};
+    jailbreakd_checkin_ticket_t readyTicket = {0};
     assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, fake_checkin_token, &ticket) == 0);
-    return jailbreakdServerPortCheckinComplete(&ticket);
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_expected_pid, fake_checkin_token, &readyTicket) == 0);
+    assert(ticket.pid == readyTicket.pid && ticket.generation == readyTicket.generation && ticket.port == readyTicket.port);
+    return jailbreakdServerPortCheckinComplete(&readyTicket);
 }
 
 static void fail_current_candidate(void)
@@ -544,6 +581,7 @@ static void test_previous_pid_environment_is_validated_before_waitpid(void)
     setJailbreakdProcess(803);
     assert(fake_waitpid_nonblocking_calls == 1);
     assert(fake_waitpid_blocking_calls == 0);
+    assert(fake_deferred_reap_calls == 1 && fake_deferred_reap_pid == 322);
     assert(strcmp(fake_jailbreakd_pid_env, "803") == 0);
 }
 
@@ -621,7 +659,9 @@ static void test_respawned_daemon_pid_is_bound_by_generation_token(void)
     pthread_mutex_lock(&__jailbreakd_port_mutex);
     assert(!reapJailbreakdChildIfExitedLocked()); /* ECHILD is not proof of exit before reparenting. */
     pthread_mutex_unlock(&__jailbreakd_port_mutex);
-    assert(jailbreakdServerPortCheckinComplete(&respawned) == 0);
+    jailbreakd_checkin_ticket_t readyTicket = {0};
+    assert(jailbreakdServerPortCheckinReady(launchd_spawn_pid + 1, fake_checkin_token, &readyTicket) == 0);
+    assert(jailbreakdServerPortCheckinComplete(&readyTicket) == 0);
     assert(__jailbreakd_port_ready);
     assert(__jailbreakd_child_pid == launchd_spawn_pid + 1);
 }
@@ -648,6 +688,22 @@ static void test_initial_spawn_failure_rolls_back_and_retries(void)
 
     assert(complete_current_candidate() == 0);
     assert(jailbreakdClientPort() == candidate);
+}
+
+static void test_ready_ack_requires_current_pid_token_and_candidate(void)
+{
+    reset_case();
+    assert(initJailbreakd(true) == 0);
+    jailbreakd_checkin_ticket_t begun = {0};
+    jailbreakd_checkin_ticket_t ready = {0};
+    assert(jailbreakdServerPortCheckinBegin(__jailbreakd_expected_pid, fake_checkin_token, &begun) == 0);
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_expected_pid + 1, fake_checkin_token, &ready) != 0);
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_expected_pid, "ffffffffffffffffffffffffffffffff", &ready) != 0);
+    assert(!__jailbreakd_port_ready);
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_expected_pid, fake_checkin_token, &ready) == 0);
+    assert(ready.pid == begun.pid && ready.generation == begun.generation && ready.port == begun.port);
+    assert(jailbreakdServerPortCheckinComplete(&ready) == 0);
+    assert(__jailbreakd_port_ready);
 }
 
 static void test_checkin_failure_discards_only_the_unready_candidate(void)
@@ -713,7 +769,10 @@ static void test_stale_timeout_cannot_discard_a_new_generation(void)
     assert(!__jailbreakd_port_ready);
     assert(fake_ports[current_candidate].destroy_count == 0);
     assert(fake_kill_calls == kills_before_stale_failure);
-    assert(jailbreakdServerPortCheckinComplete(&current_ticket) == 0);
+    jailbreakd_checkin_ticket_t current_ready_ticket = {0};
+    assert(jailbreakdServerPortCheckinReady(__jailbreakd_expected_pid, fake_checkin_token,
+                                            &current_ready_ticket) == 0);
+    assert(jailbreakdServerPortCheckinComplete(&current_ready_ticket) == 0);
     assert(__jailbreakd_port_ready);
 }
 
@@ -828,6 +887,7 @@ int main(void)
     test_spawn_attribute_failures_destroy_initialized_attributes();
     test_suspended_respawn_cleanup_never_leaves_a_blocking_wait();
     test_unready_port_is_not_returned_and_becomes_ready_after_checkin();
+    test_ready_ack_requires_current_pid_token_and_candidate();
     test_respawned_daemon_pid_is_bound_by_generation_token();
     test_initial_spawn_failure_rolls_back_and_retries();
     test_checkin_failure_discards_only_the_unready_candidate();
