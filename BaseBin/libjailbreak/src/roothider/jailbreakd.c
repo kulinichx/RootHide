@@ -279,17 +279,18 @@ int jailbreakdServerPortCheckinAbort(pid_t pid, const char *token, jailbreakd_ch
     if (getpid() != 1 || pid <= 1 || !token || !ticket) return -1;
     size_t tokenLength = strlen(token);
     pthread_mutex_lock(&__jailbreakd_port_mutex);
+    uint64_t generation = __jailbreakd_port_generation;
     if (!__jailbreakd_initialized || !__jailbreakd_candidate_pending ||
         __jailbreakd_port_ready || !__jailbreakd_checkin_in_progress ||
         pid != __jailbreakd_expected_pid || tokenLength != 32 ||
         strcmp(token, __jailbreakd_checkin_token) != 0 || !MACH_PORT_VALID(gJailbreakdPort)) {
         pthread_mutex_unlock(&__jailbreakd_port_mutex);
         JBLogError("rejecting jailbreakd check-in abort pid=%d generation=%llu",
-                   pid, (unsigned long long)__jailbreakd_port_generation);
+                   pid, (unsigned long long)generation);
         return -1;
     }
     ticket->pid = pid;
-    ticket->generation = __jailbreakd_port_generation;
+    ticket->generation = generation;
     ticket->port = gJailbreakdPort;
     pthread_mutex_unlock(&__jailbreakd_port_mutex);
     return 0;
