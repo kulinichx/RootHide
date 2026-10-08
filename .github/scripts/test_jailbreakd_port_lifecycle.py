@@ -56,6 +56,7 @@ function_signatures = [
 ]
 functions = "\n\n".join(extract_function(source, signature) for signature in function_signatures)
 respawn_cleanup = extract_function(daemon_main_source, "static void terminateRespawnedJailbreakdChild(pid_t pid)")
+respawn_delayed_reaper = extract_function(daemon_main_source, "static void scheduleRespawnedJailbreakdChildReap(pid_t pid, unsigned int retriesRemaining)")
 respawn_attributes = extract_function(daemon_main_source, "static int initializeRespawnedJailbreakdAttributes(")
 bootstrap_port_setup = extract_function(source, "static kern_return_t prepareJailbreakdBootstrapPort(")
 deferred_parent_reaper = extract_function(source, "static void scheduleJailbreakdParentReap(")
@@ -130,7 +131,11 @@ assert "if(unrestrictResult != 0)" in respawn_source
 assert "if (kill(pid, SIGCONT) != 0)" in respawn_source
 assert respawn_source.count("terminateRespawnedJailbreakdChild(pid);") == 3
 assert "waitpid(pid, &status, WNOHANG)" in respawn_cleanup
-assert "waitpid(pid, &status, 0)" in respawn_cleanup
+assert "waitpid(pid, &status, 0)" not in respawn_cleanup
+assert "scheduleRespawnedJailbreakdChildReap(pid, 20)" in respawn_cleanup
+assert "dispatch_after" in respawn_delayed_reaper
+assert "waitpid(pid, &status, WNOHANG)" in respawn_delayed_reaper
+assert "retriesRemaining > 0" in respawn_delayed_reaper
 assert "errno != ESRCH" in respawn_cleanup
 bootstrap_start = source.index("int spawnJailbreakd()")
 bootstrap_end = source.index("	pid_t pid;", bootstrap_start)
@@ -253,6 +258,8 @@ static int fake_waitpid_blocking_calls;
 static char fake_jailbreakd_pid_env[64];
 static pid_t fake_deferred_reap_pid;
 static unsigned fake_deferred_reap_calls;
+static pid_t fake_respawn_reap_pid;
+static unsigned fake_respawn_reap_calls;
 static struct fake_spawn_attributes fake_spawn_attributes;
 static int fake_attr_init_error;
 static int fake_attr_flags_error;
@@ -279,6 +286,12 @@ static void scheduleJailbreakdParentReap(pid_t pid, unsigned int retriesRemainin
     assert(retriesRemaining == 50);
     fake_deferred_reap_pid = pid;
     fake_deferred_reap_calls++;
+}
+static void scheduleRespawnedJailbreakdChildReap(pid_t pid, unsigned int retriesRemaining)
+{
+    assert(retriesRemaining == 20);
+    fake_respawn_reap_pid = pid;
+    fake_respawn_reap_calls++;
 }
 #define getpid fake_getpid
 #define getenv fake_getenv
@@ -497,6 +510,8 @@ main = r'''static void reset_case(void)
     fake_jailbreakd_pid_env[0] = '\0';
     fake_deferred_reap_pid = 0;
     fake_deferred_reap_calls = 0;
+    fake_respawn_reap_pid = 0;
+    fake_respawn_reap_calls = 0;
     memset(&fake_spawn_attributes, 0, sizeof(fake_spawn_attributes));
     fake_attr_init_error = 0;
     fake_attr_flags_error = 0;
@@ -557,8 +572,8 @@ static void test_suspended_respawn_cleanup_never_leaves_a_blocking_wait(void)
     terminateRespawnedJailbreakdChild(fake_tracked_pid);
     assert(fake_kill_calls == 1);
     assert(!fake_child_alive);
-    assert(fake_waitpid_blocking_calls == 1);
-    assert(fake_waitpid_nonblocking_calls == 0);
+    assert(fake_waitpid_blocking_calls == 0);
+    assert(fake_waitpid_nonblocking_calls == 1);
 
     reset_case();
     fake_tracked_pid = 701;
@@ -569,6 +584,7 @@ static void test_suspended_respawn_cleanup_never_leaves_a_blocking_wait(void)
     assert(fake_child_alive);
     assert(fake_waitpid_blocking_calls == 0);
     assert(fake_waitpid_nonblocking_calls == 1);
+    assert(fake_respawn_reap_calls == 1 && fake_respawn_reap_pid == 701);
 }
 
 static void test_previous_pid_environment_is_validated_before_waitpid(void)

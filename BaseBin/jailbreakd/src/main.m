@@ -28,6 +28,25 @@ void setJetsamLimit(uint32_t sizeInMB, bool is_fatal_limit)
 
 void enableXPCLog(void* debugLog, void* errorLog);
 
+static void scheduleRespawnedJailbreakdChildReap(pid_t pid, unsigned int retriesRemaining)
+{
+	if (pid <= 1) return;
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50LL * 1000000LL),
+	               dispatch_get_global_queue(0, 0), ^{
+		int status = 0;
+		pid_t result;
+		do {
+			result = waitpid(pid, &status, WNOHANG);
+		} while (result == -1 && errno == EINTR);
+		if (result == pid || (result == -1 && errno == ECHILD)) return;
+		if (result == 0 && retriesRemaining > 0) {
+			scheduleRespawnedJailbreakdChildReap(pid, retriesRemaining - 1);
+			return;
+		}
+		JBLogError("deferred reap failed for respawned jailbreakd pid=%d errno=%d", pid, errno);
+	});
+}
+
 static void terminateRespawnedJailbreakdChild(pid_t pid)
 {
 	if (pid <= 1) return;
@@ -37,28 +56,20 @@ static void terminateRespawnedJailbreakdChild(pid_t pid)
 		signalResult = kill(pid, SIGKILL);
 	} while (signalResult != 0 && errno == EINTR);
 	if (signalResult != 0 && errno != ESRCH) {
-		int signalError = errno;
-		JBLogError("failed to terminate suspended jailbreakd pid=%d errno=%d", pid, signalError);
-		int status = 0;
-		pid_t result;
-		do {
-			result = waitpid(pid, &status, WNOHANG);
-		} while (result == -1 && errno == EINTR);
-		if (result == 0) {
-			JBLogError("suspended jailbreakd pid=%d remains alive after termination failure", pid);
-		} else if (result == -1 && errno != ECHILD) {
-			JBLogError("nonblocking reap failed for jailbreakd pid=%d errno=%d", pid, errno);
-		}
-		return;
+		JBLogError("failed to terminate suspended jailbreakd pid=%d errno=%d", pid, errno);
 	}
 
+	/* Never block the surviving daemon waiting for SIGKILL to complete. */
 	int status = 0;
 	pid_t result;
 	do {
-		result = waitpid(pid, &status, 0);
+		result = waitpid(pid, &status, WNOHANG);
 	} while (result == -1 && errno == EINTR);
-	if (result == -1 && errno != ECHILD) {
-		JBLogError("reap failed for terminated jailbreakd pid=%d errno=%d", pid, errno);
+	if (result == 0) {
+		JBLogError("suspended jailbreakd pid=%d remains alive after nonblocking cleanup", pid);
+		scheduleRespawnedJailbreakdChildReap(pid, 20);
+	} else if (result == -1 && errno != ECHILD) {
+		JBLogError("nonblocking reap failed for jailbreakd pid=%d errno=%d", pid, errno);
 	}
 }
 
