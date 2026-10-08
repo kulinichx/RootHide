@@ -69,21 +69,36 @@ mach_port_t jbclient_jailbreakd_checkin()
 
 static int jbclient_jailbreakd_report_readiness(bool ready)
 {
+    const char *mode = ready ? "ready" : "abort";
     const char *checkinToken = getenv("JAILBREAKD_CHECKIN_TOKEN");
-    if (!checkinToken) return -1;
+    if (!checkinToken) {
+        roothide_stage_log("jailbreakd.ack.final mode=%s status=missing_token requests=0 result=-1", mode);
+        return -1;
+    }
 
     int result = -1;
+    bool serverReplied = false;
+    unsigned int requests = 0;
     /* READY is idempotent for the same PID, generation and check-in token on
      * launchd. A successful commit can lose its reply; allow the next request
      * to confirm it. This is bounded recovery, not a delivery guarantee. */
     for (unsigned int attempt = 0; attempt < 3; attempt++) {
+        unsigned int number = attempt + 1;
+        roothide_stage_log("jailbreakd.ack.attempt.begin mode=%s attempt=%u", mode, number);
         xpc_object_t xargs = xpc_dictionary_create_empty();
-        if (!xargs) break;
+        if (!xargs) {
+            roothide_stage_log("jailbreakd.ack.attempt.end mode=%s attempt=%u status=allocation_failed", mode, number);
+            break;
+        }
         xpc_dictionary_set_string(xargs, "checkin-token", checkinToken);
         xpc_dictionary_set_bool(xargs, "ready", ready);
+        requests++;
         xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_ROOTHIDE, JBS_ROOTHIDE_JAILBREAKD_READY, xargs);
         xpc_release(xargs);
-        if (!xreply) continue;
+        if (!xreply) {
+            roothide_stage_log("jailbreakd.ack.attempt.end mode=%s attempt=%u status=no_reply", mode, number);
+            continue;
+        }
 
         /* A non-dictionary reply, or a dictionary without a typed result,
          * must not end the retry loop as though launchd rejected readiness. */
@@ -91,13 +106,23 @@ static int jbclient_jailbreakd_report_readiness(bool ready)
             xpc_object_t resultObject = xpc_dictionary_get_value(xreply, "result");
             if (resultObject && xpc_get_type(resultObject) == XPC_TYPE_INT64) {
                 result = (int)xpc_dictionary_get_int64(xreply, "result");
+                serverReplied = true;
                 xpc_release(xreply);
+                roothide_stage_log("jailbreakd.ack.attempt.end mode=%s attempt=%u status=%s result=%d",
+                                  mode, number, result == 0 ? "success" : "server_rejected", result);
                 break; /* Authoritative success or explicit server rejection. */
             }
+            roothide_stage_log("jailbreakd.ack.attempt.end mode=%s attempt=%u status=%s",
+                              mode, number, resultObject ? "wrong_type" : "missing_result");
+        } else {
+            roothide_stage_log("jailbreakd.ack.attempt.end mode=%s attempt=%u status=non_dictionary", mode, number);
         }
         xpc_release(xreply);
     }
     if (ready && result == 0) unsetenv("JAILBREAKD_CHECKIN_TOKEN");
+    roothide_stage_log("jailbreakd.ack.final mode=%s status=%s requests=%u result=%d",
+                      mode, serverReplied ? (result == 0 ? "success" : "server_rejected") : "unconfirmed",
+                      requests, result);
     return result;
 }
 

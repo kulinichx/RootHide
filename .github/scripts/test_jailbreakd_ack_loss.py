@@ -57,6 +57,7 @@ harness = r'''
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 typedef struct MockXpc {
     int type;
@@ -82,6 +83,33 @@ static int abort_deliveries;
 static int mock_server_ready;
 static int reject_server_result;
 static const char token_value[] = "0123456789abcdef0123456789abcdef";
+static char diagnostics[64][256];
+static int diagnostic_count;
+static int log_calls;
+static int suppress_log;
+static int fail_next_allocation;
+
+static void roothide_stage_log(const char *format, ...)
+{
+    ++log_calls;
+    if (suppress_log) return;
+    assert(diagnostic_count < 64);
+    va_list ap;
+    va_start(ap, format);
+    vsnprintf(diagnostics[diagnostic_count], sizeof(diagnostics[0]), format, ap);
+    va_end(ap);
+    /* The check-in token must never appear in diagnostics. */
+    assert(strstr(diagnostics[diagnostic_count], token_value) == NULL);
+    ++diagnostic_count;
+}
+
+static int logged(const char *fragment)
+{
+    for (int i=0; i < diagnostic_count; i++) {
+        if (strstr(diagnostics[i], fragment)) return 1;
+    }
+    return 0;
+}
 
 static char *fake_getenv(const char *name)
 {
@@ -99,6 +127,10 @@ static int fake_unsetenv(const char *name)
 
 static xpc_object_t xpc_dictionary_create_empty(void)
 {
+    if (fail_next_allocation) {
+        fail_next_allocation = 0;
+        return NULL;
+    }
     xpc_object_t o = calloc(1, sizeof(struct MockXpc));
     if (o) o->type = XPC_TYPE_DICTIONARY;
     return o;
@@ -173,12 +205,17 @@ static void reset_case(int requested_mode)
     abort_deliveries = 0;
     mock_server_ready = 0;
     reject_server_result = 0;
+    diagnostic_count = 0;
+    log_calls = 0;
+    suppress_log = 0;
+    fail_next_allocation = 0;
 }
 static void test_normal_reply(void)
 {
     reset_case(MODE_NORMAL);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(mock_server_ready && request_count == 1 && client_token_present == 0);
+    assert(diagnostic_count == 3 && logged("status=success") && logged("requests=1"));
     puts("NORMAL_ACK=PASS requests=1");
 }
 static void test_one_lost_reply(void)
@@ -186,6 +223,7 @@ static void test_one_lost_reply(void)
     reset_case(MODE_DROP_FIRST);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(mock_server_ready && request_count == 2 && client_token_present == 0);
+    assert(diagnostic_count == 5 && logged("status=no_reply") && logged("attempt=2 status=success"));
     puts("FIRST_REPLY_LOST=PASS requests=2");
 }
 static void test_two_lost_replies(void)
@@ -193,6 +231,7 @@ static void test_two_lost_replies(void)
     reset_case(MODE_DROP_TWO);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(mock_server_ready && request_count == 3 && client_token_present == 0);
+    assert(diagnostic_count == 7 && logged("attempt=3 status=success"));
     puts("BOTH_REPLIES_LOST_THIRD_SUCCEEDS=PASS requests=3");
 }
 static void test_all_replies_lost(void)
@@ -203,6 +242,9 @@ static void test_all_replies_lost(void)
     mode=MODE_NORMAL;
     assert(jbclient_jailbreakd_report_readiness(false) != 0);
     assert(mock_server_ready && abort_deliveries == 1);
+    assert(logged("mode=ready status=unconfirmed requests=3 result=-1") &&
+            logged("mode=abort attempt=1 status=server_rejected") &&
+            logged("mode=abort status=server_rejected requests=1 result=-1"));
     puts("ALL_THREE_REPLIES_LOST=KNOWN_RISK requests=3 abort_rejected=1");
 }
 static void test_malformed_then_good(void)
@@ -210,6 +252,7 @@ static void test_malformed_then_good(void)
     reset_case(MODE_MALFORMED_FIRST);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(mock_server_ready && request_count == 2 && client_token_present == 0);
+    assert(logged("attempt=1 status=wrong_type") && logged("attempt=2 status=success"));
     puts("MALFORMED_FIRST_REPLY_RECOVERS=PASS requests=2");
 }
 static void test_all_malformed(void)
@@ -217,6 +260,7 @@ static void test_all_malformed(void)
     reset_case(MODE_MALFORMED_ALL);
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
     assert(request_count == 3 && client_token_present == 1);
+    assert(logged("attempt=3 status=wrong_type") && logged("requests=3 result=-1"));
     puts("ALL_MALFORMED_REPLIES=KNOWN_RISK requests=3");
 }
 static void test_nondictionary_then_good(void)
@@ -224,6 +268,7 @@ static void test_nondictionary_then_good(void)
     reset_case(MODE_NONDICT_FIRST);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(request_count == 2 && client_token_present == 0);
+    assert(logged("attempt=1 status=non_dictionary") && logged("attempt=2 status=success"));
     puts("NON_DICTIONARY_FIRST_REPLY_RECOVERS=PASS requests=2");
 }
 static void test_missing_result_then_good(void)
@@ -231,6 +276,7 @@ static void test_missing_result_then_good(void)
     reset_case(MODE_NO_RESULT_FIRST);
     assert(jbclient_jailbreakd_report_readiness(true) == 0);
     assert(request_count == 2 && client_token_present == 0);
+    assert(logged("attempt=1 status=missing_result") && logged("attempt=2 status=success"));
     puts("MISSING_RESULT_FIRST_REPLY_RECOVERS=PASS requests=2");
 }
 static void test_explicit_server_rejection(void)
@@ -239,6 +285,8 @@ static void test_explicit_server_rejection(void)
     reject_server_result = 1;
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
     assert(!mock_server_ready && request_count == 1 && client_token_present == 1);
+    assert(logged("attempt=1 status=server_rejected") &&
+            logged("mode=ready status=server_rejected requests=1 result=-1") && diagnostic_count == 3);
     puts("EXPLICIT_REJECTION=PASS requests=1");
 }
 static void test_missing_token_no_delivery(void)
@@ -247,6 +295,7 @@ static void test_missing_token_no_delivery(void)
     client_token_present = 0;
     assert(jbclient_jailbreakd_report_readiness(true) != 0);
     assert(request_count == 0 && !mock_server_ready);
+    assert(logged("status=missing_token requests=0") && diagnostic_count == 1);
     puts("MISSING_TOKEN=PASS requests=0");
 }
 static void test_checkin_failed_ack(void)
@@ -254,8 +303,29 @@ static void test_checkin_failed_ack(void)
     reset_case(MODE_NORMAL);
     assert(jbclient_jailbreakd_report_readiness(false) == 0);
     assert(request_count == 1 && abort_deliveries == 1 && client_token_present == 1);
+    assert(logged("mode=abort attempt=1 status=success") && diagnostic_count == 3);
     puts("CHECKIN_ABORT_NORMAL=PASS requests=1");
 }
+static void test_request_allocation_failed(void)
+{
+    reset_case(MODE_NORMAL);
+    fail_next_allocation = 1;
+    assert(jbclient_jailbreakd_report_readiness(true) != 0);
+    assert(request_count == 0 && client_token_present == 1);
+    assert(logged("attempt=1 status=allocation_failed") && logged("requests=0 result=-1"));
+    puts("REQUEST_ALLOCATION_FAILED=PASS requests=0");
+}
+
+static void test_logging_unavailable(void)
+{
+    reset_case(MODE_DROP_FIRST);
+    suppress_log = 1;
+    assert(jbclient_jailbreakd_report_readiness(true) == 0);
+    assert(mock_server_ready && request_count == 2 && client_token_present == 0);
+    assert(log_calls == 5 && diagnostic_count == 0);
+    puts("LOGGING_UNAVAILABLE=PASS requests=2");
+}
+
 int main(void)
 {
     test_normal_reply();
@@ -269,6 +339,8 @@ int main(void)
     test_explicit_server_rejection();
     test_missing_token_no_delivery();
     test_checkin_failed_ack();
+    test_request_allocation_failed();
+    test_logging_unavailable();
     return 0;
 }
 '''
