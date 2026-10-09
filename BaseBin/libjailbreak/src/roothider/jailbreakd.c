@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "../libjailbreak.h"
 #include "jailbreakd.h"
@@ -1206,6 +1207,144 @@ int jbdSystemwideLog(const char* fmt, ...)
 	return result;
 }
 
+/* P0 v5: launchd must not wait indefinitely for a child-patch RPC.
+ * Only pid 1 uses this guard: other jailbreakd clients keep the original
+ * synchronous behavior. A timed-out worker is NOT cancelled; its retained
+ * request and eventual reply are reclaimed when it actually returns.
+ * A timeout opens a fail-closed circuit while work remains outstanding.
+ * Once all workers finish, clear that circuit so transient failures do not
+ * permanently disable launchd spawn patching. */
+#ifndef JBD_LAUNCHD_PATCH_TIMEOUT_SECONDS
+#define JBD_LAUNCHD_PATCH_TIMEOUT_SECONDS 10
+#endif
+#define JBD_LAUNCHD_MAX_PATCH_WORKERS 4
+
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    volatile int refs;  /* worker + caller */
+    bool completed;
+    xpc_object_t request;
+    xpc_object_t reply;
+} jbd_launchd_patch_wait_t;
+
+static pthread_mutex_t gLaunchdPatchGuard = PTHREAD_MUTEX_INITIALIZER;
+static unsigned gLaunchdPatchWorkers = 0;
+static bool gLaunchdPatchCircuitOpen = false;
+
+static void jbdLaunchdPatchWaitRelease(jbd_launchd_patch_wait_t *wait)
+{
+    if (__sync_sub_and_fetch(&wait->refs, 1) == 0) {
+        if (wait->reply) xpc_release(wait->reply);
+        if (wait->request) xpc_release(wait->request);
+        pthread_cond_destroy(&wait->cond);
+        pthread_mutex_destroy(&wait->mutex);
+        free(wait);
+    }
+}
+
+static void *jbdLaunchdPatchWorker(void *arg)
+{
+    jbd_launchd_patch_wait_t *wait = arg;
+    xpc_object_t reply = jailbreakdXpcRequest(wait->request);
+    pthread_mutex_lock(&wait->mutex);
+    wait->reply = reply;
+    wait->completed = true;
+    pthread_cond_signal(&wait->cond);
+    pthread_mutex_unlock(&wait->mutex);
+
+    pthread_mutex_lock(&gLaunchdPatchGuard);
+    --gLaunchdPatchWorkers;
+    if (gLaunchdPatchWorkers == 0) gLaunchdPatchCircuitOpen = false;
+    pthread_mutex_unlock(&gLaunchdPatchGuard);
+    jbdLaunchdPatchWaitRelease(wait);
+    return NULL;
+}
+
+static xpc_object_t jbdLaunchdBoundedSpawnPatchRequest(xpc_object_t request)
+{
+    if (getpid() != 1) return jailbreakdXpcRequest(request);
+
+    pthread_mutex_lock(&gLaunchdPatchGuard);
+    if (gLaunchdPatchCircuitOpen || gLaunchdPatchWorkers >= JBD_LAUNCHD_MAX_PATCH_WORKERS) {
+        pthread_mutex_unlock(&gLaunchdPatchGuard);
+        roothide_stage_log("jbd.launchd_patch.rejected circuit_or_capacity=1");
+        return NULL;
+    }
+    ++gLaunchdPatchWorkers;
+    pthread_mutex_unlock(&gLaunchdPatchGuard);
+
+    jbd_launchd_patch_wait_t *wait = calloc(1, sizeof(*wait));
+    if (!wait) goto admission_failed;
+    if (pthread_mutex_init(&wait->mutex, NULL) != 0) {
+        free(wait);
+        goto admission_failed;
+    }
+    if (pthread_cond_init(&wait->cond, NULL) != 0) {
+        pthread_mutex_destroy(&wait->mutex);
+        free(wait);
+        goto admission_failed;
+    }
+    wait->refs = 2;
+    wait->request = xpc_retain(request);
+    if (!wait->request) {
+        /* Neither reference has escaped yet. */
+        wait->refs = 1;
+        jbdLaunchdPatchWaitRelease(wait);
+        goto admission_failed;
+    }
+
+    pthread_t worker;
+    int threadError = pthread_create(&worker, NULL, jbdLaunchdPatchWorker, wait);
+    if (threadError != 0) {
+        wait->refs = 1;
+        jbdLaunchdPatchWaitRelease(wait);
+        goto admission_failed;
+    }
+    pthread_detach(worker);
+
+    struct timespec deadline;
+    if (clock_gettime(CLOCK_REALTIME, &deadline) != 0) {
+        /* If the clock fails, never fall back to an unbounded wait. */
+        deadline.tv_sec = 0;
+        deadline.tv_nsec = 0;
+    } else {
+        deadline.tv_sec += JBD_LAUNCHD_PATCH_TIMEOUT_SECONDS;
+    }
+
+    pthread_mutex_lock(&wait->mutex);
+    int waitError = 0;
+    while (!wait->completed && waitError == 0) {
+        waitError = pthread_cond_timedwait(&wait->cond, &wait->mutex, &deadline);
+    }
+    bool completed = wait->completed;
+    xpc_object_t reply = NULL;
+    if (completed) {
+        reply = wait->reply;
+        wait->reply = NULL; /* transfer owned XPC reply to the caller */
+    }
+    pthread_mutex_unlock(&wait->mutex);
+
+    if (!completed) {
+        pthread_mutex_lock(&gLaunchdPatchGuard);
+        /* Worker may have finished between wait unlock and this lock. */
+        gLaunchdPatchCircuitOpen = (gLaunchdPatchWorkers != 0);
+        pthread_mutex_unlock(&gLaunchdPatchGuard);
+        roothide_stage_log("jbd.launchd_patch.timeout wait_error=%d timeout_seconds=%d",
+                          waitError, JBD_LAUNCHD_PATCH_TIMEOUT_SECONDS);
+    }
+    jbdLaunchdPatchWaitRelease(wait);
+    return reply;
+
+admission_failed:
+    pthread_mutex_lock(&gLaunchdPatchGuard);
+    --gLaunchdPatchWorkers;
+    if (gLaunchdPatchWorkers == 0) gLaunchdPatchCircuitOpen = false;
+    pthread_mutex_unlock(&gLaunchdPatchGuard);
+    roothide_stage_log("jbd.launchd_patch.worker_start_failed");
+    return NULL;
+}
+
 int jbdSpawnPatchChildEx(int pid, bool resume, bool forceDyldPatch)
 {
 	xpc_object_t message = xpc_dictionary_create_empty();
@@ -1213,11 +1352,17 @@ int jbdSpawnPatchChildEx(int pid, bool resume, bool forceDyldPatch)
 	xpc_dictionary_set_int64(message, "pid", pid);
 	xpc_dictionary_set_bool(message, "resume", resume);
 	xpc_dictionary_set_bool(message, "force-dyld-patch", forceDyldPatch);
-	xpc_object_t reply = jailbreakdXpcRequest(message);
+	xpc_object_t reply = jbdLaunchdBoundedSpawnPatchRequest(message);
 	xpc_release(message);
 	int64_t result = -1;
 	if (reply) {
-		result  = xpc_dictionary_get_int64(reply, "result");
+		xpc_object_t resultValue = xpc_get_type(reply) == XPC_TYPE_DICTIONARY
+			? xpc_dictionary_get_value(reply, "result") : NULL;
+		if (resultValue && xpc_get_type(resultValue) == XPC_TYPE_INT64) {
+			result = xpc_dictionary_get_int64(reply, "result");
+		} else {
+			roothide_stage_log("jbd.launchd_patch.invalid_reply child=%d", pid);
+		}
 		xpc_release(reply);
 	}
 	return result;
