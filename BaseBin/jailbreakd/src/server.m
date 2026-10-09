@@ -4,6 +4,11 @@
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
+#include <time.h>
+#include <stdint.h>
+
+/* Existing RootHide process-identity primitive (libjailbreak/roothider/common.m). */
+extern int proc_get_pidversion(pid_t pid);
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
@@ -55,20 +60,49 @@ static dispatch_queue_t jailbreakd_spawn_patch_queue(void)
     return queue;
 }
 
-static int64_t jailbreakd_patch_spawn_child(pid_t clientPid, pid_t pid, bool resume, bool forceDyldPatch)
+/* CLOCK_MONOTONIC is shared between launchd and jailbreakd; neither wall
+ * clock changes nor the serial patch queue may extend a request's lifetime.
+ * This is a stale-request guard, NOT a cancellation of an in-progress patch. */
+static bool jailbreakd_spawn_patch_request_current(pid_t clientPid, pid_t pid,
+                                                  int64_t expectedPidVersion, int64_t deadlineNs)
 {
+    if (clientPid != 1) return true; /* preserve existing non-launchd contract */
+    if (expectedPidVersion <= 0 || deadlineNs <= 0) return false;
+    struct timespec now = {0};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0 ||
+        (int64_t)now.tv_sec > INT64_MAX / 1000000000LL) return false;
+    int64_t nowNs = (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+    if (nowNs >= deadlineNs) return false;
+    int actualVersion = proc_get_pidversion(pid);
+    return actualVersion > 0 && (int64_t)actualVersion == expectedPidVersion;
+}
+
+static int64_t jailbreakd_patch_spawn_child(pid_t clientPid, pid_t pid, bool resume,
+                                           bool forceDyldPatch, int64_t expectedPidVersion,
+                                           int64_t deadlineNs)
+{
+    if (!jailbreakd_spawn_patch_request_current(clientPid, pid, expectedPidVersion, deadlineNs)) {
+        roothide_stage_log("jailbreakd.patch.stale_before_start child=%d version=%lld", pid, (long long)expectedPidVersion);
+        return -1;
+    }
     pid_t ppid = proc_get_ppid(pid);
     JBLogDebug("spawn patch: client pid=%d, child pid=%d, child's parent pid=%d, child proc=%s",
                clientPid, pid, ppid, proc_get_path(pid, NULL));
     roothide_stage_log("jailbreakd.patch.request client=%d child=%d parent=%d resume=%d force_dyld=%d",
                        clientPid, pid, ppid, resume, forceDyldPatch);
-    if (ppid != clientPid) {
-        JBLogError("spawn patch denied: %d", pid);
+    if (ppid != clientPid ||
+        !jailbreakd_spawn_patch_request_current(clientPid, pid, expectedPidVersion, deadlineNs)) {
+        JBLogError("spawn patch denied or stale: %d", pid);
         return -1;
     }
     if (ppid == 1 && !resume) {
         /* Preserve launchd's existing no-resume workaround. */
-        return proc_patch_csflags(pid);
+        int patchResult = proc_patch_csflags(pid);
+        if (!jailbreakd_spawn_patch_request_current(clientPid, pid, expectedPidVersion, deadlineNs)) {
+            roothide_stage_log("jailbreakd.patch.stale_after_csflags child=%d", pid);
+            return -1;
+        }
+        return patchResult;
     }
 
     roothide_stage_log("jailbreakd.patch.begin child=%d", pid);
@@ -76,6 +110,11 @@ static int64_t jailbreakd_patch_spawn_child(pid_t clientPid, pid_t pid, bool res
     roothide_stage_log("jailbreakd.patch.end child=%d result=%d", pid, patchResult);
     if (patchResult != 0) {
         JBLogError("spawn patch failed: %d", pid);
+        return -1;
+    }
+    /* A long patch must not resume a replaced process or an expired request. */
+    if (!jailbreakd_spawn_patch_request_current(clientPid, pid, expectedPidVersion, deadlineNs)) {
+        roothide_stage_log("jailbreakd.patch.stale_before_resume child=%d version=%lld", pid, (long long)expectedPidVersion);
         return -1;
     }
     if (resume && kill(pid, SIGCONT) != 0) {
@@ -156,6 +195,25 @@ void jailbreakd_received_message(mach_port_t port)
 					}
 					bool resume = xpc_dictionary_get_bool(message, "resume");
 					bool forceDyldPatch = xpc_dictionary_get_bool(message, "force-dyld-patch");
+					int64_t requestedVersion = 0;
+					int64_t requestDeadline = 0;
+					if (clientPid == 1) {
+						xpc_object_t versionValue = xpc_dictionary_get_value(message, "spawn-pidversion");
+						xpc_object_t deadlineValue = xpc_dictionary_get_value(message, "spawn-deadline-ns");
+						if (!versionValue || xpc_get_type(versionValue) != XPC_TYPE_INT64 ||
+						    !deadlineValue || xpc_get_type(deadlineValue) != XPC_TYPE_INT64) {
+							roothide_stage_log("jailbreakd.patch.missing_identity child=%d", pid);
+							xpc_dictionary_set_int64(reply, "result", -1);
+							break;
+						}
+						requestedVersion = xpc_dictionary_get_int64(message, "spawn-pidversion");
+						requestDeadline = xpc_dictionary_get_int64(message, "spawn-deadline-ns");
+						if (!jailbreakd_spawn_patch_request_current(clientPid, pid, requestedVersion, requestDeadline)) {
+							roothide_stage_log("jailbreakd.patch.expired_on_receive child=%d version=%lld", pid, (long long)requestedVersion);
+							xpc_dictionary_set_int64(reply, "result", -1);
+							break;
+						}
+					}
 					dispatch_queue_t patchQueue = jailbreakd_spawn_patch_queue();
 					if (!patchQueue) {
 						xpc_dictionary_set_int64(reply, "result", -1);
@@ -166,7 +224,8 @@ void jailbreakd_received_message(mach_port_t port)
 					xpc_object_t asyncReply = reply;
 					reply = nil;
 					dispatch_async(patchQueue, ^{
-						int64_t result = jailbreakd_patch_spawn_child(clientPid, pid, resume, forceDyldPatch);
+						int64_t result = jailbreakd_patch_spawn_child(clientPid, pid, resume, forceDyldPatch,
+                                                                     requestedVersion, requestDeadline);
 						xpc_dictionary_set_int64(asyncReply, "result", result);
 						jailbreakd_reply_message(msgId, asyncReply);
 					});

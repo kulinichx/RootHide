@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "../libjailbreak.h"
 #include "jailbreakd.h"
@@ -1352,6 +1353,22 @@ int jbdSpawnPatchChildEx(int pid, bool resume, bool forceDyldPatch)
 	xpc_dictionary_set_int64(message, "pid", pid);
 	xpc_dictionary_set_bool(message, "resume", resume);
 	xpc_dictionary_set_bool(message, "force-dyld-patch", forceDyldPatch);
+	if (getpid() == 1) {
+		/* A timed-out request can remain queued in jailbreakd. Tie it to the
+		 * original process instance and a shared monotonic-clock deadline. */
+		int pidVersion = proc_get_pidversion(pid);
+		struct timespec now = {0};
+		if (pidVersion <= 0 || clock_gettime(CLOCK_MONOTONIC, &now) != 0 ||
+		    now.tv_sec < 0 ||
+		    (int64_t)now.tv_sec > INT64_MAX / 1000000000LL - JBD_LAUNCHD_PATCH_TIMEOUT_SECONDS) {
+			roothide_stage_log("jbd.launchd_patch.identity_or_clock_unavailable child=%d version=%d", pid, pidVersion);
+			xpc_release(message);
+			return -1;
+		}
+		int64_t deadlineNs = ((int64_t)now.tv_sec + JBD_LAUNCHD_PATCH_TIMEOUT_SECONDS) * 1000000000LL + now.tv_nsec;
+		xpc_dictionary_set_int64(message, "spawn-pidversion", pidVersion);
+		xpc_dictionary_set_int64(message, "spawn-deadline-ns", deadlineNs);
+	}
 	xpc_object_t reply = jbdLaunchdBoundedSpawnPatchRequest(message);
 	xpc_release(message);
 	int64_t result = -1;

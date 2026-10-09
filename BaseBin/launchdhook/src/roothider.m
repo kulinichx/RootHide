@@ -10,6 +10,8 @@
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
 
+extern int proc_get_pidversion(pid_t pid);
+
 #include "../systemhook/src/common.h"
 #include "../systemhook/src/common/envbuf.h"
 
@@ -279,11 +281,18 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 
 	if (ret == 0 && pid > 0) {
 		if(should_suspend) {
+			/* The original child can exit during the bounded jailbreakd RPC.
+			 * Do not accidentally signal a different process after PID reuse. */
+			int originalPidVersion = proc_get_pidversion(pid);
 			if(jbdSpawnPatchChild(pid, should_resume) != 0) {
-				JBLogError("Failed to patch spawned process (%d) %s", pid, path);
-				//just kill it instead of letting it hang forever so that launchd can respawn it later
-				kill(pid, SIGQUIT); //core dump
-				kill(pid, SIGKILL);
+				int currentPidVersion = proc_get_pidversion(pid);
+				JBLogError("Failed to patch spawned process (%d) %s; pidversion before=%d after=%d",
+				           pid, path, originalPidVersion, currentPidVersion);
+				if (originalPidVersion > 0 && currentPidVersion == originalPidVersion) {
+					/* Best-effort PID-version check; not atomic with kill(). */
+					kill(pid, SIGQUIT); // core dump
+					kill(pid, SIGKILL);
+				}
 				ret = 202;
 			}
 		}
