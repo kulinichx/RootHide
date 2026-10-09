@@ -197,10 +197,14 @@ void roothide_handle_xpc_msg(xpc_object_t xmsg)
 	}
 #endif
 
-	if (isBlacklistedToken(&clientToken))
+	uint64_t routine = xpc_dictionary_get_uint64(xmsg, "routine");
+	uint64_t subsystem = xpc_dictionary_get_uint64(xmsg, "subsystem");
+	/* Only these launchd operations use blacklist-specific message rewriting.
+	 * Leave unrelated jbserver/check-in traffic out of blacklist state locks. */
+	if (((subsystem == 2 && routine == 708) ||
+	     (subsystem == 6 && routine == 301)) &&
+	    isBlacklistedToken(&clientToken))
 	{
-		uint64_t routine = xpc_dictionary_get_uint64(xmsg, "routine");
-		uint64_t subsystem = xpc_dictionary_get_uint64(xmsg, "subsystem");
 		if (subsystem == 2 && routine == 708)
 		{
 			volatile char *bundle = NULL;

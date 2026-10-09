@@ -89,7 +89,12 @@ bool systemwide_domain_allowed(audit_token_t clientToken)
 
 static int systemwide_get_jbroot(char **rootPathOut)
 {
-	*rootPathOut = strdup(jbinfo(rootPath));
+	const char *rootPath = jbinfo(rootPath);
+	if (!rootPath || rootPath[0] != '/') {
+		*rootPathOut = NULL;
+		return -1;
+	}
+	*rootPathOut = strdup(rootPath);
 	if (!*rootPathOut) return -1;
 	return 0;
 }
@@ -214,11 +219,15 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 		return -1;
 	}
 
-	// Get jbroot and boot uuid
-	if (systemwide_get_jbroot(rootPathOut) != 0) return -1;
+	// Get jbroot and boot uuid; release the referenced proc on every failure.
+	if (systemwide_get_jbroot(rootPathOut) != 0) {
+		proc_rele(proc);
+		return -1;
+	}
 	if (systemwide_get_boot_uuid(bootUUIDOut) != 0) {
 		free(*rootPathOut);
 		*rootPathOut = NULL;
+		proc_rele(proc);
 		return -1;
 	}
 
@@ -251,8 +260,14 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 
 	// Generate sandbox extensions for the requesting process
 	*sandboxExtensionsOut = generate_sandbox_extensions(processToken, isPlatformProcess);
-	if(!(*sandboxExtensionsOut)) {
+	if (!*sandboxExtensionsOut) {
 		JBLogError("Failed to generate sandbox extensions for process %d", pid);
+		free(*rootPathOut);
+		free(*bootUUIDOut);
+		*rootPathOut = NULL;
+		*bootUUIDOut = NULL;
+		proc_rele(proc);
+		return -1;
 	}
 
 	bool fullyDebugged = false;

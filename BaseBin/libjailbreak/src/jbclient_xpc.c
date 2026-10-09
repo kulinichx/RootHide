@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
 #include <mach-o/dyld.h>
 #include <dlfcn.h>
 #include <os/alloc_once_private.h>
@@ -189,20 +191,50 @@ int jbclient_trust_file_by_path(const char *path)
 int jbclient_process_checkin(char **rootPathOut, char **bootUUIDOut, char **sandboxExtensionsOut, bool *fullyDebuggedOut, bool *forceCSAdhocOut)
 {
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_SYSTEMWIDE, JBS_SYSTEMWIDE_PROCESS_CHECKIN, NULL);
-	if (xreply) {
-		int64_t result = xpc_dictionary_get_int64(xreply, "result");
-		const char *rootPath = xpc_dictionary_get_string(xreply, "root-path");
-		const char *bootUUID = xpc_dictionary_get_string(xreply, "boot-uuid");
-		const char *sandboxExtensions = xpc_dictionary_get_string(xreply, "sandbox-extensions");
-		if (rootPathOut) *rootPathOut = rootPath ? strdup(rootPath) : NULL;
-		if (bootUUIDOut) *bootUUIDOut = bootUUID ? strdup(bootUUID) : NULL;
-		if (sandboxExtensionsOut) *sandboxExtensionsOut = sandboxExtensions ? strdup(sandboxExtensions) : NULL;
-		if (fullyDebuggedOut) *fullyDebuggedOut = xpc_dictionary_get_bool(xreply, "fully-debugged");
-		if (forceCSAdhocOut) *forceCSAdhocOut = xpc_dictionary_get_bool(xreply, "force-cs-adhoc");
+	if (!xreply) return -1;
+
+	/* An absent XPC integer defaults to zero. Never mistake a malformed
+	 * check-in reply for success and then dereference a NULL extension. */
+	xpc_object_t resultValue = xpc_dictionary_get_value(xreply, "result");
+	if (!resultValue || xpc_get_type(resultValue) != XPC_TYPE_INT64) {
+		xpc_release(xreply);
+		return -1;
+	}
+	int64_t result = xpc_dictionary_get_int64(xreply, "result");
+	if (result != 0) {
 		xpc_release(xreply);
 		return result;
 	}
-	return -1;
+
+	const char *rootPath = xpc_dictionary_get_string(xreply, "root-path");
+	const char *bootUUID = xpc_dictionary_get_string(xreply, "boot-uuid");
+	const char *sandboxExtensions = xpc_dictionary_get_string(xreply, "sandbox-extensions");
+	/* An empty extension string is valid; a missing one is not. */
+	if (!rootPath || rootPath[0] != '/' || !sandboxExtensions) {
+		xpc_release(xreply);
+		return -1;
+	}
+
+	/* Publish all outputs only after every requested allocation succeeds. */
+	char *rootCopy = rootPathOut ? strdup(rootPath) : NULL;
+	char *bootCopy = (bootUUIDOut && bootUUID) ? strdup(bootUUID) : NULL;
+	char *extensionsCopy = sandboxExtensionsOut ? strdup(sandboxExtensions) : NULL;
+	if ((rootPathOut && !rootCopy) || (bootUUIDOut && bootUUID && !bootCopy) ||
+	    (sandboxExtensionsOut && !extensionsCopy)) {
+		free(rootCopy);
+		free(bootCopy);
+		free(extensionsCopy);
+		xpc_release(xreply);
+		return -1;
+	}
+
+	if (rootPathOut) *rootPathOut = rootCopy;
+	if (bootUUIDOut) *bootUUIDOut = bootCopy;
+	if (sandboxExtensionsOut) *sandboxExtensionsOut = extensionsCopy;
+	if (fullyDebuggedOut) *fullyDebuggedOut = xpc_dictionary_get_bool(xreply, "fully-debugged");
+	if (forceCSAdhocOut) *forceCSAdhocOut = xpc_dictionary_get_bool(xreply, "force-cs-adhoc");
+	xpc_release(xreply);
+	return 0;
 }
 
 int jbclient_fork_fix(uint64_t childPid)
