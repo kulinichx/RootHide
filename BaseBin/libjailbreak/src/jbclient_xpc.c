@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <pthread.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <mach-o/dyld.h>
@@ -262,59 +263,75 @@ int jbclient_cs_revalidate(void)
 	return -1;
 }
 
+/* valueOut is optional. Failure leaves it untouched; success publishes an
+ * owned copy only after validation. A caller reusing a populated output slot
+ * must release its previous object before a successful replacement. */
 int jbclient_jbsettings_get(const char *key, xpc_object_t *valueOut)
 {
+	if (!key) return -1;
 	xpc_object_t xargs = xpc_dictionary_create_empty();
+	if (!xargs) return -1;
 	xpc_dictionary_set_string(xargs, "key", key);
 	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_SYSTEMWIDE, JBS_SYSTEMWIDE_JBSETTINGS_GET, xargs);
 	xpc_release(xargs);
-	if (xreply) {
-		int result = xpc_dictionary_get_int64(xreply, "result");
-		xpc_object_t value = xpc_dictionary_get_value(xreply, "value");
-		if (value && valueOut) *valueOut = xpc_copy(value);
-		xpc_release(xreply);
-		return result;
+	if (!xreply) return -1;
+
+	int result = -1;
+	if (xpc_get_type(xreply) == XPC_TYPE_DICTIONARY) {
+		xpc_object_t resultValue = xpc_dictionary_get_value(xreply, "result");
+		if (resultValue && xpc_get_type(resultValue) == XPC_TYPE_INT64) {
+			int64_t wireResult = xpc_dictionary_get_int64(xreply, "result");
+			if (wireResult >= INT_MIN && wireResult <= INT_MAX) {
+				result = (int)wireResult;
+				if (result == 0) {
+					xpc_object_t value = xpc_dictionary_get_value(xreply, "value");
+					if (!value) {
+						result = -1;
+					}
+					else if (valueOut) {
+						xpc_object_t ownedValue = xpc_copy(value);
+						if (ownedValue) *valueOut = ownedValue;
+						else result = -1;
+					}
+				}
+			}
+		}
 	}
-	return -1;
+	xpc_release(xreply);
+	return result;
 }
 
 bool jbclient_jbsettings_get_bool(const char *key)
 {
-	xpc_object_t value;
-	if (jbclient_jbsettings_get(key, &value) == 0) {
-		if (value) {
-			bool valueBool = xpc_bool_get_value(value);
-			xpc_release(value);
-			return valueBool;
-		}
+	xpc_object_t value = NULL;
+	bool result = false;
+	if (jbclient_jbsettings_get(key, &value) == 0 && value) {
+		if (xpc_get_type(value) == XPC_TYPE_BOOL) result = xpc_bool_get_value(value);
+		xpc_release(value);
 	}
-	return false;
+	return result;
 }
 
 uint64_t jbclient_jbsettings_get_uint64(const char *key)
 {
-	xpc_object_t value;
-	if (jbclient_jbsettings_get(key, &value) == 0) {
-		if (value) {
-			uint64_t valueU64 = xpc_uint64_get_value(value);
-			xpc_release(value);
-			return valueU64;
-		}
+	xpc_object_t value = NULL;
+	uint64_t result = 0;
+	if (jbclient_jbsettings_get(key, &value) == 0 && value) {
+		if (xpc_get_type(value) == XPC_TYPE_UINT64) result = xpc_uint64_get_value(value);
+		xpc_release(value);
 	}
-	return 0;
+	return result;
 }
 
 double jbclient_jbsettings_get_double(const char *key)
 {
-	xpc_object_t value;
-	if (jbclient_jbsettings_get(key, &value) == 0) {
-		if (value) {
-			double valueDouble = xpc_double_get_value(value);
-			xpc_release(value);
-			return valueDouble;
-		}
+	xpc_object_t value = NULL;
+	double result = 0;
+	if (jbclient_jbsettings_get(key, &value) == 0 && value) {
+		if (xpc_get_type(value) == XPC_TYPE_DOUBLE) result = xpc_double_get_value(value);
+		xpc_release(value);
 	}
-	return 0;
+	return result;
 }
 
 int jbclient_platform_set_process_debugged(uint64_t pid, bool fullyDebugged)
