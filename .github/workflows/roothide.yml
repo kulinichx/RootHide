@@ -172,6 +172,12 @@ jobs:
       - name: RootHide jbserver malformed XPC regressions
         run: python3 .github/scripts/test_jbserver_runtime.py
 
+      - name: RootHide jbsettings reply validation regressions
+        env:
+          CC: "xcrun clang"
+          SANITIZERS: "address,undefined"
+        run: python3 .github/scripts/test_jbsettings_reply.py
+
       - name: RootHide jailbreakd port lifecycle regressions
         run: python3 .github/scripts/test_jailbreakd_port_lifecycle.py
 
