@@ -94,8 +94,19 @@ jobs:
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          # Keep the pinned roothide/theos version: it may no longer be
+          # reachable from the refs fetched by an ordinary clone.
+          git clone --no-checkout https://github.com/roothide/theos.git "$THEOS"
+          if ! git -C "$THEOS" cat-file -e "$THEOS_COMMIT^{tree}" 2>/dev/null; then
+            echo "Pinned Theos tree missing in clone; fetching the exact SHA: $THEOS_COMMIT"
+            if ! git -C "$THEOS" fetch --no-tags --depth=1 origin "$THEOS_COMMIT"; then
+              echo "::error::Theos commit $THEOS_COMMIT cannot be fetched from roothide/theos; refusing unpinned master fallback."
+              exit 1
+            fi
+          fi
+          git -C "$THEOS" cat-file -e "$THEOS_COMMIT^{tree}"
           git -C "$THEOS" checkout --detach "$THEOS_COMMIT"
+          test "$(git -C "$THEOS" rev-parse HEAD)" = "$THEOS_COMMIT"
           git -C "$THEOS" submodule update --init --recursive
 
           mkdir -p "$THEOS/sdks"
