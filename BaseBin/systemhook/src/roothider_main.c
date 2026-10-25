@@ -172,14 +172,14 @@ void redirect_paths(const char* rootdir)
 
 
 kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[restrict]);
-void string_enumerate_components(const char *string, const char *separator, void (^enumBlock)(const char *pathString, bool *stop));
+bool string_enumerate_components(const char *string, const char *separator, void (^enumBlock)(const char *pathString, bool *stop));
 
-void trust_insert_libraries(char** envc)
+bool trust_insert_libraries(char** envc)
 {
 	const char* DYLD_INSERT_LIBRARIES = envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES");
-	if(!DYLD_INSERT_LIBRARIES) return;
+	if(!DYLD_INSERT_LIBRARIES) return true;
 
-	string_enumerate_components(DYLD_INSERT_LIBRARIES, ":", ^(const char *path, bool *stop) {
+	return string_enumerate_components(DYLD_INSERT_LIBRARIES, ":", ^(const char *path, bool *stop) {
 		if (strcmp(path, HOOK_DYLIB_PATH) != 0) {
 			jbclient_trust_library_recurse(path, NULL);
 		}
@@ -283,19 +283,18 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 	// on some devices dyldhook may fail due to vm_protect(VM_PROT_READ|VM_PROT_WRITE), 2, (os/kern) protection failure in dsc::__DATA_CONST:__const, 
 	// so we need to disable dyld-in-cache here. (or we can use VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)
 	char **envc = envbuf_mutcopy((const char **)envp);
-	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
-		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+	int ret = 0;
+	if (envp && !envc) ret = ENOMEM;
+	if (ret == 0 && envbuf_getenv((const char **)envc, "DYLD_INSERT_LIBRARIES")) {
+		if (!envbuf_setenv(&envc, "DYLD_IN_CACHE", "0")) ret = ENOMEM;
 	}
 
-	if(!jbclient_dyld_patch_enabled())
-	{
-		if (spawnConfig & kSpawnConfigInject) {
-			trust_insert_libraries(envc);
-		}
+	if (ret == 0 && !jbclient_dyld_patch_enabled() && (spawnConfig & kSpawnConfigInject)) {
+		if (!trust_insert_libraries(envc)) ret = ENOMEM;
 	}
 
 	int pid = 0;
-	int ret = __posix_spawn_orig(&pid, path, desc, argv, envc);
+	if (ret == 0) ret = __posix_spawn_orig(&pid, path, desc, argv, envc);
 	if (pidp) *pidp = pid;
 
 	envbuf_free(envc);
@@ -374,12 +373,17 @@ int roothide_systemhook___execve_posthook(const char *path, char *const argv[], 
 	}
 
 	char **envc = envbuf_mutcopy((const char **)envp);
-	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
-		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+	bool envPrepared = (!envp || envc != NULL);
+	if (envPrepared && envbuf_getenv((const char **)envc, "DYLD_INSERT_LIBRARIES")) {
+		envPrepared = envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 	}
 	
-	int ret = __execve_orig(path, argv, envc);
-	int olderr = errno;
+	int ret = -1;
+	int olderr = ENOMEM;
+	if (envPrepared) {
+		ret = __execve_orig(path, argv, envc);
+		olderr = errno;
+	}
 	
 	envbuf_free(envc);
 

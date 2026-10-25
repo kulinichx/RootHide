@@ -1,5 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 int envbuf_len(const char *envp[])
 {
@@ -18,12 +20,17 @@ char **envbuf_mutcopy(const char *envp[])
 	if (envp == NULL) return NULL;
 
 	int len = envbuf_len(envp);
-	char **envcopy = malloc(len * sizeof(char *));
+	char **envcopy = calloc((size_t)len, sizeof(char *));
+	if (!envcopy) return NULL;
 
 	for (int i = 0; i < len-1; i++) {
 		envcopy[i] = strdup(envp[i]);
+		if (!envcopy[i]) {
+			for (int j = 0; j < i; j++) free(envcopy[j]);
+			free(envcopy);
+			return NULL;
+		}
 	}
-	envcopy[len-1] = NULL;
 
 	return envcopy;
 }
@@ -72,47 +79,53 @@ const char *envbuf_getenv(const char *envp[], const char *name)
 	return NULL;
 }
 
-void envbuf_setenv(char **envpp[], const char *name, const char *value)
+bool envbuf_setenv(char **envpp[], const char *name, const char *value)
 {
-	if (envpp) {
-		char **envp = *envpp;
-		if (!envp) {
-			// treat NULL as [NULL]
-			envp = malloc(sizeof(const char *));
-			if (!envp) return;
-			envp[0] = NULL;
-		}
+	if (!envpp || !name || !value) return false;
 
-		char *envToSet = malloc(strlen(name)+strlen(value)+2);
-		if (!envToSet) {
-			if (!*envpp) free(envp);
-			return;
-		}
-		strcpy(envToSet, name);
-		strcat(envToSet, "=");
-		strcat(envToSet, value);
-
-		int existingEnvIndex = envbuf_find((const char **)envp, name);
-		if (existingEnvIndex >= 0) {
-			// if already exists: deallocate old variable, then replace pointer
-			free(envp[existingEnvIndex]);
-			envp[existingEnvIndex] = envToSet;
-		}
-		else {
-			// if doesn't exist yet: increase env buffer size, place at end
-			int prevLen = envbuf_len((const char **)envp);
-			char **newEnvp = realloc(envp, (prevLen+1)*sizeof(const char *));
-			if (!newEnvp) {
-				free(envToSet);
-				if (!*envpp) free(envp);
-				return;
-			}
-			*envpp = newEnvp;
-			envp = newEnvp;
-			envp[prevLen-1] = envToSet;
-			envp[prevLen] = NULL;
-		}
+	char **envp = *envpp;
+	bool newEnv = !envp;
+	if (newEnv) {
+		// Treat a missing environment as an empty, NULL-terminated buffer.
+		envp = malloc(sizeof(char *));
+		if (!envp) return false;
+		envp[0] = NULL;
 	}
+
+	size_t nameLen = strlen(name);
+	size_t valueLen = strlen(value);
+	if (valueLen > SIZE_MAX - 2 || nameLen > SIZE_MAX - valueLen - 2) {
+		if (newEnv) free(envp);
+		return false;
+	}
+	char *envToSet = malloc(nameLen + valueLen + 2);
+	if (!envToSet) {
+		if (newEnv) free(envp);
+		return false;
+	}
+	memcpy(envToSet, name, nameLen);
+	envToSet[nameLen] = '=';
+	memcpy(envToSet + nameLen + 1, value, valueLen + 1);
+
+	int existingEnvIndex = envbuf_find((const char **)envp, name);
+	if (existingEnvIndex >= 0) {
+		// Replace only after the new value has been allocated.
+		free(envp[existingEnvIndex]);
+		envp[existingEnvIndex] = envToSet;
+		return true;
+	}
+
+	int prevLen = envbuf_len((const char **)envp);
+	char **newEnvp = realloc(envp, ((size_t)prevLen + 1) * sizeof(char *));
+	if (!newEnvp) {
+		free(envToSet);
+		if (newEnv) free(envp);
+		return false;
+	}
+	newEnvp[prevLen-1] = envToSet;
+	newEnvp[prevLen] = NULL;
+	*envpp = newEnvp;
+	return true;
 }
 
 void envbuf_unsetenv(char **envpp[], const char *name)

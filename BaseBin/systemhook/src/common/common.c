@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 #include "envbuf.h"
+#include <errno.h>
+#include <stdint.h>
 #include "private.h"
 #include <libjailbreak/jbclient_xpc.h>
 #include <libjailbreak/jbserver_domains.h>
@@ -57,9 +59,11 @@ bool string_has_suffix(const char* str, const char* suffix)
 	return !strcmp(str + str_len - suffix_len, suffix);
 }
 
-void string_enumerate_components(const char *string, const char *separator, void (^enumBlock)(const char *pathString, bool *stop))
+bool string_enumerate_components(const char *string, const char *separator, void (^enumBlock)(const char *pathString, bool *stop))
 {
+	if (!string || !separator || !enumBlock) return false;
 	char *stringCopy = strdup(string);
+	if (!stringCopy) return false;
 	char *savePtr = NULL;
 	char *curString = strtok_r(stringCopy, separator, &savePtr);
 	while (curString != NULL) {
@@ -69,6 +73,7 @@ void string_enumerate_components(const char *string, const char *separator, void
 		curString = strtok_r(NULL, separator, &savePtr);
 	}
 	free(stringCopy);
+	return true;
 }
 
 xpc_object_t jbuserconfig_get_value(const char *key)
@@ -215,11 +220,11 @@ static int spawn_exec_hook_common(const char *path,
 	const char *existingLibraryInserts = envbuf_getenv((const char **)envp, "DYLD_INSERT_LIBRARIES");
 	__block bool systemHookAlreadyInserted = false;
 	if (existingLibraryInserts) {
-		string_enumerate_components(existingLibraryInserts, ":", ^(const char *existingLibraryInsert, bool *stop) {
+		if (!string_enumerate_components(existingLibraryInserts, ":", ^(const char *existingLibraryInsert, bool *stop) {
 			if (!strcmp(existingLibraryInsert, HOOK_DYLIB_PATH)) {
 				systemHookAlreadyInserted = true;
 			}
-		});
+		})) return ENOMEM;
 	}
 
 	int JBEnvAlreadyInsertedCount = (int)systemHookAlreadyInserted;
@@ -297,16 +302,32 @@ static int spawn_exec_hook_common(const char *path,
 		// the state we want to be in is not the state we are in right now
 
 		envc = envbuf_mutcopy((const char **)envp);
+		if (envp && !envc) return ENOMEM;
 
 		if (shouldInsertJBEnv) {
 			if (!systemHookAlreadyInserted) {
-				char newLibraryInsert[strlen(HOOK_DYLIB_PATH) + (existingLibraryInserts ? (strlen(existingLibraryInserts) + 1) : 0) + 1];
+				size_t hookLen = strlen(HOOK_DYLIB_PATH);
+				size_t existingLen = existingLibraryInserts ? strlen(existingLibraryInserts) : 0;
+				if (hookLen > SIZE_MAX - 2 || existingLen > SIZE_MAX - hookLen - 2) {
+					envbuf_free(envc);
+					return ENOMEM;
+				}
+				char *newLibraryInsert = malloc(hookLen + existingLen + 2);
+				if (!newLibraryInsert) {
+					envbuf_free(envc);
+					return ENOMEM;
+				}
 				strcpy(newLibraryInsert, HOOK_DYLIB_PATH);
 				if (existingLibraryInserts) {
 					strcat(newLibraryInsert, ":");
 					strcat(newLibraryInsert, existingLibraryInserts);
 				}
-				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+				bool updated = envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+				free(newLibraryInsert);
+				if (!updated) {
+						envbuf_free(envc);
+						return ENOMEM;
+				}
 			}
 		}
 		else {
@@ -316,10 +337,14 @@ static int spawn_exec_hook_common(const char *path,
 				}
 				else {
 					char *newLibraryInsert = malloc(strlen(existingLibraryInserts)+1);
+					if (!newLibraryInsert) {
+						envbuf_free(envc);
+						return ENOMEM;
+					}
 					newLibraryInsert[0] = '\0';
 
 					__block bool first = true;
-					string_enumerate_components(existingLibraryInserts, ":", ^(const char *existingLibraryInsert, bool *stop) {
+					bool parsed = string_enumerate_components(existingLibraryInserts, ":", ^(const char *existingLibraryInsert, bool *stop) {
 						if (strcmp(existingLibraryInsert, HOOK_DYLIB_PATH) != 0) {
 							if (first) {
 								strcpy(newLibraryInsert, existingLibraryInsert);
@@ -331,14 +356,18 @@ static int spawn_exec_hook_common(const char *path,
 							}
 						}
 					});
-					if (first) {
+					bool updated = parsed;
+					if (updated && first) {
 						envbuf_unsetenv(&envc, "DYLD_INSERT_LIBRARIES");
 					}
-					else {
-						envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+					else if (updated) {
+						updated = envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
 					}
-
 					free(newLibraryInsert);
+					if (!updated) {
+						envbuf_free(envc);
+						return ENOMEM;
+					}
 				}
 			}
 			envbuf_unsetenv(&envc, "_SafeMode");
@@ -425,6 +454,7 @@ int execve_hook_shared(const char *path,
 		return execve_orig(path, argv, envp_patched);
 	});
 
+	if (r == ENOMEM) { errno = ENOMEM; return -1; }
 	return r;
 }
 

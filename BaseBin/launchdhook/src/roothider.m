@@ -4,6 +4,7 @@
 #include <spawn.h>
 #include <substrate.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <sys/sysctl.h>
 #include <sys/utsname.h>
 
@@ -48,35 +49,30 @@ int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void *newp,
 int (*orig_bind)(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int new_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
-    if (addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
-        struct sockaddr_in addr_in = *(struct sockaddr_in*)addr;
-        in_port_t port = ntohs(addr_in.sin_port);
-        if (port == 0) {
-			int ret = -1;
-			for(port=IPPORT_HIFIRSTAUTO; port<=IPPORT_HILASTAUTO; port++)
-			{
-				addr_in.sin_port = htons(port);
-				ret = orig_bind(sockfd, (struct sockaddr*)&addr_in, addrlen);
-				if(ret==0 || errno!=EADDRINUSE) {
-					break;
-				}
-			}
-			return ret;
+    if (!addr) return orig_bind(sockfd, addr, addrlen);
+
+    if (addrlen >= sizeof(struct sockaddr_in) && addr->sa_family == AF_INET) {
+        struct sockaddr_in addr_in = *(const struct sockaddr_in *)addr;
+        if (addr_in.sin_port == 0) {
+            // Use a wide counter so UINT16_MAX does not wrap to zero.
+            for (uint32_t port = IPPORT_HIFIRSTAUTO; port <= IPPORT_HILASTAUTO; ++port) {
+                addr_in.sin_port = htons((in_port_t)port);
+                int ret = orig_bind(sockfd, (const struct sockaddr *)&addr_in, addrlen);
+                if (ret == 0 || errno != EADDRINUSE) return ret;
+            }
+            errno = EADDRINUSE;
+            return -1;
         }
-    } else if (addr->sa_family == AF_INET6 && addrlen >= sizeof(struct sockaddr_in6)) {
-        struct sockaddr_in6 addr_in6 = *(struct sockaddr_in6*)addr;
-        in_port_t port = ntohs(addr_in6.sin6_port);
-        if (port == 0) {
-			int ret = -1;
-			for(port=IPPORT_HIFIRSTAUTO; port<=IPPORT_HILASTAUTO; port++)
-			{
-				addr_in6.sin6_port = htons(port);
-				ret = orig_bind(sockfd, (struct sockaddr*)&addr_in6, addrlen);
-				if(ret==0 || errno!=EADDRINUSE) {
-					break;
-				}
-			}
-			return ret;
+    } else if (addrlen >= sizeof(struct sockaddr_in6) && addr->sa_family == AF_INET6) {
+        struct sockaddr_in6 addr_in6 = *(const struct sockaddr_in6 *)addr;
+        if (addr_in6.sin6_port == 0) {
+            for (uint32_t port = IPPORT_HIFIRSTAUTO; port <= IPPORT_HILASTAUTO; ++port) {
+                addr_in6.sin6_port = htons((in_port_t)port);
+                int ret = orig_bind(sockfd, (const struct sockaddr *)&addr_in6, addrlen);
+                if (ret == 0 || errno != EADDRINUSE) return ret;
+            }
+            errno = EADDRINUSE;
+            return -1;
         }
     }
     return orig_bind(sockfd, addr, addrlen);
@@ -255,22 +251,29 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 	// on some devices dyldhook may fail due to vm_protect(VM_PROT_READ|VM_PROT_WRITE), 2, (os/kern) protection failure in dsc::__DATA_CONST:__const, 
 	// so we need to disable dyld-in-cache here. (or we can use VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)
 	char **envc = envbuf_mutcopy((const char **)envp);
-	if(envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
-		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+	bool envPrepared = (!envp || envc != NULL);
+	if (envPrepared && envbuf_getenv((const char **)envc, "DYLD_INSERT_LIBRARIES")) {
+		envPrepared = envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 	}
 
 #ifdef __arm64e__
-	if (!__builtin_available(iOS 16.0, *))
+	if (envPrepared && !__builtin_available(iOS 16.0, *))
 	{
 		if(!dyld_patch_enabled() && process_force_dyld_patch(path, argv)) {
-			envbuf_setenv(&envc, "SPINLOCK_FIX_DISABLED", "1");
+			envPrepared = envbuf_setenv(&envc, "SPINLOCK_FIX_DISABLED", "1");
 		}
 	}
 #endif
+	if (!envPrepared) {
+		// Never spawn a process with a partially constructed injection environment.
+		envbuf_free(envc);
+		posix_spawnattr_setflags(attrp, flags);
+		return ENOMEM;
+	}
 
 	int pid = 0;
 	int ret = __posix_spawn_orig_wrapper(&pid, path, desc, argv, envc);
-	if(pidp) *pidp = pid;
+	if(ret == 0 && pidp) *pidp = pid;
 
 	envbuf_free(envc);
 	
@@ -307,7 +310,7 @@ int roothide_launchd___posix_spawn__spinlock_fix_only(pid_t *restrict pidp, cons
 
 	int pid = 0;
 	int ret = __posix_spawn_orig_wrapper(&pid, path, desc, argv, envp);
-	if(pidp) *pidp = pid;
+	if(ret == 0 && pidp) *pidp = pid;
 	
 	posix_spawnattr_setflags(attrp, flags); // maybe caller will use it again?
 
@@ -416,6 +419,7 @@ int roothide_launchd___posix_spawn_prehook(pid_t *restrict pidp, const char *res
 		else
 		{
 			char **envc = envbuf_mutcopy((const char **)envp);
+			if (envp && !envc) return ENOMEM;
 
 			//choicy may set these 
 			envbuf_unsetenv(&envc, "_SafeMode");
@@ -430,6 +434,10 @@ int roothide_launchd___posix_spawn_prehook(pid_t *restrict pidp, const char *res
 			/* and posix_spawn->kernel->amfid->launchd may cause xpc dead loop so we can't use lock-spawn-unlock here */
 	
 			volatile pid_t* blacklistedPidp = allocBlacklistProcessId();
+			if (!blacklistedPidp) {
+				envbuf_free(envc);
+				return ENOMEM;
+			}
 	
 			if(roothideBlacklisted || !dyld_patch_enabled() || !iOS15Arm64e) {
 				ret = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, envc);
@@ -437,8 +445,10 @@ int roothide_launchd___posix_spawn_prehook(pid_t *restrict pidp, const char *res
 				ret = roothide_launchd___posix_spawn__spinlock_fix_only(blacklistedPidp, path, desc, argv, envc);
 			}
 	
-			pid_t pid = *blacklistedPidp;
-			if(pidp) *pidp = *blacklistedPidp;
+			// Failed spawn may leave the PID output unwritten. Never cache it.
+			pid_t pid = (ret == 0) ? *blacklistedPidp : 0;
+			if (ret == 0 && pidp) *pidp = pid;
+			if (ret != 0) *blacklistedPidp = 0;
 
 			commitBlacklistProcessId(blacklistedPidp); // will release blacklistedPidp
 			blacklistedPidp = NULL;
