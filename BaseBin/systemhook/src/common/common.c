@@ -1,4 +1,5 @@
 #include "common.h"
+#include "rc9_jetsam_limit.h"
 #include "../roothider.h"
 #include <xpc/xpc.h>
 #include <xpc_private.h>
@@ -279,15 +280,15 @@ static int spawn_exec_hook_common(const char *path,
 	if (attrStruct) {
 		// If systemhook is being injected and jetsam limits are set, increase them by a factor of jetsamMultiplier
 		if (shouldInsertJBEnv) {
-			if (jetsamMultiplier == 0 || isnan(jetsamMultiplier)) jetsamMultiplier = 3; // default value (3x)
+			if (jetsamMultiplier == 0 || !isfinite(jetsamMultiplier)) jetsamMultiplier = 3; // default value (3x)
 			if (jetsamMultiplier > 1) {
 				int memlimit_active = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE);
 				if (memlimit_active != -1) {
-					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = memlimit_active * jetsamMultiplier;
+					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = rc9_jetsam_scaled_limit(memlimit_active, jetsamMultiplier);
 				}
 				int memlimit_inactive = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE);
 				if (memlimit_inactive != -1) {
-					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = memlimit_inactive * jetsamMultiplier;
+					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = rc9_jetsam_scaled_limit(memlimit_inactive, jetsamMultiplier);
 				}
 			}
 		}
