@@ -136,10 +136,12 @@ bool isBlacklistedPath(const char* path)
 {
     if(!path) return false;
 
-    if(!injectPlistPath)
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
         injectPlistPath = strdup(JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.plist"));
-    if(!injectSystemPlistPath)
         injectSystemPlistPath = strdup(JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.system.plist"));
+    });
+    if (!injectPlistPath) return isBlacklistedPath_orig(path);
 
     if(access(injectPlistPath, F_OK) == 0) {
         if(!strcmp(path, "/sbin/launchd")) return false;
