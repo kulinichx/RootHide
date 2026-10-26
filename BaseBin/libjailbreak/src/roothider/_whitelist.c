@@ -22,7 +22,7 @@ bool zqbb_isWhiteListForSystem(const char *path, const char *injectSystemPath)
     __block bool found = false;
 
     xpc_dictionary_apply(xplist, ^bool(const char *key, xpc_object_t value) {
-        if (xpc_get_type(value) == XPC_TYPE_BOOL &&
+        if (*key && xpc_get_type(value) == XPC_TYPE_BOOL &&
             xpc_bool_get_value(value) &&
             strstr(path, key)) {
             found = true;
