@@ -58,7 +58,7 @@ xpc_object_t rc_inject_policy_cache_copy_dictionary(RCInjectPolicyCache *cache,
     os_unfair_lock_lock(&cache->lock);
 
     struct stat pathStat = {};
-    if (stat(path, &pathStat) != 0) {
+    if (stat(path, &pathStat) != 0 || !S_ISREG(pathStat.st_mode)) {
         cache_clear_locked(cache);
         os_unfair_lock_unlock(&cache->lock);
         return NULL;
@@ -90,7 +90,9 @@ xpc_object_t rc_inject_policy_cache_copy_dictionary(RCInjectPolicyCache *cache,
     // fstat() the opened descriptor so the metadata we cache belongs to the
     // exact file object that is parsed even if the path is atomically replaced.
     struct stat fileStat = {};
-    if (fstat(fd, &fileStat) != 0 || fileStat.st_size <= 0) {
+    if (fstat(fd, &fileStat) != 0 ||
+        !S_ISREG(fileStat.st_mode) ||
+        fileStat.st_size <= 0) {
         close(fd);
         if (fileStat.st_size <= 0 && fileStat.st_ino != 0) {
             cache_replace_locked(cache, &fileStat, NULL);
