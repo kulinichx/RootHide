@@ -888,13 +888,13 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (NSArray *)jetsamOptionTitles
 {
     return @[
-        @"1x",
-        @"1.5x",
-        @"2x",
-        @"2.5x",
-        [NSString stringWithFormat:@"3x (%@)", DOLocalizedString(@"Recommended")],
-        @"3.5x",
-        @"4x",
+        DOLocalizedString(@"Jetsam_Disabled"),
+        @"+15 MB",
+        @"+20 MB",
+        @"+25 MB",
+        [NSString stringWithFormat:@"+30 MB (%@)", DOLocalizedString(@"Recommended")],
+        @"+35 MB",
+        @"+40 MB",
     ];
 }
 

@@ -43,7 +43,7 @@
 "Settings_Verbose_Logs" = "詳細日誌";
 "Settings_Apps_JIT" = "允許應用程式使用 JIT";
 "Settings_Allow_Old_arm64e_ABI_Libraries" = "允許舊版 arm64e 函式庫";
-"Settings_Jetsam_Multiplier" = "Jetsam 倍率";
+"Settings_Jetsam_Multiplier" = "Jetsam Additional Memory";
 
 // Settings Buttons
 "Button_Remove_Jailbreak" = "移除越獄";
@@ -61,7 +61,8 @@
 "Section_Customization" = "自訂";
 "Section_Exploits" = "漏洞利用";
 "Section_Boot_Logo" = "開機 Logo";
-"Jetsam_Description" = "Jetsam 是一項系統功能，會自動終止記憶體用量超過指定限制的程序。安裝大量 Tweak 時，程序可能會在啟動時就超過此限制，導致反覆崩潰。在此可選擇倍率，所有設有記憶體限制的程序，其限制都會乘上這個倍率。當程序反覆崩潰，或安裝大量 Tweak 後出現異常的系統行為時，可提高此設定。為避免對整體系統的記憶體使用造成負面影響，建議選擇能讓系統穩定運作的最低倍率。";
+"Jetsam_Description" = "Adds the selected MB amount to each injected process’s configured allowance (10 MB by default; SpringBoard 1024 MB, xxtouch 48 MB, thermalmonitord 16 MB). Disabled leaves limits unchanged. Unlimited limits remain unlimited. Process allowances are stored in cn.zqbb.jetsam.addend.plist.";
+"Jetsam_Disabled" = "Disabled";
 "Enabled" = "啟用";
 "Custom_Boot_Logo" = "自訂開機 Logo";
 "Select_Image" = "選擇圖片";
