@@ -1,5 +1,6 @@
 #include "_zqbb.h"
 #include "RCInjectPolicyCache.h"
+#include <limits.h>
 
 static RCInjectPolicyCache injectPolicyCache = RC_INJECT_POLICY_CACHE_INIT;
 static RCInjectPolicyCache systemInjectPolicyCache = RC_INJECT_POLICY_CACHE_INIT;
@@ -53,4 +54,33 @@ bool zqbb_isWhiteList(const char *path)
 
     xpc_release(xplist);
     return found;
+}
+
+// Match ZQBB's per-path Jetsam addend plist and its 10 MB fallback.
+// Keep RC9's lock-protected metadata cache and owned-XPC-reference discipline.
+int zqbb_getJetsamAddend(const char *path)
+{
+    if (!path) return 10;
+
+    static RCInjectPolicyCache jetsamAddendPolicyCache = RC_INJECT_POLICY_CACHE_INIT;
+    const char *configPath =
+        JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.jetsam.addend.plist");
+    xpc_object_t plist =
+        rc_inject_policy_cache_copy_dictionary(&jetsamAddendPolicyCache, configPath);
+    if (!plist) return 10;
+
+    __block int result = 10;
+    xpc_dictionary_apply(plist, ^bool(const char *key, xpc_object_t value) {
+        if (*key && xpc_get_type(value) == XPC_TYPE_INT64) {
+            int64_t amount = xpc_int64_get_value(value);
+            if (amount > 0 && amount <= INT_MAX && strstr(path, key)) {
+                result = (int)amount;
+                return false;
+            }
+        }
+        return true;
+    });
+
+    xpc_release(plist);
+    return result;
 }

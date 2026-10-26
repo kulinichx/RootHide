@@ -278,17 +278,18 @@ static int spawn_exec_hook_common(const char *path,
 
 	uint8_t *attrStruct = (uint8_t *)attr;
 	if (attrStruct) {
-		// If systemhook is being injected and jetsam limits are set, increase them by a factor of jetsamMultiplier
+		// If systemhook is being injected and jetsam limits are set, increase them with the ZQBB per-process addend
 		if (shouldInsertJBEnv) {
 			if (jetsamMultiplier == 0 || !isfinite(jetsamMultiplier)) jetsamMultiplier = 3; // default value (3x)
 			if (jetsamMultiplier > 1) {
+				int jetsamAddend = rc9_zqbb_jetsam_addend(zqbb_getJetsamAddend(path), jetsamMultiplier);
 				int memlimit_active = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE);
 				if (memlimit_active != -1) {
-					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = rc9_jetsam_scaled_limit(memlimit_active, jetsamMultiplier);
+					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = rc9_zqbb_jetsam_limit(memlimit_active, jetsamAddend);
 				}
 				int memlimit_inactive = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE);
 				if (memlimit_inactive != -1) {
-					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = rc9_jetsam_scaled_limit(memlimit_inactive, jetsamMultiplier);
+					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = rc9_zqbb_jetsam_limit(memlimit_inactive, jetsamAddend);
 				}
 			}
 		}
