@@ -17,26 +17,37 @@ int hook_encode_hook(struct hookd_encoded_hook *encodedHook, struct hookd_hook *
 {
 	encodedHook->address = hook->address;
 	encodedHook->dataSize = hook->dataSize;
-	memcpy(&encodedHook->data[0], hook->data, hook->dataSize);
+	if (hook->dataSize != 0) {
+		memcpy(&encodedHook->data[0], hook->data, hook->dataSize);
+	}
 	return 0;
 }
 
 int hookd_encode_msg(struct hookd_mach_msg *msg, int clientPid, task_port_t taskPort, struct hookd_hook *hooks, int hooksCount, struct hookd_encoded_fixup *fixups, int fixupsCount)
 {
-	if (!msg) return -1;
+	if (!msg || hooksCount < 0 || fixupsCount < 0 ||
+	    (hooksCount > 0 && !hooks) || (fixupsCount > 0 && !fixups)) return -1;
 
 	size_t msgSize = sizeof(struct hookd_mach_msg);
+	if (msgSize > HOOKD_MSG_MAX_SIZE) return -1;
 
 	size_t hooksSize = 0;
 	for (int i = 0; i < hooksCount; i++) {
-		hooksSize += hookd_sizeof_encoded_hook(&hooks[i]);
+		// Check the remaining message capacity before each size addition.
+		size_t available = HOOKD_MSG_MAX_SIZE - msgSize;
+		if (available < sizeof(struct hookd_encoded_hook)) return -1;
+		available -= sizeof(struct hookd_encoded_hook);
+		if (hooks[i].dataSize > available ||
+		    (hooks[i].dataSize != 0 && !hooks[i].data)) return -1;
+		size_t hookSize = sizeof(struct hookd_encoded_hook) + hooks[i].dataSize;
+		msgSize += hookSize;
+		hooksSize += hookSize;
 	}
-	msgSize += hooksSize;
 
-	size_t fixupsSize = sizeof(struct hookd_encoded_fixup) * fixupsCount;
+	if ((size_t)fixupsCount >
+	    (HOOKD_MSG_MAX_SIZE - msgSize) / sizeof(struct hookd_encoded_fixup)) return -1;
+	size_t fixupsSize = sizeof(struct hookd_encoded_fixup) * (size_t)fixupsCount;
 	msgSize += fixupsSize;
-
-	if (msgSize > HOOKD_MSG_MAX_SIZE) return -1;
 
 	msg->hdr.msgh_size = msgSize;
 
@@ -53,15 +64,28 @@ int hookd_encode_msg(struct hookd_mach_msg *msg, int clientPid, task_port_t task
 		off += hookSize;
 	}
 
-	memcpy(&msg->data[msg->fixupsStartOff], fixups, fixupsCount * sizeof(struct hookd_encoded_fixup));
+	if (fixupsSize != 0) {
+		memcpy(&msg->data[msg->fixupsStartOff], fixups, fixupsSize);
+	}
 
 	return 0;
 }
 
 int hookd_decode_reply(struct hookd_mach_msg_reply *reply, int *hookResultsOut, int *fixupResultsOut)
 {
-	if (reply->hdr.msgh_size < sizeof(struct hookd_mach_msg_reply)) return -1;
-	if (reply->hdr.msgh_size != (sizeof(struct hookd_mach_msg_reply) + reply->hookResultsCount * sizeof(int64_t) + reply->fixupResultsCount * sizeof(int64_t))) return -1;
+	if (!reply) return -1;
+
+	// Check the available payload before using potentially untrusted reply counts.
+	size_t msgSize = reply->hdr.msgh_size;
+	size_t headerSize = sizeof(struct hookd_mach_msg_reply);
+	if (msgSize < headerSize || msgSize > HOOKD_MSG_MAX_SIZE) return -1;
+	size_t resultBytes = msgSize - headerSize;
+	if (resultBytes % sizeof(int64_t) != 0) return -1;
+	size_t totalCount = resultBytes / sizeof(int64_t);
+	if (reply->hookResultsCount > totalCount ||
+	    reply->fixupResultsCount != totalCount - reply->hookResultsCount) return -1;
+	if ((reply->hookResultsCount && !hookResultsOut) ||
+	    (reply->fixupResultsCount && !fixupResultsOut)) return -1;
 
 	int64_t *hookResults  = (int64_t *)&reply->data[0];
 	int64_t *fixupResults = (int64_t *)&reply->data[reply->hookResultsCount * sizeof(int64_t)];
@@ -79,7 +103,8 @@ int hookd_decode_reply(struct hookd_mach_msg_reply *reply, int *hookResultsOut, 
 
 int hookd_send_requests(task_port_t taskPort, struct hookd_hook *hooks, int hooksCount, int *hookResultsOut, struct hookd_encoded_fixup *fixups, int fixupsCount, int *fixupResultsOut)
 {
-	if (!hookd_send_msg) return -1;
+	if (!hookd_send_msg || hooksCount < 0 || fixupsCount < 0 ||
+	    (hooksCount && !hookResultsOut) || (fixupsCount && !fixupResultsOut)) return -1;
 
 	int r = 0;
 
@@ -96,6 +121,9 @@ int hookd_send_requests(task_port_t taskPort, struct hookd_hook *hooks, int hook
 	r = hookd_send_msg(msg, reply);
 	if (r != 0) return r;
 
+	// The decoder does not know the size of the caller-owned result arrays.
+	if (reply->hookResultsCount != (uint64_t)hooksCount ||
+	    reply->fixupResultsCount != (uint64_t)fixupsCount) return -44;
 	if (hookd_decode_reply(reply, hookResultsOut, fixupResultsOut) != 0) return -44;
 
 	return 0;

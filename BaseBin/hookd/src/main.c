@@ -57,15 +57,17 @@ int apply_hook(mach_port_t clientTaskPort, mach_port_t taskPortInClient, vm_addr
 		// printf("Failed to write data at %#lx in task %d (%d)\n", (vm_offset_t)data, taskPort, kr); fflush(stdout);
 	}
 
-	kr = vm_protect(taskPort, vmaddr, size, false, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS;
-	if (kr != KERN_SUCCESS) {
-		// printf("Failed to make %lx->%#lx in task %d executable (%d)\n", vmaddr, vmaddr+size, taskPort, kr); fflush(stdout);
+	// Preserve the vm_write result: restoring page protections must not erase
+	// a failed write, and a protection error must retain its real Mach code.
+	kern_return_t restoreKr = vm_protect(taskPort, vmaddr, size, false, VM_PROT_READ | VM_PROT_EXECUTE);
+	if (restoreKr != KERN_SUCCESS) {
+		// printf("Failed to make %lx->%#lx in task %d executable (%d)\n", vmaddr, vmaddr+size, taskPort, restoreKr); fflush(stdout);
 		mach_port_mod_refs(mach_task_self(), taskPort, MACH_PORT_RIGHT_SEND, -1);
-		return kr;
+		return restoreKr;
 	}
 
 	mach_port_mod_refs(mach_task_self(), taskPort, MACH_PORT_RIGHT_SEND, -1);
-	return KERN_SUCCESS;
+	return kr;
 }
 
 int apply_fixup(mach_port_t clientTaskPort, mach_port_t taskPortInClient, vm_address_t address, vm_size_t size, bool set_maximum, vm_prot_t prot)
@@ -86,6 +88,7 @@ void server_loop(mach_port_t port)
 	kern_return_t kr;
 	mach_msg_size_t buffer_size = 4096 + MAX_TRAILER_SIZE;
 	void *buffer = malloc(buffer_size);
+	if (!buffer) return;
 
 	while (true) {
 		struct hookd_mach_msg *msg = (struct hookd_mach_msg *)buffer;
@@ -146,14 +149,21 @@ void server_loop(mach_port_t port)
 		uint32_t hookCount = 0;
 		if (hooksSize > 0) {
 			for (uint32_t idx = 0; idx < hooksSize;) {
+				size_t remainingBytes = hooksSize - idx;
+				if (remainingBytes < sizeof(struct hookd_encoded_hook)) break;
 				struct hookd_encoded_hook *hook = (struct hookd_encoded_hook *)&hooksStart[idx];
-				uint32_t remainingBytes = hooksSize - idx;
-				uint32_t hookSize = sizeof(*hook) + hook->dataSize;
-				if (hookSize > remainingBytes) break;
+				// Validate before adding: a 64-bit dataSize can wrap hookSize to zero.
+				if (hook->dataSize > remainingBytes - sizeof(*hook)) break;
+				size_t hookSize = sizeof(*hook) + (size_t)hook->dataSize;
 
+				int64_t *expanded = realloc(hookResults, sizeof(int64_t) * (hookCount + 1));
+				if (!expanded) {
+					free(hookResults);
+					goto deny;
+				}
+				hookResults = expanded;
+				hookResults[hookCount] = apply_hook(clientTaskPort, msg->taskPortInClient, hook->address, hook->data, hook->dataSize);
 				hookCount++;
-				hookResults = realloc(hookResults, sizeof(int64_t) * hookCount);
-				hookResults[hookCount-1] = apply_hook(clientTaskPort, msg->taskPortInClient, hook->address, hook->data, hook->dataSize);
 				// printf("Hook %d (address=%#llx, data=%p, dataSize=%zu) => %lld\n", hookCount-1, hook->address, hook->data, hook->dataSize, hookResults[hookCount-1]);
 				idx += hookSize;
 			}
@@ -165,6 +175,10 @@ void server_loop(mach_port_t port)
 		if ((fixupsSize > 0) && ((fixupsSize % sizeof(struct hookd_encoded_fixup)) == 0)) {
 			fixupCount = fixupsSize / sizeof(struct hookd_encoded_fixup);
 			fixupResults = malloc(fixupCount * sizeof(int64_t));
+			if (!fixupResults) {
+				free(hookResults);
+				goto deny;
+			}
 
 			for (uint32_t idx = 0; idx < fixupCount; idx++) {
 				struct hookd_encoded_fixup *fixup = (struct hookd_encoded_fixup *)&fixupsStart[idx * sizeof(struct hookd_encoded_fixup)];
@@ -178,6 +192,11 @@ void server_loop(mach_port_t port)
 
 		size_t replySize = sizeof(struct hookd_mach_msg_reply) + hookResultsSize + fixupResultsSize;
 		struct hookd_mach_msg_reply *reply = malloc(replySize);
+		if (!reply) {
+			free(hookResults);
+			free(fixupResults);
+			goto deny;
+		}
 		reply->hdr.msgh_size = replySize;
 		
 		reply->hookResultsCount  = hookCount;
@@ -203,6 +222,7 @@ void server_loop(mach_port_t port)
 			msg->hdr.msgh_remote_port = 0;
 			msg->hdr.msgh_bits = msg->hdr.msgh_bits & ~MACH_MSGH_BITS_REMOTE_MASK;
 		}
+		free(reply);
 
 deny:
 		if (MACH_PORT_VALID(clientTaskPort)) {
@@ -233,10 +253,19 @@ int main(int argc, char **argv)
 		// printf("hookd failed to lookup registered ports\n"); fflush(stdout);
 		return -1;
 	}
+	if (!registeredPorts || registeredPortsCount < 3) {
+		if (registeredPorts) {
+			vm_deallocate(mach_task_self(), (vm_address_t)registeredPorts,
+			              sizeof(mach_port_t) * registeredPortsCount);
+		}
+		return -1;
+	}
 
 	mach_port_t checkinPort = registeredPorts[2];
 	if (checkinPort == MACH_PORT_NULL) {
 		// printf("checkinPort is NULL, not launched from launchd\n"); fflush(stdout);
+		vm_deallocate(mach_task_self(), (vm_address_t)registeredPorts,
+		              sizeof(mach_port_t) * registeredPortsCount);
 		return -1;
 	}
 
@@ -251,6 +280,8 @@ int main(int argc, char **argv)
 	kr = mach_msg(&hdr, MACH_SEND_MSG, hdr.msgh_size, 0, 0, 0, 0);
 	if (kr != KERN_SUCCESS) {
 		// printf("hookd failed to send checkin to parent\n"); fflush(stdout);
+		vm_deallocate(mach_task_self(), (vm_address_t)registeredPorts,
+		              sizeof(mach_port_t) * registeredPortsCount);
 		return kr;
 	}
 
