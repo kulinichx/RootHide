@@ -202,6 +202,25 @@ static void initializeRootHideWhitelistDefaults(void)
         }
     }
 
+    // Match ZQBB per-process Jetsam defaults without replacing user settings.
+    // This file is separate from the inject.plist whitelist mode switch.
+    NSString *jetsamAddendPath =
+        [rootHidePath stringByAppendingPathComponent:@"cn.zqbb.jetsam.addend.plist"];
+
+    if (![fileManager fileExistsAtPath:jetsamAddendPath]) {
+        NSDictionary *defaultJetsamAddends = @{
+            @"/SpringBoard" : @1024,
+            @"/xxtouch" : @48,
+            @"/thermalmonitord" : @16,
+        };
+
+        if ([defaultJetsamAddends writeToFile:jetsamAddendPath atomically:YES]) {
+            [fileManager setAttributes:fileAttributes
+                          ofItemAtPath:jetsamAddendPath
+                                 error:nil];
+        }
+    }
+
     // RC9 whitelist migration: existing installs keep their old
     // cn.zqbb.inject.system.plist, so newly required system entries are merged
     // once. Keys the user already has (including explicit NO) are never changed,
