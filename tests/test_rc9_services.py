@@ -284,7 +284,7 @@ def native_tests():
     # Foundation imports real XPC/Mach declarations. Namespace only the fixture
     # and extracted function tokens after those imports, not the SDK headers.
     xpc_body = programs['xpc'][len(NATIVE_PREFIX):]
-    xpc_body = re.sub(r'\b(?:xpc_[A-Za-z_0-9]+|XPC_TYPE_[A-Z_]+|mach_port_t|audit_token_t|audit_token_to_[a-z]+)\b',
+    xpc_body = re.sub(r'\b(?:xpc_[A-Za-z_0-9]+|XPC_TYPE_[A-Z_0-9]+|mach_port_t|audit_token_t|audit_token_to_[a-z]+)\b',
                       lambda match: 'test_' + match.group(0), xpc_body)
     programs['xpc'] = NATIVE_PREFIX + xpc_body
     with tempfile.TemporaryDirectory(prefix='rc9-services-') as temp:

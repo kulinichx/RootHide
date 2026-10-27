@@ -4,6 +4,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
+#include <fcntl.h>
 #include "kernel.h"
 #include "info.h"
 #include "primitives.h"
@@ -289,13 +291,18 @@ out:
 
 int jb_trustcache_add_cdhashes(cdhash_t *hashes, uint32_t hashCount)
 {
-	struct trustcache_entry_v1 entries[hashCount];
-	for (int i = 0; i < hashCount; i++) {
+	if (hashCount == 0) return 0;
+	if (!hashes) return -1;
+	struct trustcache_entry_v1 *entries = calloc(hashCount, sizeof(*entries));
+	if (!entries) return -1;
+	for (uint32_t i = 0; i < hashCount; i++) {
 		memcpy(entries[i].hash, hashes[i], sizeof(cdhash_t));
 		entries[i].hash_type = 1;
 		entries[i].flags = 0;
 	}
-	return jb_trustcache_add_entries(entries, hashCount);
+	int result = jb_trustcache_add_entries(entries, hashCount);
+	free(entries);
+	return result;
 }
 
 int jb_trustcache_add_entry(struct trustcache_entry_v1 entry)
@@ -467,10 +474,14 @@ int trustcache_file_upload_with_uuid(trustcache_file_v1 *tc, uuid_t uuid)
 
 int trustcache_file_build_from_cdhashes(cdhash_t *CDHashes, uint32_t CDHashCount, trustcache_file_v1 **tcOut)
 {
-	if (!CDHashes || CDHashCount == 0 || !tcOut) return -1;
+	if (!tcOut) return -1;
+	*tcOut = NULL;
+	if (!CDHashes || CDHashCount == 0) return -1;
+	if (CDHashCount > (SIZE_MAX - sizeof(trustcache_file_v1)) / sizeof(trustcache_entry_v1)) return -1;
 
 	size_t tcSize = sizeof(trustcache_file_v1) + (sizeof(trustcache_entry_v1) * CDHashCount);
 	trustcache_file_v1 *file = malloc(tcSize);
+	if (!file) return -1;
 	_trustcache_file_init(file);
 
 	file->length = CDHashCount;
@@ -485,31 +496,50 @@ int trustcache_file_build_from_cdhashes(cdhash_t *CDHashes, uint32_t CDHashCount
 	return 0;
 }
 
+static int trustcache_read_full(int fd, void *buffer, size_t size)
+{
+	size_t offset = 0;
+	while (offset < size) {
+		ssize_t amount = read(fd, (uint8_t *)buffer + offset, size - offset);
+		if (amount < 0 && errno == EINTR) continue;
+		if (amount <= 0) return -1;
+		offset += (size_t)amount;
+	}
+	return 0;
+}
+
 int trustcache_file_build_from_path(const char *filePath, trustcache_file_v1 **tcOut)
 {
-	int fd = open(filePath, O_RDONLY);
-	struct stat s = { 0 };
-	fstat(fd, &s);
-	
-	size_t tcSize = s.st_size;
-	if (tcSize < (sizeof(trustcache_file_v1))) {
-		// To small to be a TrustCache, file is probably malformed
-		return -1;
-	}
+	if (!tcOut) return -1;
+	*tcOut = NULL;
+	if (!filePath) return -1;
+	int fd = open(filePath, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) return -1;
+	int result = -1;
+	trustcache_file_v1 *file = NULL;
+	struct stat s = {0};
+	if (fstat(fd, &s) != 0 || !S_ISREG(s.st_mode) ||
+	    s.st_size < (off_t)sizeof(trustcache_file_v1) || (uintmax_t)s.st_size > SIZE_MAX) goto out;
 
-	trustcache_file_v1 *file = malloc(tcSize);
-	read(fd, file, tcSize);
-	close(fd);
+	// Validate the fixed header before allocating based on an untrusted file size.
+	trustcache_file_v1 header;
+	if (trustcache_read_full(fd, &header, sizeof(header)) != 0 || header.version != 1) goto out;
+	size_t tcSize = (size_t)s.st_size;
+	size_t payloadSize = tcSize - sizeof(header);
+	if (payloadSize % sizeof(trustcache_entry_v1) != 0 ||
+	    header.length != payloadSize / sizeof(trustcache_entry_v1)) goto out;
 
-	size_t actualTcSize = sizeof(trustcache_file_v1) + (sizeof(trustcache_entry_v1) * file->length);
-	if (actualTcSize != tcSize) {
-		// Size mismatch, file is malformed
-		free(file);
-		return -1;
-	}
-
+	file = malloc(tcSize);
+	if (!file) goto out;
+	memcpy(file, &header, sizeof(header));
+	if (trustcache_read_full(fd, file->entries, payloadSize) != 0) goto out;
 	*tcOut = file;
-	return 0;
+	file = NULL;
+	result = 0;
+out:
+	free(file);
+	close(fd);
+	return result;
 }
 
 bool trustcache_contains_cdhash(uint64_t tcKaddr, cdhash_t CDHash)
