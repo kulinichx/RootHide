@@ -1,5 +1,6 @@
 #include "common.h"
 #include "roothider.h"
+#include "_zqbb.h"
 #include <dirent.h>
 #include <limits.h>
 #include <os/log.h>
@@ -259,7 +260,7 @@ int csops_audittoken_hook(pid_t pid, unsigned int ops, void *useraddr, size_t us
 
 bool should_enable_tweaks(void)
 {
-	if (access(JBROOT_PATH("/basebin/.safe_mode"), F_OK) == 0) {
+	if (!roothide_isTweakInjectionEnabled()) {
 		return false;
 	}
 

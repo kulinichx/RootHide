@@ -155,7 +155,8 @@ int syscall__sysctlbyname(const char *name, size_t namelen, void *oldp, size_t *
 }
 int __sysctlbyname_hook(const char *name, size_t namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 {
-	if(name && namelen && strncmp(name, "security.mac.amfi.developer_mode_status", namelen)==0) {
+	const char *target = "security.mac.amfi.developer_mode_status";
+	if(name && namelen == strlen(target) && strncmp(name, target, namelen)==0) {
 		if(oldp && oldlenp && *oldlenp>=sizeof(int)) {
 			*(int*)oldp = 1;
 			*oldlenp = sizeof(int);

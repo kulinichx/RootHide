@@ -241,7 +241,9 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 	int proctype = 0;
 	posix_spawnattr_getprocesstype_np(attrp, &proctype);
 
-	bool should_suspend = (proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
+	// Match the trust-only APT transport policy used by systemhook.
+	bool should_suspend = !is_apt_transport_path(path) &&
+		(proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
 	bool should_resume = should_suspend && (flags & POSIX_SPAWN_START_SUSPENDED)==0;
 
 	if (should_suspend) {
@@ -273,7 +275,6 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 
 	int pid = 0;
 	int ret = __posix_spawn_orig_wrapper(&pid, path, desc, argv, envc);
-	if(ret == 0 && pidp) *pidp = pid;
 
 	envbuf_free(envc);
 	
@@ -293,6 +294,8 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 		JBLogError("spawn failed: %d %s, pid=%d", ret, strerror(ret), pid);
 	}
 
+	// A failed child patch terminates the child; do not publish its PID.
+	if (ret == 0 && pidp) *pidp = pid;
 	return ret;
 }
 

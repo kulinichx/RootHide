@@ -24,6 +24,11 @@ bool isJailbreakBundlePath(const char* path)
 		return false;
 	}
 
+	if(strcmp(fs.f_mntonname, "/private/preboot") == 0) {
+		// Match ZQBB: RootHide apps do not live on the preboot volume.
+		return false;
+	}
+
 	if(isRemovableBundlePath(path))
 	{
 		if(!hasTrollstoreMarker(path)) {

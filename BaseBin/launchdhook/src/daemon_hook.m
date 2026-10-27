@@ -49,6 +49,10 @@ xpc_object_t xpc_dictionary_get_value_hook(xpc_object_t xdict, const char *key)
 				}
 			}
 */
+
+			// Touch firmware was loaded during the device boot. Re-running this
+			// daemon after a userspace reboot can break aftermarket displays.
+			xpc_dictionary_set_value(origXvalue, "/System/Library/LaunchDaemons/com.apple.mtmergeprops.plist", NULL);
 		}
 	}
 	else if (!strcmp(key, "Paths")) {

@@ -61,6 +61,7 @@ static bool isBuiltinAppIdentifier(const char* identifier)
     if(!identifier) return false;
 
     if(strcmp(identifier, "com.opa334.Dopamine-roothide") == 0) return true;
+    if(strcmp(identifier, "cn.zqbb.dopaRH") == 0) return true;
 
     const char* appIdentifier = jbinfo(appIdentifier);
     if(appIdentifier && *appIdentifier && strcmp(identifier, appIdentifier) == 0) return true;

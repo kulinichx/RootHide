@@ -264,7 +264,10 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 	int proctype = 0;
 	posix_spawnattr_getprocesstype_np(attrp, &proctype);
 
-	bool should_suspend = (proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
+	// Trust-only and excluded processes must also skip SETEXEC patching.
+	// Otherwise exec enters jailbreakd even though normal spawn skips it.
+	bool should_suspend = (spawnConfig & kSpawnConfigInject) &&
+		(proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
 	bool should_resume = should_suspend && (flags & POSIX_SPAWN_START_SUSPENDED)==0;
 	bool patch_exec = should_suspend && (flags & POSIX_SPAWN_SETEXEC) != 0;
 
@@ -295,7 +298,6 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 
 	int pid = 0;
 	if (ret == 0) ret = __posix_spawn_orig(&pid, path, desc, argv, envc);
-	if (pidp) *pidp = pid;
 
 	envbuf_free(envc);
 
@@ -306,11 +308,7 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 		jbdSpawnExecCancel(path);
 	} else if (ret == 0 && pid > 0) {
 		if (should_suspend) {
-			if (!(spawnConfig & kSpawnConfigInject)) {
-				// Trust-only helpers, such as APT transports, do not need a
-				// suspended-task patch. Resume them as requested by the caller.
-				if (should_resume) kill(pid, SIGCONT);
-			} else if(jbdSpawnPatchChild(pid, should_resume) != 0) { // jdb fault? kill
+			if(jbdSpawnPatchChild(pid, should_resume) != 0) { // jdb fault? kill
 				//just kill it instead of letting it hang forever, and the requester decides what to do later
 				kill(pid, SIGQUIT); //core dump
 				kill(pid, SIGKILL);
@@ -319,6 +317,8 @@ int roothide_systemhook___posix_spawn_posthook(pid_t *restrict pidp, const char 
 		}
 	}
 
+	// Publish the child only after all post-spawn work has succeeded.
+	if (ret == 0 && pidp) *pidp = pid;
 	return ret;
 }
 

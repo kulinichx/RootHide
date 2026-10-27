@@ -1,9 +1,30 @@
 #include "_zqbb.h"
 #include "RCInjectPolicyCache.h"
 #include <limits.h>
+#include <unistd.h>
 
 static RCInjectPolicyCache injectPolicyCache = RC_INJECT_POLICY_CACHE_INIT;
 static RCInjectPolicyCache systemInjectPolicyCache = RC_INJECT_POLICY_CACHE_INIT;
+
+bool roothide_isTweakInjectionEnabled(void)
+{
+    if (access(JBROOT_PATH("/basebin/.safe_mode"), F_OK) == 0) return false;
+
+    // Keep RC9's manager toggle at the TweakLoader boundary. Disabling tweaks
+    // must not turn a whitelisted app into a RootHide-blacklisted process.
+    static RCInjectPolicyCache gatePolicyCache = RC_INJECT_POLICY_CACHE_INIT;
+    // JBROOT_PATH uses an alloca buffer: it must not outlive this call.
+    const char *gatePath =
+        JBROOT_PATH("/var/mobile/Library/RootHide/RootHideConfig.plist");
+    xpc_object_t dict = rc_inject_policy_cache_copy_dictionary(&gatePolicyCache, gatePath);
+    if (!dict) return true;
+
+    xpc_object_t value = xpc_dictionary_get_value(dict, "tweakInjectionEnabled");
+    bool enabled = !value || xpc_get_type(value) != XPC_TYPE_BOOL ||
+        xpc_bool_get_value(value);
+    xpc_release(dict);
+    return enabled;
+}
 
 bool zqbb_wantInject(const char *execName, const char *injectPath)
 {
