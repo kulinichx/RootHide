@@ -1,6 +1,7 @@
 """Update regressions: production updater and extractor with injected OS failures."""
 import argparse
 import io
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -279,14 +280,17 @@ def native_tests():
             directory = tarfile.TarInfo('basebin')
             directory.type = tarfile.DIRTYPE
             directory.mode = 0o755
+            directory.uid, directory.gid = os.getuid(), os.getgid()
             tar.addfile(directory)
             item = tarfile.TarInfo('basebin/tool')
             item.mode = 0o755
+            item.uid, item.gid = os.getuid(), os.getgid()
             item.size = len(content)
             tar.addfile(item, io.BytesIO(content))
             link = tarfile.TarInfo('basebin/link')
             link.type = tarfile.SYMTYPE
             link.linkname = 'tool'
+            link.uid, link.gid = os.getuid(), os.getgid()
             tar.addfile(link)
         output = Path(temp) / 'extracted'
         subprocess.run([str(binary), str(payload), str(output)], check=True)
@@ -294,9 +298,17 @@ def native_tests():
         assert (output / 'basebin/link').is_symlink()
         assert (output / 'basebin/link').read_bytes() == content
         blocked = Path(temp) / 'blocked'
-        blocked.write_text('existing file', encoding='utf-8')
-        assert subprocess.run([str(binary), str(payload), str(blocked)]).returncode == 1
-        assert blocked.read_text(encoding='utf-8') == 'existing file'
+        blocked.mkdir()
+        sentinel = blocked / 'sentinel'
+        sentinel.write_text('preserve', encoding='utf-8')
+        # libarchive may replace a plain file with a directory. Deny writes
+        # to its parent to inject a real failure instead of assuming otherwise.
+        blocked.chmod(0o500)
+        try:
+            assert subprocess.run([str(binary), str(payload), str(blocked / 'destination')]).returncode == 1
+            assert sentinel.read_text(encoding='utf-8') == 'preserve'
+        finally:
+            blocked.chmod(0o700)
         damaged = Path(temp) / 'damaged.tar'
         damaged.write_bytes(payload.read_bytes()[:2048])
         assert subprocess.run([str(binary), str(damaged), str(Path(temp) / 'damaged-output')]).returncode == 1
