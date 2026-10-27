@@ -111,7 +111,7 @@ struct statfs { char f_mntonname[32]; };
 static int test_statfs(const char *p, struct statfs *out) {
     strcpy(out->f_mntonname, !strncmp(p,"/System/",8) ? "/" : "/private/var"); return 0;
 }
-#define statfs test_statfs
+#define statfs(...) test_statfs(__VA_ARGS__)
 static int test_access(const char *p,int mode) {
     (void)mode;
     if (!strcmp(p,HOOK_DYLIB_PATH)) return hook_exists ? 0 : -1;
