@@ -21,12 +21,20 @@ def inspect(raw,label,temp):
         r,_=run(['lipo',str(fat),'-thin',arch,'-output',str(thin)]); b.require(r['returncode']==0,'lipo failed to extract slice')
         b.require(thin.read_bytes()==blob,'lipo and Python disagree on slice bytes')
         otool,_=run(['otool','-l',str(thin)]); b.require(otool['returncode']==0,'otool parse failed')
-        entitlements,xml=run(['codesign','-d','--entitlements',':-',str(thin)])
+        entitlement_path=temp/(label+'.'+arch+'.entitlements')
+        entitlements,stdout=run(['codesign','-d','--entitlements',str(entitlement_path),str(thin)])
         b.require(entitlements['returncode']==0,'codesign could not read signature')
         parts=b.signature(blob)[1]
         if 5 in parts:
             expected=plistlib.loads(parts[5][1][8:])
-            b.require(plistlib.loads(xml)==expected,'Apple entitlement parser disagrees')
+            b.require(entitlement_path.exists(),repr(entitlements))
+            xml=entitlement_path.read_bytes()
+            if xml[:4]==bytes.fromhex('fade7171'): xml=xml[8:]
+            try: actual=plistlib.loads(xml)
+            except Exception:
+                print('Entitlement extraction diagnostics:',entitlements,'prefix=',xml[:80].hex(),flush=True)
+                raise
+            b.require(actual==expected,'Apple entitlement parser disagrees')
         verify,_=run(['codesign','--verify','--strict','--verbose=4',str(thin)])
         result.append({'arch':arch,'subtype':hex(sub),'lipo':info,'otool':otool,'codesign_entitlements':entitlements,'codesign_verify':verify,'hashes':b.verify_signature(blob)})
     return result
