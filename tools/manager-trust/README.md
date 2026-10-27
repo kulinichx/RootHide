@@ -33,6 +33,8 @@ RCInjectAnalysis 不纳入此适配。
 
 仅使用 Python 标准库。不执行 deb 的 postinst，不安装手机，不改当前 RC9 的内置包。
 生成两个独立候选 deb、verification.json 和 SHA256SUMS.txt。
+相同 Python/zlib 环境重复构建的 deb 字节一致；不同平台/版本的 gzip 压缩器可能产生不同压缩流。
+跨环境核对应比较解压后的 control.tar/data.tar 和各文件哈希；交付以私有 CI 产物及其 SHA256 为准。
 黑名单以 RC9 原有 1.3.9+bindtrust1 为底包，主程序原样保留，没有分析模块。
 白名单以 3.2.1-5 为底包，在两个 slice 的零填充头部追加 Hook 加载命令，不移动代码、数据、chained fixups 或既有依赖次序；保留 XML/DER entitlement 和 requirements，重算 SHA256 CodeDirectory 页哈希。
 保留原包的无 CMS 签名结构；哈希校验不能替代 iOS 真机的加载验证。
