@@ -55,6 +55,8 @@ jobs:
         with:
           name: manager-trust-candidates
           path: artifacts/manager-trust
+      - name: Install independent entitlement reader
+        run: brew install ldid
       - name: Parse both Mach-O slices and entitlement blobs with Apple tools
         run: python3 tools/manager-trust/apple_inspect.py
       - uses: actions/upload-artifact@v4

@@ -36,6 +36,8 @@ RCInjectAnalysis 不纳入此适配。
 黑名单以 RC9 原有 1.3.9+bindtrust1 为底包，主程序原样保留，没有分析模块。
 白名单以 3.2.1-5 为底包，在两个 slice 的零填充头部追加 Hook 加载命令，不移动代码、数据、chained fixups 或既有依赖次序；保留 XML/DER entitlement 和 requirements，重算 SHA256 CodeDirectory 页哈希。
 保留原包的无 CMS 签名结构；哈希校验不能替代 iOS 真机的加载验证。
+macOS codesign 对提供的原版 Inject 3.2.1-5 也提示 no signature / invalid entitlements blob。
+CI 记录并逐项对比原包与候选诊断，使用 ldid 独立读取 XML entitlement；不将该原包限制描述为 Apple 签名通过。
 包中的 Info.plist 原先没有非零签名特殊槽哈希，改显示版本无需改 entitlement。
 
 ## 后续升级流程
