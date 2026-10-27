@@ -22,7 +22,8 @@ def inspect(raw,label,temp):
         b.require(thin.read_bytes()==blob,'lipo and Python disagree on slice bytes')
         otool,_=run(['otool','-l',str(thin)]); b.require(otool['returncode']==0,'otool parse failed')
         entitlement_path=temp/(label+'.'+arch+'.entitlements')
-        entitlements,stdout=run(['codesign','-d','--entitlements',str(entitlement_path),str(thin)])
+        # Apple TN3125: modern codesign defaults to a human-readable DER dump.
+        entitlements,stdout=run(['/usr/bin/codesign','-d','--entitlements',str(entitlement_path),'--xml',str(thin)])
         b.require(entitlements['returncode']==0,'codesign could not read signature')
         parts=b.signature(blob)[1]
         if 5 in parts:
@@ -35,7 +36,7 @@ def inspect(raw,label,temp):
                 print('Entitlement extraction diagnostics:',entitlements,'prefix=',xml[:80].hex(),flush=True)
                 raise
             b.require(actual==expected,'Apple entitlement parser disagrees')
-        verify,_=run(['codesign','--verify','--strict','--verbose=4',str(thin)])
+        verify,_=run(['/usr/bin/codesign','--verify','--strict','--verbose=4',str(thin)])
         result.append({'arch':arch,'subtype':hex(sub),'lipo':info,'otool':otool,'codesign_entitlements':entitlements,'codesign_verify':verify,'hashes':b.verify_signature(blob)})
     return result
 
