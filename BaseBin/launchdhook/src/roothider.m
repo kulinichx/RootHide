@@ -241,8 +241,9 @@ int roothide_launchd___posix_spawn_posthook(pid_t *restrict pidp, const char *re
 	int proctype = 0;
 	posix_spawnattr_getprocesstype_np(attrp, &proctype);
 
-	// Match the trust-only APT transport policy used by systemhook.
-	bool should_suspend = !is_apt_transport_path(path) &&
+	// Respect the shared blacklist, whitelist, and trust-only APT policy.
+	kSpawnConfig spawnConfig = spawn_config_for_executable(path, argv);
+	bool should_suspend = (spawnConfig & kSpawnConfigInject) &&
 		(proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
 	bool should_resume = should_suspend && (flags & POSIX_SPAWN_START_SUSPENDED)==0;
 

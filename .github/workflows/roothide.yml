@@ -72,7 +72,9 @@ jobs:
           xcode-version: "15.4"
 
       - name: Runtime policy regression tests
-        run: python3 tests/test_rc9_runtime_policy.py --native
+        run: |
+          python3 tests/test_rc9_runtime_policy.py --native
+          python3 tests/test_rc9_common.py --native
 
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main

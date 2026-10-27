@@ -18,15 +18,16 @@
 #include <libjailbreak/jbserver_domains.h>
 #include <libjailbreak/util.h>
 #include <libjailbreak/jbroot.h>
-#include <libjailbreak/hookd.h>
-#include <libkern/OSCacheControl.h>
 #include <os/log.h>
 #include <os/lock.h>
 #include "../_zqbb.h"
 #include "RCInjectPolicyCache.h"
 
-// RootHide dynamic policy lives in domain 6; jbclient_roothide.c is linked into systemhook.
+#ifndef RC9_LAUNCHD
+// Only systemhook queries the server. launchd applies isBlacklistedPath in
+// its prehook before entering this shared policy; never send IPC to itself.
 extern bool jbclient_blacklist_check_path(const char *path);
+#endif
 
 bool string_has_prefix(const char *str, const char* prefix)
 {
@@ -102,7 +103,7 @@ xpc_object_t jbuserconfig_get_value(const char *key)
         return value;
 }
 
-static bool is_apt_helper_path(const char *path)
+bool is_apt_transport_path(const char *path)
 {
 	// Keep systemhook in apt-get so it can trust transports spawned later.
 	// Only the short-lived transport itself must be injection-free.
@@ -111,6 +112,9 @@ static bool is_apt_helper_path(const char *path)
 
 kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[restrict])
 {
+	if (!path) return 0;
+
+#ifndef RC9_LAUNCHD
 	// RootHide dynamic blacklist is stronger than the normal Dopamine policy:
 	// no trust, no systemhook injection, and no tweak propagation. Returning 0
 	// also makes spawn_exec_hook_common strip any inherited jailbreak env.
@@ -126,7 +130,9 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 		return 0;
 	}
 
-	if (is_apt_helper_path(path)) {
+#endif
+
+	if (is_apt_transport_path(path)) {
 		return kSpawnConfigTrust;
 	}
 
@@ -166,7 +172,7 @@ kSpawnConfig spawn_config_for_executable(const char* path, char *const argv[rest
 		}
 	}
 
-	// RC8 whitelist mode: preserve RC7 Health v2 policy above, then apply donor whitelist policy.
+	// Apply the RootHide whitelist only after the blacklist decisions above.
 	const char *injectPath = JBROOT_PATH("/var/mobile/Library/RootHide/cn.zqbb.inject.plist");
 	if (access(injectPath, F_OK) == 0) {
 		const char *exec = strrchr(path, '/');
@@ -241,23 +247,23 @@ static int spawn_exec_hook_common(const char *path,
 		}
 
 		// Check if we can find a _SafeMode or _MSSafeMode variable
-		// In this case we do not want to inject anything
+		// RootHide may still need its base hook; main.c separately blocks tweaks.
 		const char *safeModeValue = envbuf_getenv((const char **)envp, "_SafeMode");
 		const char *msSafeModeValue = envbuf_getenv((const char **)envp, "_MSSafeMode");
 		if (safeModeValue) {
 			if (!strcmp(safeModeValue, "1")) {
-				shouldInsertJBEnv = false;
+				if (!allowInjectWithSafeMode(path)) shouldInsertJBEnv = false;
 				hasSafeModeVariable = true;
-				break;
 			}
 		}
 		if (msSafeModeValue) {
 			if (!strcmp(msSafeModeValue, "1")) {
-				shouldInsertJBEnv = false;
+				if (!allowInjectWithSafeMode(path)) shouldInsertJBEnv = false;
 				hasSafeModeVariable = true;
-				break;
 			}
 		}
+		if (!shouldInsertJBEnv) break;
+		// Allowing RootHide in SafeMode must not bypass DriverKit or dylib existence checks.
 
 		int proctype = 0;
 		if (attr && posix_spawnattr_getprocesstype_np(&attr, &proctype) == 0) {
@@ -405,7 +411,7 @@ int posix_spawn_hook_shared(pid_t *restrict pid,
 	if (r == 0 && pid && desc) {
 		posix_spawnattr_t attr = desc->attrp;
 		short flags = 0;
-		if (posix_spawnattr_getflags(&attr, &flags) == 0) {
+		if (attr && posix_spawnattr_getflags(&attr, &flags) == 0) {
 			if (flags & POSIX_SPAWN_START_SUSPENDED) {
 				// If something spawns a process as suspended, ensure mapping invalid pages in it is possible
 				// Normally it would only be possible after systemhook.dylib enables it
@@ -416,32 +422,6 @@ int posix_spawn_hook_shared(pid_t *restrict pid,
 	}
 
 	return r;
-}
-
-kern_return_t vm_allocate_nearby(vm_map_t target_task, vm_address_t from_area, vm_size_t from_area_size, vm_address_t *address, vm_size_t size, uint64_t limit)
-{
-	if (from_area != 0 && from_area_size > 0 && address) {
-		// Make sure allocation is within limit for every single page in the area
-		uint64_t realLimit = limit - (from_area_size / 2);
-
-		for (uint64_t off = 0; off < realLimit; off += vm_page_size) {
-			vm_address_t tmp = (from_area + from_area_size) + off;
-			kern_return_t kr = vm_allocate(target_task, &tmp, size, VM_FLAGS_FIXED);
-			if (kr == KERN_SUCCESS) {
-				*address = tmp;
-				return kr;
-			}
-
-			tmp = (from_area - size) - off;
-			kr = vm_allocate(target_task, &tmp, size, VM_FLAGS_FIXED);
-			if (kr == KERN_SUCCESS) {
-				*address = tmp;
-				return kr;
-			}
-		}
-	}
-
-	return KERN_NO_SPACE;
 }
 
 int execve_hook_shared(const char *path,
@@ -458,39 +438,4 @@ int execve_hook_shared(const char *path,
 
 	if (r == ENOMEM) { errno = ENOMEM; return -1; }
 	return r;
-}
-
-__attribute__((noinline, naked)) volatile void *get_tpidrr0_el0(void)
-{
-	asm("MRS X0, TPIDRRO_EL0");
-	asm("RET");
-}
-
-kern_return_t litehook_hook_memory_hookd(void *target, void *source, size_t sourceSize)
-{
-	kern_return_t kr = hookd_hook(mach_task_self_, (uint64_t)target, source, sourceSize);
-	if (kr == KERN_SUCCESS) {
-		sys_icache_invalidate(target, sourceSize);
-	}
-	return kr;
-}
-
-kern_return_t mach_vm_protect_fixed(mach_port_name_t task, mach_vm_address_t address, mach_vm_size_t size, boolean_t set_maximum, vm_prot_t new_protection)
-{
-	kern_return_t rv;
-
-	bool skipped = false;
-	if (!skipped) {
-		if ((new_protection & VM_PROT_EXECUTE) || (new_protection & VM_PROT_COPY)) {
-			rv = hookd_vm_protect(task, address, size, set_maximum, new_protection);
-		}
-		else {
-			rv = _kernelrpc_mach_vm_protect_trap(task, address, size, set_maximum, new_protection);
-			if (rv == MACH_SEND_INVALID_DEST) {
-				rv = _kernelrpc_mach_vm_protect(task, address, size, set_maximum, new_protection);
-			}
-		}
-	}
-
-	return rv;
 }

@@ -21,7 +21,7 @@ def source(path):
 
 def function(path, name):
     text = source(path)
-    match = re.search(r"^(?:static )?(?:bool|int) " + re.escape(name) + r"\s*\([^;]*?\)\s*\{", text, re.M)
+    match = re.search(r"^(?:static )?(?:bool|int|kSpawnConfig|xpc_object_t|char\s*\*)\s*" + re.escape(name) + r"\s*\([^;]*?\)\s*\{", text, re.M)
     if not match:
         raise AssertionError(f"Function not found: {path}: {name}")
     # These audited function bodies have balanced braces in their comments.
@@ -75,7 +75,7 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("if (ret == 0 && pidp) *pidp = pid;", system)
         self.assertGreater(system.index("if (ret == 0 && pidp) *pidp = pid;"), system.index("return 202;"))
         launchd = function("BaseBin/launchdhook/src/roothider.m", "roothide_launchd___posix_spawn_posthook")
-        self.assertIn("bool should_suspend = !is_apt_transport_path(path) &&", launchd)
+        self.assertIn("bool should_suspend = (spawnConfig & kSpawnConfigInject) &&", launchd)
         self.assertGreater(launchd.index("if (ret == 0 && pidp) *pidp = pid;"), launchd.index("ret = 202;"))
 
     def test_sysctl_name_requires_exact_length(self):
@@ -253,6 +253,7 @@ int main(void) {
     const char *paths[]={"/jb/usr/lib/apt/methods/http","/jb/usr/bin/apt-get"};
     for(int method=0;method<2;method++) for(int driver=0;driver<2;driver++) for(int suspended=0;suspended<2;suspended++) {
         reset_spawn();attr.flags=suspended ? POSIX_SPAWN_START_SUSPENDED : 0;
+        policy=method ? kSpawnConfigInject | kSpawnConfigTrust : kSpawnConfigTrust;
         short flags=attr.flags;attr.proctype=driver ? POSIX_SPAWN_PROC_TYPE_DRIVER : 0;
         bool patch=method && !driver;
         assert(roothide_launchd___posix_spawn_posthook(&pid,paths[method],&desc,NULL,NULL)==0);
@@ -273,8 +274,17 @@ int main(void) {
         }
     }
     reset_spawn();pid=777;patch_error=1;attr.flags=0;attr.proctype=0;
+    policy=kSpawnConfigInject | kSpawnConfigTrust;
     assert(roothide_launchd___posix_spawn_posthook(&pid,paths[1],&desc,NULL,NULL)==202);
     assert(pid==777 && kills==2 && patches==1 && attr.flags==0);
+    for(policy=0;policy<4;policy++) for(int driver=0;driver<2;driver++) for(int suspended=0;suspended<2;suspended++) {
+        reset_spawn();attr.flags=suspended ? POSIX_SPAWN_START_SUSPENDED : 0;
+        short flags=attr.flags;attr.proctype=driver ? POSIX_SPAWN_PROC_TYPE_DRIVER : 0;
+        bool patch=(policy & kSpawnConfigInject) && !driver;
+        assert(roothide_launchd___posix_spawn_posthook(&pid,"/bin/demo",&desc,NULL,NULL)==0);
+        assert(patches==patch && resumes==(patch && !suspended) && attr.flags==flags);
+        assert(seen_flags==(short)(flags | (patch ? POSIX_SPAWN_START_SUSPENDED : 0)));
+    }
     const char target[]="security.mac.amfi.developer_mode_status";
     int status=0;size_t size=sizeof(status);
     assert(__sysctlbyname_hook(target,strlen(target),&status,&size,NULL,0)==0);
@@ -304,7 +314,7 @@ def native_tests():
     functions = [
         ("BaseBin/systemhook/src/_zqbb.c", "roothide_isTweakInjectionEnabled"),
         ("BaseBin/libjailbreak/src/roothider/_wantsInject.c", "zqbb_wantsInject"),
-        ("BaseBin/systemhook/src/common.c", "is_apt_transport_path"),
+        ("BaseBin/systemhook/src/common/common.c", "is_apt_transport_path"),
         ("BaseBin/systemhook/src/roothider_main.c", "roothide_systemhook___posix_spawn_posthook"),
         ("BaseBin/launchdhook/src/roothider.m", "roothide_launchd___posix_spawn_posthook"),
         ("BaseBin/systemhook/src/roothider_common.c", "__sysctlbyname_hook"),
