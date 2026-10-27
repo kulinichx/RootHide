@@ -281,6 +281,12 @@ def native_tests():
         'paths': NATIVE_PREFIX+PATH_MOCKS+extract(source('BaseBin/roothidehooks/runningboardd.x'),'static NSSet<NSString*>* fixAllowedPaths')+PATH_MAIN,
         'uttype': NATIVE_PREFIX+UT_PREFIX+method+UT_MAIN,
     }
+    # Foundation imports real XPC/Mach declarations. Namespace only the fixture
+    # and extracted function tokens after those imports, not the SDK headers.
+    xpc_body = programs['xpc'][len(NATIVE_PREFIX):]
+    xpc_body = re.sub(r'\b(?:xpc_[A-Za-z_0-9]+|XPC_TYPE_[A-Z_]+|mach_port_t|audit_token_t|audit_token_to_[a-z]+)\b',
+                      lambda match: 'test_' + match.group(0), xpc_body)
+    programs['xpc'] = NATIVE_PREFIX + xpc_body
     with tempfile.TemporaryDirectory(prefix='rc9-services-') as temp:
         for name,program in programs.items():
             path=Path(temp)/f'{name}.m';binary=Path(temp)/name
