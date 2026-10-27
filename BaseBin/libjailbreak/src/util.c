@@ -863,11 +863,13 @@ copy_data(struct archive *ar, struct archive *aw)
 
 int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 {
-	struct archive *a;
-	struct archive *ext;
+	struct archive *a = NULL;
+	struct archive *ext = NULL;
 	struct archive_entry *entry;
 	int flags;
 	int r;
+	int result = 1;
+	if (!fileToExtract || !extractionPath) return 1;
 
 	/* Select which attributes we want to restore. */
 	flags = ARCHIVE_EXTRACT_TIME;
@@ -877,13 +879,15 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 	flags |= ARCHIVE_EXTRACT_OWNER;
 
 	a = archive_read_new();
+	if (!a) goto out;
 	archive_read_support_format_all(a);
 	archive_read_support_filter_all(a);
 	ext = archive_write_disk_new();
+	if (!ext) goto out;
 	archive_write_disk_set_options(ext, flags);
 	archive_write_disk_set_standard_lookup(ext);
 	if ((r = archive_read_open_filename(a, fileToExtract, 10240)))
-			return 1;
+			goto out;
 	for (;;) {
 			r = archive_read_next_header(a, &entry);
 			if (r == ARCHIVE_EOF)
@@ -891,38 +895,46 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 			if (r < ARCHIVE_OK)
 					fprintf(stderr, "%s\n", archive_error_string(a));
 			if (r < ARCHIVE_WARN)
-					return 1;
+					goto out;
 
 			const char *currentFile = archive_entry_pathname(entry);
 			char outputPath[PATH_MAX];
-			strlcpy(outputPath, extractionPath, PATH_MAX);
-			strlcat(outputPath, "/", PATH_MAX);
-			strlcat(outputPath, currentFile, PATH_MAX);
+			if (!currentFile || strlcpy(outputPath, extractionPath, sizeof(outputPath)) >= sizeof(outputPath) ||
+			    strlcat(outputPath, "/", sizeof(outputPath)) >= sizeof(outputPath) ||
+			    strlcat(outputPath, currentFile, sizeof(outputPath)) >= sizeof(outputPath)) goto out;
 
 			archive_entry_set_pathname(entry, outputPath);
 			
 			r = archive_write_header(ext, entry);
-			if (r < ARCHIVE_OK)
+			if (r < ARCHIVE_OK) {
 					fprintf(stderr, "%s\n", archive_error_string(ext));
+					// A failed header can leave an entry unwritten; never report success.
+					if (r < ARCHIVE_WARN) goto out;
+			}
 			else if (archive_entry_size(entry) > 0) {
 					r = copy_data(a, ext);
 					if (r < ARCHIVE_OK)
 							fprintf(stderr, "%s\n", archive_error_string(ext));
 					if (r < ARCHIVE_WARN)
-							return 1;
+							goto out;
 			}
 			r = archive_write_finish_entry(ext);
 			if (r < ARCHIVE_OK)
 					fprintf(stderr, "%s\n", archive_error_string(ext));
 			if (r < ARCHIVE_WARN)
-					return 1;
+					goto out;
 	}
-	archive_read_close(a);
-	archive_read_free(a);
-	archive_write_close(ext);
-	archive_write_free(ext);
-	
-	return 0;
+	result = 0;
+out:
+	if (a) {
+		if (archive_read_close(a) < ARCHIVE_WARN) result = 1;
+		if (archive_read_free(a) < ARCHIVE_WARN) result = 1;
+	}
+	if (ext) {
+		if (archive_write_close(ext) < ARCHIVE_WARN) result = 1;
+		if (archive_write_free(ext) < ARCHIVE_WARN) result = 1;
+	}
+	return result;
 }
 
 
