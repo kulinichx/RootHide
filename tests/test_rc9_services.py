@@ -238,6 +238,7 @@ static __thread int g_utrBusy=0;
 static BOOL blacklist=YES, raiseException, nest;
 static int calls;
 static BOOL utrHideClientBlacklisted(id client) { return blacklist; }
+static pid_t utrClientPid(id client) { return 50; }
 static BOOL utrFilterActive(void) { return g_utrHide && !g_utrBusy; }
 @interface ReadClient : NSObject
 -(void)getTypeRecordsWithIdentifiers:(id)identifiers completionHandler:(void(^)(id))handler;
