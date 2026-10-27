@@ -1,0 +1,12 @@
+{
+  "inject_sha256": "13d2a8dfc0d6496cbf4e472ddb1314643b95f1d611fa0dbebf5506fa8c9e8bfa",
+  "hook_sha256": "1885d0b5f9cf8af4d6fb2c7038231722e84b4ebc170a8ee03f3ee9672d702d4d",
+  "hook_source_package_sha256": "006f6930315c5f8759623e3ec69a5739212188fd384c107fb9e2788f14655ae6",
+  "hook_tar_metadata": {
+    "mode": 493,
+    "uid": 501,
+    "gid": 20,
+    "mtime": 1789655395
+  },
+  "hook_source_available": false
+}

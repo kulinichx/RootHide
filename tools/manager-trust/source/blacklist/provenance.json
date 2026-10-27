@@ -1,0 +1,11 @@
+{
+  "source_commit": "b15df6a01b027d2e6850912576be9a6899ab151d",
+  "base_commit": "652b6a632f7639034f840b71ca14c8482d19247c",
+  "files": {
+    "RootHide/AppDelegate.m": "0da802a161dacba2c1b9e83b386ebcd1eac178b21ade8f6b4ed601513e2b034e",
+    "RootHide/AppDelegate.h": "455eb9a5a1c023cc553354e1d8e21cd11f70d7c52ad9fcbebc9927b7cbdf23b3",
+    "RootHide/en.lproj/Localizable.strings": "2bfdaf8b87c96fa968ee243e8a91f6fbcfbe6df8acf0f883cbed7b851a0b1660",
+    "RootHide/zh_CN.lproj/Localizable.strings": "25c9cbaa9d90df97e72707a1d8a004d67648390a54b19aa9b33a80f8a7b64826",
+    "LICENSE": "6fcda17dfab9672260e928a0c0917f055b9ee458d5fbf652abc58f61d0267d3c"
+  }
+}

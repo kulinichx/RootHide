@@ -1,0 +1,6 @@
+vendor/*.deb binary
+vendor/*.dylib binary
+vendor/*.json text eol=lf
+# Exact historical source bytes, including upstream whitespace, are provenance.
+source/blacklist/** -text -whitespace
+source/blacklist/provenance.json text eol=lf
