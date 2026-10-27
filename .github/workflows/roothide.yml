@@ -71,15 +71,6 @@ jobs:
         with:
           xcode-version: "15.4"
 
-      - name: Runtime policy regression tests
-        run: |
-          python3 tests/test_rc9_runtime_policy.py --native
-          python3 tests/test_rc9_common.py --native
-          python3 tests/test_rc9_services.py --native
-          python3 tests/test_rc9_trustcache.py --native
-          python3 tests/test_rc9_dyld.py --native
-          python3 tests/test_rc9_update.py --native
-
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main
         with:
@@ -91,6 +82,15 @@ jobs:
           brew install make libarchive openssl@3 xz
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Runtime policy regression tests
+        run: |
+          python3 tests/test_rc9_runtime_policy.py --native
+          python3 tests/test_rc9_common.py --native
+          python3 tests/test_rc9_services.py --native
+          python3 tests/test_rc9_trustcache.py --native
+          python3 tests/test_rc9_dyld.py --native
+          python3 tests/test_rc9_update.py --native
 
       - name: Cache Theos
         id: cache-theos

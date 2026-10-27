@@ -269,8 +269,10 @@ def native_tests():
         binary = Path(temp) / 'real_archive'
         path.write_text(REAL_ARCHIVE_PREFIX + extract(source(UTIL), 'static int\ncopy_data(') +
                         archive + REAL_ARCHIVE_MAIN, encoding='utf-8')
+        archive_prefix = subprocess.check_output(['brew', '--prefix', 'libarchive'], text=True).strip()
         subprocess.run([clang, '-Wall', '-Wextra', '-Werror', '-O1', '-g',
-                        '-fsanitize=address,undefined', str(path), '-larchive', '-o', str(binary)], check=True)
+                        '-fsanitize=address,undefined', '-I' + archive_prefix + '/include', str(path),
+                        '-L' + archive_prefix + '/lib', '-larchive', '-o', str(binary)], check=True)
         payload = Path(temp) / 'payload.tar'
         content = b'basebin extraction regression\n' * 256
         with tarfile.open(payload, 'w') as tar:
