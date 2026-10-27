@@ -25,6 +25,7 @@ int apply_dyld_patch(NSString *dyldPath, const char *newUUIDPrefix)
 
 	if (getAMFIAddr == 0) {
         printf("Error: Failed patchfinding getAMFI\n");
+        macho_free(dyldMacho);
         return -1;
     }
 
@@ -86,6 +87,21 @@ int merge_dyldhook(NSString *originalDyldPath, NSString *outPath)
 	return r;
 }
 
+static int install_generated_dyld(NSString *inflight, NSString *patched, NSString *old, bool updating)
+{
+	NSFileManager *fm = [NSFileManager defaultManager];
+	if (updating) {
+		// Keep the live dyld vnode alive until the next userspace boot.
+		if ([fm fileExistsAtPath:old] && ![fm removeItemAtPath:old error:nil]) return 5;
+		if (![fm moveItemAtPath:patched toPath:old error:nil]) return 6;
+	}
+	if (![fm moveItemAtPath:inflight toPath:patched error:nil]) {
+		if (updating && ![fm moveItemAtPath:old toPath:patched error:nil]) return 8;
+		return 7;
+	}
+	return 0;
+}
+
 int basebin_generate(bool comingFromJBUpdate)
 {
 	NSString *basebinPath    = JBROOT_PATH(@"/basebin");
@@ -93,7 +109,7 @@ int basebin_generate(bool comingFromJBUpdate)
 	NSString *fakelibPath    = JBROOT_PATH(@"/basebin/.fakelib");
 	NSString *systemhookPath = JBROOT_PATH(@"/basebin/systemhook.dylib");
 
-	[[NSFileManager defaultManager] createDirectoryAtPath:genPath withIntermediateDirectories:YES attributes:nil error:nil];
+	if (![[NSFileManager defaultManager] createDirectoryAtPath:genPath withIntermediateDirectories:YES attributes:nil error:nil]) return 9;
 
 	NSString *fakelibDyldPath        = [fakelibPath stringByAppendingPathComponent:@"dyld"];
 	NSString *fakelibSystemHookPath  = [fakelibPath stringByAppendingPathComponent:@"systemhook.dylib"];
@@ -108,42 +124,30 @@ int basebin_generate(bool comingFromJBUpdate)
 
 	if (!comingFromJBUpdate) {
 		// Copy /usr/lib to /var/jb/basebin/.fakelib
-		[[NSFileManager defaultManager] removeItemAtPath:fakelibPath error:nil];
-		[[NSFileManager defaultManager] createDirectoryAtPath:fakelibPath withIntermediateDirectories:YES attributes:nil error:nil];
-		carbonCopy(@"/usr/lib", fakelibPath);
+		if ([[NSFileManager defaultManager] fileExistsAtPath:fakelibPath] &&
+		    ![[NSFileManager defaultManager] removeItemAtPath:fakelibPath error:nil]) return 10;
+		if (![[NSFileManager defaultManager] createDirectoryAtPath:fakelibPath withIntermediateDirectories:YES attributes:nil error:nil]) return 11;
+		if (carbonCopy(@"/usr/lib", fakelibPath) != 0) return 12;
 
 		// Delete the dyld inside .fakelib
-		[[NSFileManager defaultManager] removeItemAtPath:fakelibDyldPath error:nil];
+		if (![[NSFileManager defaultManager] removeItemAtPath:fakelibDyldPath error:nil]) return 13;
 
 		// Symlink .fakelib/dyld -> /var/jb/basebin/gen/dyld
-		[[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibDyldPath withDestinationPath:dyldPatchedPath error:nil];
+		if (![[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibDyldPath withDestinationPath:dyldPatchedPath error:nil]) return 14;
 
 		// Symlink .fakelib/systemhook.dylib -> /var/jb/basebin/systemhook.dylib
-		[[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibSystemHookPath withDestinationPath:systemhookPath error:nil];
+		if (![[NSFileManager defaultManager] createSymbolicLinkAtPath:fakelibSystemHookPath withDestinationPath:systemhookPath error:nil]) return 15;
 
 		// Backup original dyld
-		carbonCopy(@"/usr/lib/dyld", dyldOrigPath);
+		if (carbonCopy(@"/usr/lib/dyld", dyldOrigPath) != 0) return 16;
 	}
 
-	carbonCopy(dyldOrigPath, dyldInflightPath);
+	if (carbonCopy(dyldOrigPath, dyldInflightPath) != 0) return 17;
 
 	NSString *dyldUUIDPrefix = [@"DOPA" stringByAppendingString:dopamineVersion];
 	if (apply_dyld_patch(dyldInflightPath, dyldUUIDPrefix.UTF8String) != 0) return 2;
 	if (merge_dyldhook(dyldInflightPath, dyldInflightPath) != 0) return 3;
 	if (resign_file(dyldInflightPath, @"com.apple.dyld", YES) != 0) return 4;
 
-	if (comingFromJBUpdate) {
-		// We cannot delete dyld as this point because it's still in use
-		// If we did this, we'd panic the system
-		// So we will move the past patched dyld to dyld.old to keep the vnode alive
-		// If there is another dyld.old at this point, we will remove it now
-		// since it is guaranteed to not be in use at this point
-		if ([[NSFileManager defaultManager] fileExistsAtPath:dyldOldPath]) {
-			[[NSFileManager defaultManager] removeItemAtPath:dyldOldPath error:nil];
-		}
-		[[NSFileManager defaultManager] moveItemAtPath:dyldPatchedPath toPath:dyldOldPath error:nil];
-	}
-
-	[[NSFileManager defaultManager] moveItemAtPath:dyldInflightPath toPath:dyldPatchedPath error:nil];
-	return 0;
+	return install_generated_dyld(dyldInflightPath, dyldPatchedPath, dyldOldPath, comingFromJBUpdate);
 }

@@ -77,6 +77,7 @@ jobs:
           python3 tests/test_rc9_common.py --native
           python3 tests/test_rc9_services.py --native
           python3 tests/test_rc9_trustcache.py --native
+          python3 tests/test_rc9_dyld.py --native
 
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main

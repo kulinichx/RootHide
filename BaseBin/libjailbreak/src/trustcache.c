@@ -477,9 +477,9 @@ int trustcache_file_build_from_cdhashes(cdhash_t *CDHashes, uint32_t CDHashCount
 	if (!tcOut) return -1;
 	*tcOut = NULL;
 	if (!CDHashes || CDHashCount == 0) return -1;
-	if (CDHashCount > (SIZE_MAX - sizeof(trustcache_file_v1)) / sizeof(trustcache_entry_v1)) return -1;
-
-	size_t tcSize = sizeof(trustcache_file_v1) + (sizeof(trustcache_entry_v1) * CDHashCount);
+	size_t payloadSize, tcSize;
+	if (__builtin_mul_overflow((size_t)CDHashCount, sizeof(trustcache_entry_v1), &payloadSize) ||
+	    __builtin_add_overflow(sizeof(trustcache_file_v1), payloadSize, &tcSize)) return -1;
 	trustcache_file_v1 *file = malloc(tcSize);
 	if (!file) return -1;
 	_trustcache_file_init(file);
