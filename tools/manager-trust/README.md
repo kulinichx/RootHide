@@ -1,19 +1,23 @@
 # RootHide Manager · Trust
 
+> 2026-10-27 设备反馈：Sileo / RC9 c252f6a 上两个 trust1 应用均启动闪退，trust1 已撤回。
+> trust2 是恢复原始启动元数据/归档约定的排障候选，尚未确认修复。没有设备日志，根因未定。
+
 只维护用户确认后的 BindFS 挂载信任，以及 VPN/代理检测提示偏好。
 字体挂载属于 BindFS 挂载的一种；不会自动信任所有挂载，也不修改网络状态或内核 trustcache。
 RCInjectAnalysis 不纳入此适配。
 
 ## 版本约定
 
-| 管理器 | 包版本 | 应用版本元数据 |
+| 管理器 | 包版本 | 保持原始应用版本 |
 | --- | --- | --- |
-| RootHide Inject Manager | 3.2.1-5+trust1 | 3.2.1-5 · Trust |
-| RootHide Manager | 1.3.9+trust1 | 1.3.9 · Trust |
+| RootHide Inject Manager | 3.2.1-5+trust2 | 3.2.1-5 |
+| RootHide Manager | 1.3.9+trust2 | 1.3.9 |
 
-保留应用名称、包 ID、配置路径及最低系统版本。仅适配层更新时递增 trust2、trust3。
-“· Trust”写入 CFBundleShortVersionString；管理器原界面没有统一的版本页，不能保证每个页面都展示它。
-不为版本文案增加另一套 UI Hook。安装器按 Debian 包版本判断升级。
+保留应用名称、包 ID、配置路径及最低系统版本。后续适配层更新递增 trust3、trust4。
+Info.plist 完整字节保持原样，不向 CFBundleShortVersionString 填入展示文案。
+“· Trust”仅用于说明和发行标签，安装器显示 +trust2。安装器按 Debian 包版本判断升级。
+这是对 trust1 中不必要的启动元数据修改的撤回；不能在无日志情况下断言它是闪退根因。
 
 ## 已保存的内容
 
@@ -35,12 +39,13 @@ RCInjectAnalysis 不纳入此适配。
 生成两个独立候选 deb、verification.json 和 SHA256SUMS.txt。
 相同 Python/zlib 环境重复构建的 deb 字节一致；不同平台/版本的 gzip 压缩器可能产生不同压缩流。
 跨环境核对应比较解压后的 control.tar/data.tar 和各文件哈希；交付以私有 CI 产物及其 SHA256 为准。
-黑名单以 RC9 原有 1.3.9+bindtrust1 为底包，主程序原样保留，没有分析模块。
+黑名单以 RC9 原有 1.3.9+bindtrust1 为底包，整个 data.tar.lzma 原字节直接复用，主程序、签名、Info.plist、资源和权限均原样保留，没有分析模块。
+白名单恢复原包 data.tar.lzma 格式、原始 tar 成员路径（包括 ./postinst）和 Info.plist；不再添加 RHUpstreamVersion/RHTrustRevision 键。
 白名单以 3.2.1-5 为底包，在两个 slice 的零填充头部追加 Hook 加载命令，不移动代码、数据、chained fixups 或既有依赖次序；保留 XML/DER entitlement 和 requirements，重算 SHA256 CodeDirectory 页哈希。
 保留原包的无 CMS 签名结构；哈希校验不能替代 iOS 真机的加载验证。
 macOS codesign 对提供的原版 Inject 3.2.1-5 也提示 no signature / invalid entitlements blob。
 CI 记录并逐项对比原包与候选诊断，使用 ldid 独立读取 XML entitlement；不将该原包限制描述为 Apple 签名通过。
-包中的 Info.plist 原先没有非零签名特殊槽哈希，改显示版本无需改 entitlement。
+原签名没有非零 Info.plist 特殊槽哈希，不代表任意 bundle 元数据都满足设备注册/启动要求；trust2 不修改该文件。
 
 ## 后续升级流程
 
@@ -52,6 +57,10 @@ CI 记录并逐项对比原包与候选诊断，使用 ldid 独立读取 XML ent
 6. 检查版本排序、双架构、签名、权限、资源、原名单/自定义清理规则和模式切换，再做真机验证。
 
 ## 真机验收与回退
+
+先在原环境安装黑名单 trust2 再单独启动：其整个应用数据归档与原 bindtrust 包相同，可用于区分重打包/元数据与设备环境问题。
+如果仍闪退，停止连续换包，采集 RootHide 的崩溃或启动拒绝日志及 Sileo 安装输出；排查 postinst/uicache、.jbroot 依赖和 RC9 环境。
+黑名单确认恢复后再测白名单 trust2。不要卸载清配置，也不要删除白名单/信任数据库。
 
 先保存现有 RootHideConfig.plist、cn.zqbb.inject*.plist 和 varCleanRules-custom.plist。
 验证正常启动；未信任挂载弹提示；“继续提示”不写入；只信任所选挂载；重启后承接偏好；VPN/代理提示偏好持久；未知告警仍展示；白名单折叠 UI 和两种模式切换正常。

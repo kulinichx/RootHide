@@ -4,7 +4,7 @@ Preserves the input's non-CMS signing format and recomputes page hashes.
 This is not an Apple developer signature or proof of device acceptance.
 """
 from pathlib import Path
-import argparse, copy, gzip, hashlib, io, json, math, plistlib, re, struct, tarfile
+import argparse, copy, gzip, hashlib, io, json, lzma, math, plistlib, re, struct, tarfile
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parents[1]
@@ -53,17 +53,21 @@ def deb_read(raw):
         require(len(found)==1,'Ambiguous Debian member'); return tar_read(found[0])
     return part('control.tar'),part('data.tar')
 
-def tar_write(members):
+def tar_write(members, compression='gz'):
     out=io.BytesIO()
     with tarfile.open(fileobj=out,mode='w',format=tarfile.GNU_FORMAT) as tf:
         for name,(original,data) in members.items():
-            m=copy.copy(original); m.name=name; m.size=len(data) if data is not None else 0
+            # Preserve upstream names, including ./postinst in control.tar.
+            m=copy.copy(original); m.size=len(data) if data is not None else 0
             tf.addfile(m,io.BytesIO(data) if data is not None else None)
-    return gzip.compress(out.getvalue(),compresslevel=9,mtime=0)
+    if compression=='gz': return gzip.compress(out.getvalue(),compresslevel=9,mtime=0)
+    require(compression=='lzma','Unsupported tar compression')
+    return lzma.compress(out.getvalue(),format=lzma.FORMAT_ALONE,preset=9)
 
-def deb_write(control,payload):
+def deb_write(control,payload,original_data=None):
     out=bytearray(b'!<arch>\n')
-    for name,data in [('debian-binary',b'2.0\n'),('control.tar.gz',tar_write(control)),('data.tar.gz',tar_write(payload))]:
+    payload_blob=original_data if original_data is not None else tar_write(payload,'lzma')
+    for name,data in [('debian-binary',b'2.0\n'),('control.tar.gz',tar_write(control)),('data.tar.lzma',payload_blob)]:
         header=f'{name+chr(47):<16}{STAMP:<12}{0:<6}{0:<6}{100644:<8}{len(data):<10}'.encode('ascii')+bytes([96,10])
         require(len(header)==60,'Invalid ar header size'); out+=header+data
         if len(data)%2: out+=b'\n'
@@ -195,25 +199,30 @@ def make_package(source,version,display,kind,hook=None):
         require('RCInjectAnalysis' not in name,'Analysis payload found')
         if name==exe:
             require(not any('RCInjectAnalysis' in n for _,_,b in slices(data) for _,n in libraries(b)),'Analysis dependency found')
+    # Keep all launch metadata byte-identical to upstream. Trust branding belongs
+    # in Debian package metadata, not CFBundleShortVersionString.
     plistpath=app+'/Info.plist'; info=plistlib.loads(payload[plistpath][1])
-    info['RHUpstreamVersion']=info['CFBundleShortVersionString']; info['RHTrustRevision']=1
-    info['CFBundleShortVersionString']=display
-    fmt=plistlib.FMT_BINARY if payload[plistpath][1].startswith(b'bplist') else plistlib.FMT_XML
-    set_content(payload,plistpath,plistlib.dumps(info,fmt=fmt,sort_keys=False))
     control=controls['control'][1].decode()
     control=re.sub(r'^Version: .*$',f'Version: {version}',control,flags=re.M)
     size=sum(len(d) for _,d in payload.values() if d is not None)
     control=re.sub(r'^Installed-Size: .*$',f'Installed-Size: {math.ceil(size/1024)}',control,flags=re.M)
     control=re.sub(r'^Description: .*$',"Description: RootHide manager with detection trust preferences\n Trust edition: user-confirmed BindFS mount trust and VPN/proxy warning preferences.",control,flags=re.M)
     set_content(controls,'control',control.encode())
-    encoded=deb_write(controls,payload); c2,p2=deb_read(encoded)
+    source_ar=ar_read(source)
+    require('data.tar.lzma' in source_ar,'Unexpected source archive format')
+    original_data=source_ar['data.tar.lzma'] if hook is None else None
+    encoded=deb_write(controls,payload,original_data); c2,p2=deb_read(encoded)
     require(c2['postinst'][1]==deb_read(source)[0]['postinst'][1],'postinst changed')
     changes=[name for name in original if original[name][1]!=p2[name][1]]
-    expected=[exe,plistpath] if hook is not None else [plistpath]
+    expected=[exe] if hook is not None else []
     require(set(changes)==set(expected),'Unexpected payload change')
+    require(p2[plistpath][1]==original[plistpath][1],'Bundle metadata changed')
+    require(list(ar_read(encoded))==list(source_ar),'Archive member format/order changed')
+    if hook is None:
+        require(ar_read(encoded)['data.tar.lzma']==source_ar['data.tar.lzma'],'Blacklist data archive changed')
     for name,(meta,_) in original.items():
         require((meta.mode,meta.uid,meta.gid,meta.linkname,meta.type)==(p2[name][0].mode,p2[name][0].uid,p2[name][0].gid,p2[name][0].linkname,p2[name][0].type),'File metadata changed')
-    return encoded,{'package_version':version,'display_version':display,'sha256':digest(encoded),'size':len(encoded),'changed_payload':changes,'added_payload':sorted(set(p2)-set(original)),'postinst_unchanged':True,'existing_file_permissions_unchanged':True,'macho':audit}
+    return encoded,{'package_version':version,'edition_label':display,'bundle_version':info['CFBundleShortVersionString'],'bundle_metadata_unchanged':True,'source_data_archive_reused':hook is None,'sha256':digest(encoded),'size':len(encoded),'changed_payload':changes,'added_payload':sorted(set(p2)-set(original)),'postinst_unchanged':True,'existing_file_permissions_unchanged':True,'macho':audit}
 
 def build(out):
     official=read_pinned(ROOT/'vendor/inject-3.2.1-5.deb',INJECT_SHA)
@@ -222,8 +231,8 @@ def build(out):
     hookcheck=[{'subtype':hex(sub),'signature':verify_signature(blob)} for sub,_,blob in slices(hook)]
     out.mkdir(parents=True,exist_ok=True); reports={}
     for name,source,version,display,kind,h in [
-        ('cn.zqbb.inject.manager_3.2.1-5+trust1_iphoneos-arm64e.deb',official,'3.2.1-5+trust1','3.2.1-5 · Trust','inject',hook),
-        ('com.roothide.manager_1.3.9+trust1_iphoneos-arm64e.deb',black,'1.3.9+trust1','1.3.9 · Trust','blacklist',None)]:
+        ('cn.zqbb.inject.manager_3.2.1-5+trust2_iphoneos-arm64e.deb',official,'3.2.1-5+trust2','3.2.1-5 · Trust','inject',hook),
+        ('com.roothide.manager_1.3.9+trust2_iphoneos-arm64e.deb',black,'1.3.9+trust2','1.3.9 · Trust','blacklist',None)]:
         data,report=make_package(source,version,display,kind,h)
         (out/name).write_bytes(data); require(digest((out/name).read_bytes())==report['sha256'],'Output verification failed')
         reports[name]=report; print(name,len(data),digest(data))
@@ -233,5 +242,5 @@ def build(out):
     return report
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(); parser.add_argument('--output',type=Path,default=REPO/'artifacts/2026-10-27-manager-trust')
+    parser=argparse.ArgumentParser(); parser.add_argument('--output',type=Path,default=REPO/'artifacts/2026-10-27-manager-trust2')
     build(parser.parse_args().output)

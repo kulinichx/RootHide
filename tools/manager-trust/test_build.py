@@ -46,8 +46,8 @@ class TrustPackages(unittest.TestCase):
 
     def test_reproducible_packages_preserve_data_and_settings(self):
         for source,kind,version,display,hook in [
-            (self.upstream,'inject','3.2.1-5+trust1','3.2.1-5 · Trust',self.hook),
-            (self.black,'blacklist','1.3.9+trust1','1.3.9 · Trust',None)]:
+            (self.upstream,'inject','3.2.1-5+trust2','3.2.1-5 · Trust',self.hook),
+            (self.black,'blacklist','1.3.9+trust2','1.3.9 · Trust',None)]:
             a,report=b.make_package(source,version,display,kind,hook)
             again,_=b.make_package(source,version,display,kind,hook)
             self.assertEqual(a,again)
@@ -58,19 +58,25 @@ class TrustPackages(unittest.TestCase):
             self.assertFalse(any(name.startswith(('var/','private/')) for name in p))
             for name,(_,raw) in p.items():
                 if name.endswith('/Info.plist'):
-                    before=plistlib.loads(oldp[name][1]); after=plistlib.loads(raw)
-                    self.assertEqual(after.pop('RHUpstreamVersion'),before['CFBundleShortVersionString'])
-                    self.assertEqual(after.pop('RHTrustRevision'),1)
-                    self.assertEqual(after['CFBundleShortVersionString'],display)
-                    after['CFBundleShortVersionString']=before['CFBundleShortVersionString']
-                    self.assertEqual(before,after)
+                    self.assertEqual(raw,oldp[name][1])
                 elif raw and raw[:4]==bytes.fromhex('cafebabe'):
                     for _,_,slice_ in b.slices(raw): b.verify_signature(slice_)
                 else: self.assertEqual(oldp[name][1],raw)
             if kind=='blacklist':
                 exe='Applications/RootHide.app/RootHide'
                 self.assertEqual(p[exe][1],oldp[exe][1])
+                self.assertEqual(b.ar_read(a)['data.tar.lzma'],b.ar_read(source)['data.tar.lzma'])
             else:
                 self.assertEqual(p['Applications/RootHideInject.app/DetectionTrustHook.dylib'][1],self.hook)
+
+    def test_original_archive_names_and_maintainer_script_paths(self):
+        for source,kind,hook in [(self.upstream,'inject',self.hook),(self.black,'blacklist',None)]:
+            package,_=b.make_package(source,'9.0+test','Trust',kind,hook)
+            self.assertEqual(list(b.ar_read(package)),list(b.ar_read(source)))
+            oldc,oldp=b.deb_read(source); newc,newp=b.deb_read(package)
+            for name,(member,_) in oldc.items():
+                self.assertEqual(newc[name][0].name,member.name)
+            for name,(member,_) in oldp.items():
+                self.assertEqual(newp[name][0].name,member.name)
 
 if __name__=='__main__': unittest.main(verbosity=2)
