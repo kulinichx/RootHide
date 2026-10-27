@@ -20,13 +20,18 @@ CFURLRef new__CFCopyHomeDirURLForUser(const char *username, bool fallBackToHome)
 	char path[PATH_MAX]={0};
 	if(CFURLGetFileSystemRepresentation(url, 0, (UInt8*)path, sizeof(path)))
 	{
-		const char* jbpath = rootfs(path);
-		if(strncmp(jbpath, "/rootfs/", sizeof("/rootfs/")-1) == 0)
+		NSString* jbpath = rcRootfsPath(@(path));
+		if([jbpath hasPrefix:@"/rootfs/"])
 		{
-			CFRelease(url);
-
-			const char* newpath = jbroot(path);
-			url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8*)newpath, strlen(newpath), true);
+			NSString* redirected = rcJbrootPath(@(path));
+			const char* newpath = redirected.fileSystemRepresentation;
+			if (newpath) {
+				CFURLRef replacement = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8*)newpath, strlen(newpath), true);
+				if (replacement) {
+					CFRelease(url);
+					url = replacement;
+				}
+			}
 		}
 	}
 

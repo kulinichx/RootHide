@@ -1,5 +1,5 @@
 TARGET := iphone:clang:latest:16.0
-INSTALL_TARGET_PROCESSES = lsd cfprefsd
+INSTALL_TARGET_PROCESSES = lsd cfprefsd runningboardd
 FINALPACKAGE = 1
 THEOS_PACKAGE_SCHEME = roothide
 ARCHS = arm64 arm64e

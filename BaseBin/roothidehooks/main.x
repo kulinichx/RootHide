@@ -8,9 +8,9 @@
 
 NSString* safe_getExecutablePath()
 {
-	char executablePathC[PATH_MAX];
+	char executablePathC[PATH_MAX] = {0};
 	uint32_t executablePathCSize = sizeof(executablePathC);
-	_NSGetExecutablePath(&executablePathC[0], &executablePathCSize);
+	if (_NSGetExecutablePath(&executablePathC[0], &executablePathCSize) != 0) return nil;
 	return [NSString stringWithUTF8String:executablePathC];
 }
 
@@ -34,6 +34,10 @@ NSString* getProcessName()
 	else if ([processName isEqualToString:@"lsd"]) {
 		extern void lsdInit(void);
 		lsdInit();
+	}
+	else if ([processName isEqualToString:@"runningboardd"]) {
+		extern void rbdInit(void);
+		rbdInit();
 	}
 	else if ([processName isEqualToString:@"SpringBoard"]) {
 		extern void sbInit(void);

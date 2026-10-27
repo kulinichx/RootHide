@@ -234,6 +234,8 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 %end //%hook _LSDOpenClient
 
 
+%group UTTypeHooks
+
 @interface UTTypeRecord : NSObject
 + (id)typeRecordWithIdentifier:(id)identifier;
 - (unsigned int)tableID;
@@ -258,10 +260,28 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 - (NSXPCConnection*)XPCConnection;
 @end
 
+// Install as a unit only when the private DB accessors and functions exist.
+static BOOL utrRecordAPIAvailable(void)
+{
+    Class typeRecord = NSClassFromString(@"UTTypeRecord");
+    Class declaredRecord = NSClassFromString(@"_UTDeclaredTypeRecord");
+    Class bundleRecord = NSClassFromString(@"LSBundleRecord");
+    Class readClient = NSClassFromString(@"_LSDReadClient");
+    return [typeRecord respondsToSelector:@selector(typeRecordWithIdentifier:)]
+        && [typeRecord instancesRespondToSelector:@selector(tableID)]
+        && [declaredRecord instancesRespondToSelector:@selector(_initWithContext:tableID:unitID:)]
+        && [declaredRecord instancesRespondToSelector:@selector(isDeclared)]
+        && [declaredRecord instancesRespondToSelector:@selector(isCoreType)]
+        && [declaredRecord instancesRespondToSelector:@selector(isInPublicDomain)]
+        && [declaredRecord instancesRespondToSelector:@selector(declaringBundleRecord)]
+        && [bundleRecord instancesRespondToSelector:@selector(URL)]
+        && [readClient instancesRespondToSelector:@selector(XPCConnection)];
+}
+
 static __thread BOOL g_utrHide = NO;   // raised by the _LSDReadClient hooks for blacklisted requests
 static __thread int  g_utrBusy = 0;    // >0 while we ourselves touch the DB, to keep our access out of the filters
 
-static __attribute__((unused)) BOOL utrFilterActive(void) { return g_utrHide && !g_utrBusy; }
+static BOOL utrFilterActive(void) { return g_utrHide && !g_utrBusy; }
 
 static pid_t utrClientPid(_LSDReadClient* client)
 {
@@ -269,7 +289,7 @@ static pid_t utrClientPid(_LSDReadClient* client)
 	return conn ? conn.processIdentifier : -1;
 }
 
-static __attribute__((unused)) BOOL utrHideClientBlacklisted(_LSDReadClient* client)
+static BOOL utrHideClientBlacklisted(_LSDReadClient* client)
 {
 	pid_t pid = utrClientPid(client);
 	if(pid>0 && jbclient_blacklist_check_pid(pid)) {
@@ -287,8 +307,11 @@ static unsigned int utrTypeTableID(void)
 		// guard this probe's own nested lookup so it is never filtered, independent of the caller.
 		// g_utrBusy is a counter, so this nests cleanly inside utrUnitIsJailbreak's busy region.
 		g_utrBusy++;
-		tid = (unsigned int)[[NSClassFromString(@"UTTypeRecord") typeRecordWithIdentifier:@"public.data"] tableID];
-		g_utrBusy--;
+		@try {
+			tid = (unsigned int)[[NSClassFromString(@"UTTypeRecord") typeRecordWithIdentifier:@"public.data"] tableID];
+		} @finally {
+			g_utrBusy--;
+		}
 	});
 	return tid;
 }
@@ -310,28 +333,33 @@ static BOOL utrRecordIsFromJailbreakApp(_UTDeclaredTypeRecord* rec)
 }
 
 // build a record for an enumerated unitID and decide if it belongs to a jailbreak app.
-static __attribute__((unused)) BOOL utrUnitIsJailbreak(void* db, intptr_t unitID)
+static BOOL utrUnitIsJailbreak(void* db, intptr_t unitID)
 {
 	BOOL result = NO;
 	g_utrBusy++; // keep our own nested DB access out of the filters
-	unsigned int tid = utrTypeTableID();
-	if (tid) {
-		void* ctx = db; // _initWithContext: reads *(void**)ctx (offset 0) == db
-		_UTDeclaredTypeRecord* rec = [[NSClassFromString(@"_UTDeclaredTypeRecord") alloc]
-					_initWithContext:(void*)&ctx tableID:tid unitID:(unsigned int)unitID];
-		result = utrRecordIsFromJailbreakApp(rec);
+	@try {
+		unsigned int tid = utrTypeTableID();
+		if (tid) {
+			void* ctx = db; // _initWithContext: reads *(void**)ctx (offset 0) == db
+			_UTDeclaredTypeRecord* rec = [[NSClassFromString(@"_UTDeclaredTypeRecord") alloc]
+						_initWithContext:(void*)&ctx tableID:tid unitID:(unsigned int)unitID];
+			result = utrRecordIsFromJailbreakApp(rec);
+		}
+	} @finally {
+		g_utrBusy--;
 	}
-	g_utrBusy--;
 	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if 0
 typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5);
 %hookf(void, _UTEnumerateTypesForTag, void* db, void* tagClass, void* tag, id block)
 {
-	if (!utrFilterActive() || !block) { %orig; return; }
+	if (!utrFilterActive() || !block) {
+		%orig;
+		return;
+	}
 
 	UTREnumBlock orig = (UTREnumBlock)block;
 	UTREnumBlock wrapper = ^intptr_t(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5) {
@@ -343,7 +371,10 @@ typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitB
 
 %hookf(void, _UTEnumerateTypesForIdentifier, void* db, long identStrId, id block)
 {
-	if (!utrFilterActive() || !block) { %orig; return; }
+	if (!utrFilterActive() || !block) {
+		%orig;
+		return;
+	}
 
 	UTREnumBlock orig = (UTREnumBlock)block;
 	UTREnumBlock wrapper = ^intptr_t(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5) {
@@ -356,7 +387,10 @@ typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitB
 typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t kind, unsigned char* outStop);
 %hookf(void, _UTTypeSearchConformingTypesWithBlock, void* db, long unitID, long flags, long arg4, id block)
 {
-	if (!utrFilterActive() || !block) { %orig; return; }
+	if (!utrFilterActive() || !block) {
+		%orig;
+		return;
+	}
 
 	UTRConformBlock orig = (UTRConformBlock)block;
 	UTRConformBlock wrapper = ^void(intptr_t uid, const void* unitBytes, intptr_t kind, unsigned char* outStop) {
@@ -371,7 +405,10 @@ typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t
 // _UTTypeConformsTo's boolean verdict goes through ...Common (not WithBlock), so it is unaffected.
 %hookf(void, _UTTypeSearchConformsToTypesWithBlock, void* db, long unitID, long flags, long arg4, id block)
 {
-	if (!utrFilterActive() || !block) { %orig; return; }
+	if (!utrFilterActive() || !block) {
+		%orig;
+		return;
+	}
 
 	UTRConformBlock orig = (UTRConformBlock)block;
 	UTRConformBlock wrapper = ^void(intptr_t uid, const void* unitBytes, intptr_t kind, unsigned char* outStop) {
@@ -393,93 +430,154 @@ typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t
 	if (utrFilterActive()) return; // don't cache the hidden result
 	%orig(a1, block);
 }
-#endif
 
-#if 0
 %hook _LSDReadClient
 - (void)getTypeRecordWithTag:(id)tag ofClass:(id)_class conformingToIdentifier:(id)identifier completionHandler:(void(^)(id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getTypeRecordWithTag:%@ ofClass:%@ conforming:%@ pid=%d", tag, _class, identifier, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getTypeRecordsWithTag:(id)tag ofClass:(id)_class conformingToIdentifier:(id)identifier completionHandler:(void(^)(id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getTypeRecordsWithTag:%@ ofClass:%@ conforming:%@ pid=%d", tag, _class, identifier, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getTypeRecordWithIdentifier:(id)identifier allowUndeclared:(BOOL)allowUndeclared completionHandler:(void(^)(id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getTypeRecordWithIdentifier:%@ allowUndeclared:%d pid=%d", identifier, allowUndeclared, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getTypeRecordsWithIdentifiers:(id)identifiers completionHandler:(void(^)(id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getTypeRecordsWithIdentifiers:%@ pid=%d", identifiers, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getTypeRecordForImportedTypeWithIdentifier:(id)identifier conformingToIdentifier:(id)conforming completionHandler:(void(^)(id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getTypeRecordForImportedTypeWithIdentifier:%@ conforming:%@ pid=%d", identifier, conforming, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getRelatedTypesOfTypeWithIdentifier:(id)identifier maximumDegreeOfSeparation:(NSInteger)degree completionHandler:(void(^)(id, id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getRelatedTypesOfTypeWithIdentifier:%@ degree:%ld pid=%d", identifier, (long)degree, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getWhetherTypeIdentifier:(id)identifier conformsToTypeIdentifier:(id)other completionHandler:(void(^)(id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getWhetherTypeIdentifier:%@ conformsToTypeIdentifier:%@ pid=%d", identifier, other, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getResourceValuesForKeys:(id)keys URL:(id)url preferredLocalizations:(id)locs completionHandler:(void(^)(id, id, id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getResourceValuesForKeys:%@ URL:%@ pid=%d", keys, url, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 
 - (void)getBoundIconInfoForDocumentProxy:(id)documentProxy completionHandler:(void(^)(id, id))handler
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
+	if (!utrHideClientBlacklisted(self)) {
+		%orig;
+		return;
+	}
 	NSLog(@"[UTType] getBoundIconInfoForDocumentProxy:%@ pid=%d", documentProxy, utrClientPid(self));
+	BOOL previousHide = g_utrHide;
 	g_utrHide = YES;
-	%orig;
-	g_utrHide = NO;
+	@try {
+		%orig;
+	} @finally {
+		g_utrHide = previousHide;
+	}
 }
 %end //%hook _LSDReadClient
-#endif
 
+%end // %group UTTypeHooks
 
 %hook _LSQueryContext
 
@@ -652,6 +750,20 @@ void lsdInit(void)
 	if(_LSServer_RebuildApplicationDatabases)
 	{
 		MSHookFunction(_LSServer_RebuildApplicationDatabases, (void *)&new_LSServer_RebuildApplicationDatabases, (void **)&orig_LSServer_RebuildApplicationDatabases);
+	}
+
+	if (coreServicesImage) {
+		void* _LSSchemaCacheRead = MSFindSymbol(coreServicesImage, "__LSSchemaCacheRead");
+		void* _LSSchemaCacheWrite = MSFindSymbol(coreServicesImage, "__LSSchemaCacheWrite");
+		void* _UTEnumerateTypesForTag = MSFindSymbol(coreServicesImage, "__UTEnumerateTypesForTag");
+		void* _UTEnumerateTypesForIdentifier = MSFindSymbol(coreServicesImage, "__UTEnumerateTypesForIdentifier");
+		void* _UTTypeSearchConformingTypesWithBlock = MSFindSymbol(coreServicesImage, "__UTTypeSearchConformingTypesWithBlock");
+		void* _UTTypeSearchConformsToTypesWithBlock = MSFindSymbol(coreServicesImage, "__UTTypeSearchConformsToTypesWithBlock");
+		if(utrRecordAPIAvailable() && _LSSchemaCacheRead && _LSSchemaCacheWrite && _UTEnumerateTypesForTag && _UTEnumerateTypesForIdentifier && _UTTypeSearchConformingTypesWithBlock && _UTTypeSearchConformsToTypesWithBlock)
+		{
+			NSLog(@"UTTypeHooks: installing");
+			%init(UTTypeHooks, _LSSchemaCacheRead=_LSSchemaCacheRead, _LSSchemaCacheWrite=_LSSchemaCacheWrite, _UTEnumerateTypesForTag=_UTEnumerateTypesForTag, _UTEnumerateTypesForIdentifier=_UTEnumerateTypesForIdentifier, _UTTypeSearchConformingTypesWithBlock=_UTTypeSearchConformingTypesWithBlock, _UTTypeSearchConformsToTypesWithBlock=_UTTypeSearchConformsToTypesWithBlock);
+		}
 	}
 
 	%init();

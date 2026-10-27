@@ -520,6 +520,10 @@ void roothide_init_with_executable(const char* executable)
 		}
 	}
 
+	if(strcmp(executable, "/usr/libexec/runningboardd") == 0) {
+		dlopen(JBROOT_PATH("/basebin/roothidehooks.dylib"), RTLD_NOW);
+	}
+
 	if(string_has_suffix(executable, "/Dopamine.app/Dopamine")) {
 		loadPathHook(); //requre jit
 	}

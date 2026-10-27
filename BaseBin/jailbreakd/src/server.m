@@ -1,6 +1,9 @@
 #include <Foundation/Foundation.h>
 #include <bsm/libbsm.h>
 #include <libproc.h>
+#include <stdint.h>
+#include <limits.h>
+#include <errno.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <libjailbreak/roothider.h>
@@ -26,15 +29,30 @@ void jailbreakd_received_message(mach_port_t port)
 			return;
 		}
 
+		if (!message || xpc_get_type(message) != XPC_TYPE_DICTIONARY) return;
+		xpc_object_t messageID = xpc_dictionary_get_value(message, "id");
+		if (!messageID || xpc_get_type(messageID) != XPC_TYPE_UINT64) return;
 		xpc_object_t reply = xpc_dictionary_create_reply(message);
+		if (!reply) return;
 
-		JBD_MESSAGE_ID msgId = xpc_dictionary_get_uint64(message, "id");
+		uint64_t rawMessageID = xpc_dictionary_get_uint64(message, "id");
+		if (rawMessageID > UINT32_MAX) {
+			xpc_dictionary_set_int64(reply, "result", -EINVAL);
+			jailbreakd_reply_message(0, reply);
+			return;
+		}
+		JBD_MESSAGE_ID msgId = (JBD_MESSAGE_ID)rawMessageID;
 		
 		if (xpc_get_type(message) == XPC_TYPE_DICTIONARY) {
 			audit_token_t auditToken = {0};
 			xpc_dictionary_get_audit_token(message, &auditToken);
 			uid_t clientUid = audit_token_to_euid(auditToken);
 			pid_t clientPid = audit_token_to_pid(auditToken);
+			if (clientPid <= 0) {
+				xpc_dictionary_set_int64(reply, "result", -EINVAL);
+				jailbreakd_reply_message(msgId, reply);
+				return;
+			}
 
 			char* desc = NULL;
 			JBLogDebug("received message %d from %d(%s) with dictionary: %s", msgId, clientPid, proc_get_path(clientPid,NULL), (desc=xpc_copy_description(message)));
@@ -43,7 +61,12 @@ void jailbreakd_received_message(mach_port_t port)
 			switch (msgId) {
 				case JBD_MSG_SPINLOCK_FIX_ONLY: {
 					int64_t result = 0;
-					pid_t pid = xpc_dictionary_get_int64(message, "pid");
+					int64_t requestedPid = xpc_dictionary_get_int64(message, "pid");
+					if (requestedPid <= 0 || requestedPid > INT_MAX) {
+						xpc_dictionary_set_int64(reply, "result", -EINVAL);
+						break;
+					}
+					pid_t pid = (pid_t)requestedPid;
 					bool resume = xpc_dictionary_get_bool(message, "resume");
 					pid_t ppid = proc_get_ppid(pid);
 					JBLogDebug("spinlock fix: client pid=%d, child pid=%d, child's parent pid=%d, child proc=%s", clientPid, pid, ppid, proc_get_path(pid,NULL));
@@ -68,7 +91,12 @@ void jailbreakd_received_message(mach_port_t port)
 
 				case JBD_MSG_SPAWN_PATCH_CHILD: {
 					int64_t result = 0;
-					pid_t pid = xpc_dictionary_get_int64(message, "pid");
+					int64_t requestedPid = xpc_dictionary_get_int64(message, "pid");
+					if (requestedPid <= 0 || requestedPid > INT_MAX) {
+						xpc_dictionary_set_int64(reply, "result", -EINVAL);
+						break;
+					}
+					pid_t pid = (pid_t)requestedPid;
 					bool resume = xpc_dictionary_get_bool(message, "resume");
 					bool forceDyldPatch = xpc_dictionary_get_bool(message, "force-dyld-patch");
 					pid_t ppid = proc_get_ppid(pid);
@@ -153,15 +181,20 @@ void jailbreakd_received_message(mach_port_t port)
 					JBLogFunction(logFilePath, clientPid, tid, progname ? progname : "(null)", "%s", log);
 					xpc_dictionary_set_int64(reply, "result", 0);
 #else
-					abort();
+					// Logging is optional; a release daemon must not crash on a log request.
+					xpc_dictionary_set_int64(reply, "result", 0);
 #endif
 					break;
 				}
 
 				case JBD_MSG_TEST_CALL: {
-					int value = xpc_dictionary_get_int64(message, "value");
-					JBLogDebug("jailbreakd test call(%llu) from %d,%s", value, clientPid, proc_get_path(clientPid,NULL));	
-					xpc_dictionary_set_int64(reply, "result", value * 2);
+					int64_t value = xpc_dictionary_get_int64(message, "value");
+					JBLogDebug("jailbreakd test call(%lld) from %d,%s", (long long)value, clientPid, proc_get_path(clientPid,NULL));
+					if (value > INT64_MAX / 2 || value < INT64_MIN / 2) {
+						xpc_dictionary_set_int64(reply, "result", -1);
+					} else {
+						xpc_dictionary_set_int64(reply, "result", value * 2);
+					}
 					
 					if(clientUid == 0) {
 						abort(); // crashreporter test
@@ -169,6 +202,9 @@ void jailbreakd_received_message(mach_port_t port)
 
 					break;
 				}
+				default:
+					xpc_dictionary_set_int64(reply, "result", -ENOTSUP);
+					break;
 			}
 		}
 		if (reply) {
