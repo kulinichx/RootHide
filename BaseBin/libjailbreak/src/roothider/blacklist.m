@@ -63,6 +63,15 @@ static bool isBuiltinAppIdentifier(const char* identifier)
     if(strcmp(identifier, "com.opa334.Dopamine-roothide") == 0) return true;
     if(strcmp(identifier, "cn.zqbb.dopaRH") == 0) return true;
 
+    NSString *storedAppIdentifier =
+        [NSString stringWithContentsOfFile:JBROOT_PATH(@"/basebin/.AppIdentifier")
+                                  encoding:NSUTF8StringEncoding
+                                     error:nil];
+    if (storedAppIdentifier.length > 0 &&
+        strcmp(identifier, storedAppIdentifier.UTF8String) == 0) {
+        return true;
+    }
+
     const char* appIdentifier = jbinfo(appIdentifier);
     if(appIdentifier && *appIdentifier && strcmp(identifier, appIdentifier) == 0) return true;
 
@@ -110,6 +119,7 @@ static BOOL zqbb_wantsBlacklist(NSString *execName)
     if(!xplist) return NO;
 
     BOOL result = xpc_dictionary_get_bool(xplist, execName.UTF8String);
+    xpc_release(xplist);
 
     return result;
 }
@@ -145,9 +155,6 @@ bool isBlacklistedPath(const char* path)
 
     if(access(injectPlistPath, F_OK) == 0) {
         if(!strcmp(path, "/sbin/launchd")) return false;
-        // The RootHide app blacklist must remain authoritative when the
-        // optional injection whitelist is enabled.
-        if(isBlacklistedPath_orig(path)) return true;
         if(zqbb_isWhiteListForSystem(path, injectSystemPlistPath)) return false;
         return zqbb_isBlacklistedExec(path, injectPlistPath);
     }

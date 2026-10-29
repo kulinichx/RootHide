@@ -75,6 +75,8 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
 static NSArray<NSString *> *rc9RequiredSystemWhitelistItems(void)
 {
     return @[
+        @"/lockdownd",
+        @"/MobileStorageMounter",
         @"/usr/libexec/dasd",
     ];
 }
@@ -151,6 +153,8 @@ static void initializeRootHideWhitelistDefaults(void)
             @"/Dopamine",
             @"/SpringBoard",
             @"/Preferences",
+            @"/lockdownd",
+            @"/MobileStorageMounter",
             @"/amfid",
             @"/cfprefsd",
             @"/lsd",

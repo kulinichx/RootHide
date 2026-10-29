@@ -86,14 +86,26 @@ class ServiceContracts(unittest.TestCase):
         domain_lookup = dispatch.index('xpc_dictionary_get_value(xmsg, "jb-domain")')
         self.assertLess(early_return, domain_lookup)
 
-    def test_injection_whitelist_cannot_override_roothide_app_blacklist(self):
+    def test_injection_whitelist_uses_the_author_wantsblacklist_gate(self):
         text = source('BaseBin/libjailbreak/src/roothider/blacklist.m')
+        wants_blacklist = extract(text, 'static BOOL zqbb_wantsBlacklist')
+        self.assertIn('xpc_release(xplist);', wants_blacklist)
+
+        helper = extract(text, 'static bool zqbb_isBlacklistedExec')
+        gate = helper.index('if(zqbb_wantsBlacklist(')
+        app_blacklist = helper.index('if(isBlacklistedPath_orig(path)) return true;')
+        whitelist = helper.index('if(zqbb_wantsInject(exec, injectPath))')
+        self.assertLess(gate, app_blacklist)
+        self.assertLess(app_blacklist, whitelist)
+
         policy = extract(text, 'bool isBlacklistedPath(const char* path)')
-        app_blacklist = policy.index('if(isBlacklistedPath_orig(path)) return true;')
         system_whitelist = policy.index('if(zqbb_isWhiteListForSystem(path, injectSystemPlistPath)) return false;')
         exec_whitelist = policy.index('return zqbb_isBlacklistedExec(path, injectPlistPath);')
-        self.assertLess(app_blacklist, system_whitelist)
         self.assertLess(system_whitelist, exec_whitelist)
+        self.assertNotIn(
+            'if(isBlacklistedPath_orig(path)) return true;',
+            policy,
+        )
 
     def test_safe_mode_trollstore_allowlist_matches_official(self):
         rc9 = extract(source('BaseBin/systemhook/src/roothider_common.c'),
