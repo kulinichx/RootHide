@@ -175,7 +175,7 @@ void check_usreboot_msg(xpc_object_t xmsg)
 	}
 }
 
-void roothide_handle_xpc_msg(xpc_object_t xmsg)
+bool roothide_handle_xpc_msg(xpc_object_t xmsg)
 {
 	check_usreboot_msg(xmsg);
 
@@ -258,5 +258,9 @@ void roothide_handle_xpc_msg(xpc_object_t xmsg)
 				xpc_dictionary_set_int64(xmsg, "pid", INT_MAX);
 			}
 		}
+
+		return true;
 	}
+
+	return false;
 }

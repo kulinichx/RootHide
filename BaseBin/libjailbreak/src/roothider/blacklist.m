@@ -145,6 +145,9 @@ bool isBlacklistedPath(const char* path)
 
     if(access(injectPlistPath, F_OK) == 0) {
         if(!strcmp(path, "/sbin/launchd")) return false;
+        // The RootHide app blacklist must remain authoritative when the
+        // optional injection whitelist is enabled.
+        if(isBlacklistedPath_orig(path)) return true;
         if(zqbb_isWhiteListForSystem(path, injectSystemPlistPath)) return false;
         return zqbb_isBlacklistedExec(path, injectPlistPath);
     }

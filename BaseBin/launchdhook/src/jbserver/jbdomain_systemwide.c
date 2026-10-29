@@ -139,7 +139,7 @@ int systemwide_trust_file(audit_token_t *processToken, int rfd, struct siginfo *
 		return -1;
 	}
 	if (string_has_prefix(filepath, "/private/preboot/Cryptexes/") ||
-		(isRemovableBundlePath(filepath) && !hasTrollstoreLiteMarker(filepath))) {
+		(isRemovableBundlePath(filepath) && !hasTrollstoreMarker(filepath))) {
 		close(fd);
 		return 0;
 	}

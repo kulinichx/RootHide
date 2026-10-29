@@ -75,11 +75,6 @@ bool hasTrollstoreMarker(const char* path)
 	asprintf(&markerpath, "%s/_TrollStore", uuidpath);
 
 	int ret = access(markerpath, F_OK);
-    if(ret != 0) {
-        free((void*)markerpath); markerpath = NULL;
-        asprintf(&markerpath, "%s/_TrollStoreLite", uuidpath);
-        ret = access(markerpath, F_OK);
-    }
 
     free((void*)markerpath);
 	free((void*)uuidpath);

@@ -115,7 +115,6 @@ static int test_statfs(const char *p, struct statfs *out) {
 static int test_access(const char *p,int mode) {
     (void)mode;
     if (!strcmp(p,HOOK_DYLIB_PATH)) return hook_exists ? 0 : -1;
-    if (strstr(p,"/_TrollStoreLite")) return marker_kind==2 ? 0 : -1;
     if (strstr(p,"/_TrollStore")) return marker_kind==1 ? 0 : -1;
     if (strstr(p,"cn.zqbb.inject.plist")) return whitelist_exists ? 0 : -1;
     return -1;
@@ -189,7 +188,7 @@ static int run(const char *path,char *const env[],struct _posix_spawn_args_desc 
 int main(void) {
     /* The same compiled function is exercised in launchd and systemhook modes. */
     const char *paths[]={app,"/System/Library/daemon","/jb/usr/bin/tool"};
-    for(int child=0;child<2;child++) for(int marker=0;marker<3;marker++)
+    for(int child=0;child<2;child++) for(int marker=0;marker<2;marker++)
     for(int path=0;path<3;path++) for(int flag=0;flag<3;flag++) {
         reset();fake_pid=child ? 100 : 1;marker_kind=marker;
         char *env[]={flag==1 ? "_SafeMode=1" : "_SafeMode=0",flag==2 ? "_MSSafeMode=1" : "_MSSafeMode=0",NULL};

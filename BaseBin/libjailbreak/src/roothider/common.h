@@ -42,7 +42,6 @@ bool string_has_prefix(const char *str, const char* prefix);
 bool string_has_suffix(const char* str, const char* suffix);
 
 bool hasTrollstoreMarker(const char* path);
-bool hasTrollstoreLiteMarker(const char* path);
 
 void ensure_jbroot_symlink(const char* filepath);
 
@@ -69,7 +68,7 @@ void hideDeveloperMode();
 void exec_set_patch(bool enabled);
 int exec_cmd_roothide_spawn(pid_t* pidp, const char* path, const posix_spawn_file_actions_t *fap, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]);
 
-void roothide_handle_xpc_msg(xpc_object_t xmsg);
+bool roothide_handle_xpc_msg(xpc_object_t xmsg);
 
 void loadAppStoredIdentifiers();
 

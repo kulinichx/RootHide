@@ -317,27 +317,6 @@ bool hasTrollstoreMarker(const char* path)
 	asprintf(&markerpath, "%s/_TrollStore", uuidpath);
 
 	int ret = access(markerpath, F_OK);
-    if(ret != 0) {
-        free((void*)markerpath); markerpath = NULL;
-        asprintf(&markerpath, "%s/_TrollStoreLite", uuidpath);
-        ret = access(markerpath, F_OK);
-    }
-
-    free((void*)markerpath);
-	free((void*)uuidpath);
-
-	return ret==0;
-}
-
-bool hasTrollstoreLiteMarker(const char* path)
-{
-    char* uuidpath = getAppUUIDPath(path);
-	if(!uuidpath) return false;
-
-	char* markerpath=NULL;
-	asprintf(&markerpath, "%s/_TrollStoreLite", uuidpath);
-
-	int ret = access(markerpath, F_OK);
 
     free((void*)markerpath);
 	free((void*)uuidpath);
@@ -841,8 +820,7 @@ void loadAppStoredIdentifiers()
             continue;
         }
 
-        if([fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStore"]]
-            || [fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStoreLite"]])
+        if([fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStore"]])
         {
             JBLogDebug("Skipping trollstored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
             continue;

@@ -72,6 +72,37 @@ class ServiceContracts(unittest.TestCase):
         self.assertNotIn('abort()', log_case)
         self.assertIn('-ENOTSUP', text)
 
+    def test_blacklisted_xpc_is_filtered_before_jbserver_dispatch(self):
+        hook = source('BaseBin/libjailbreak/src/roothider/xpc_hook.m')
+        handler = extract(hook, 'bool roothide_handle_xpc_msg')
+        self.assertLess(handler.index('check_usreboot_msg(xmsg);'),
+                        handler.index('if (isBlacklistedToken(&clientToken))'))
+        self.assertIn('return true;', handler)
+        self.assertIn('return false;', handler)
+
+        dispatch = extract(source('BaseBin/libjailbreak/src/jbserver.c'),
+                           'int jbserver_received_xpc_message')
+        early_return = dispatch.index('if (roothide_handle_xpc_msg(xmsg)) return -2;')
+        domain_lookup = dispatch.index('xpc_dictionary_get_value(xmsg, "jb-domain")')
+        self.assertLess(early_return, domain_lookup)
+
+    def test_injection_whitelist_cannot_override_roothide_app_blacklist(self):
+        text = source('BaseBin/libjailbreak/src/roothider/blacklist.m')
+        policy = extract(text, 'bool isBlacklistedPath(const char* path)')
+        app_blacklist = policy.index('if(isBlacklistedPath_orig(path)) return true;')
+        system_whitelist = policy.index('if(zqbb_isWhiteListForSystem(path, injectSystemPlistPath)) return false;')
+        exec_whitelist = policy.index('return zqbb_isBlacklistedExec(path, injectPlistPath);')
+        self.assertLess(app_blacklist, system_whitelist)
+        self.assertLess(system_whitelist, exec_whitelist)
+
+    def test_safe_mode_trollstore_allowlist_matches_official(self):
+        rc9 = extract(source('BaseBin/systemhook/src/roothider_common.c'),
+                      'bool allowInjectWithSafeMode')
+        official = extract(source(
+            '参照官方dopamine/Dopamine-roothide-28/BaseBin/systemhook/src/roothider_common.c'),
+            'bool allowInjectWithSafeMode')
+        self.assertEqual(rc9, official)
+
 NATIVE_PREFIX = r'''
 #import <Foundation/Foundation.h>
 #include <assert.h>

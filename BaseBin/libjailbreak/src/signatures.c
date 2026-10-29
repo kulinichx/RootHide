@@ -139,7 +139,7 @@ int file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *cd
 		JBLogDebug("Skipping Cryptexes file: %s", filepath);
 		return 0;
 	}
-	if (isRemovableBundlePath(filepath) && !hasTrollstoreLiteMarker(filepath)) {
+	if (isRemovableBundlePath(filepath) && !hasTrollstoreMarker(filepath)) {
 		JBLogDebug("Ignoring adhoc signed app: %s", filepath);
 		return 0;
 	}
