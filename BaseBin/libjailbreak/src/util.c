@@ -14,6 +14,8 @@
 #include <math.h>
 #include <mach-o/dyld.h>
 #include <dirent.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <IOKit/IOKitLib.h>
 #include <mach-o/dyld_images.h>
 #include <mach-o/getsect.h>
@@ -869,6 +871,8 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 	int flags;
 	int r;
 	int result = 1;
+	char destinationPrefix[PATH_MAX];
+	char resolvedDestination[PATH_MAX];
 	if (!fileToExtract || !extractionPath) return 1;
 
 	/* Select which attributes we want to restore. */
@@ -890,6 +894,32 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 	archive_write_disk_set_standard_lookup(ext);
 	if ((r = archive_read_open_filename(a, fileToExtract, 10240)))
 			goto out;
+
+	/* Resolve caller-supplied directory aliases (such as /var on Darwin),
+	 * while leaving archive entry paths subject to the security checks. */
+	if (!extractionPath[0] ||
+	    strlcpy(destinationPrefix, extractionPath, sizeof(destinationPrefix)) >= sizeof(destinationPrefix)) goto out;
+	size_t suffixOffset = strlen(extractionPath);
+	while (!realpath(destinationPrefix, resolvedDestination)) {
+		if (errno != ENOENT) goto out;
+		char *separator = strrchr(destinationPrefix, '/');
+		if (!separator) {
+			suffixOffset = 0;
+			if (!realpath(".", resolvedDestination)) goto out;
+			break;
+		}
+		suffixOffset = separator - destinationPrefix + 1;
+		if (separator == destinationPrefix) {
+			if (!realpath("/", resolvedDestination)) goto out;
+			break;
+		}
+		*separator = '\0';
+	}
+	if (extractionPath[suffixOffset] &&
+	    (strlcat(resolvedDestination, "/", sizeof(resolvedDestination)) >= sizeof(resolvedDestination) ||
+	     strlcat(resolvedDestination, extractionPath + suffixOffset, sizeof(resolvedDestination)) >= sizeof(resolvedDestination))) goto out;
+	extractionPath = resolvedDestination;
+
 	for (;;) {
 			r = archive_read_next_header(a, &entry);
 			if (r == ARCHIVE_EOF)

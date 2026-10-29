@@ -179,6 +179,7 @@ ARCHIVE_PREFIX = r'''
 #include <string.h>
 #include <limits.h>
 #include <stdint.h>
+#include <errno.h>
 #define ARCHIVE_OK 0
 #define ARCHIVE_WARN -20
 #define ARCHIVE_FAILED -25
@@ -195,6 +196,7 @@ struct archive_entry { int unused; };
 static struct archive reader, writer;
 static struct archive_entry entry;
 static int fail, warning, headers, writtenHeaders, readCloses, writeCloses, readFrees, writeFrees, bodyCalls;
+static char writtenPath[PATH_MAX];
 static const char *entryPath = "basebin/tool";
 static const char *entryHardlink;
 static struct archive *archive_read_new(void) { return fail == 1 ? NULL : &reader; }
@@ -211,7 +213,7 @@ static int archive_read_next_header(struct archive *a, struct archive_entry **ou
 }
 static const char *archive_error_string(struct archive *a) { return "injected archive error"; }
 static const char *archive_entry_pathname(struct archive_entry *e) { return entryPath; }
-static void archive_entry_set_pathname(struct archive_entry *e, const char *path) {}
+static void archive_entry_set_pathname(struct archive_entry *e, const char *path) { strlcpy(writtenPath, path, sizeof(writtenPath)); }
 static const char *archive_entry_hardlink(struct archive_entry *e) { return entryHardlink; }
 static void archive_entry_set_hardlink(struct archive_entry *e, const char *path) {}
 static int archive_write_header(struct archive *a, struct archive_entry *e) { writtenHeaders++; return fail == 5 ? ARCHIVE_FAILED : (warning ? ARCHIVE_WARN : 0); }
@@ -222,19 +224,39 @@ static int archive_read_close(struct archive *a) { readCloses++; return fail == 
 static int archive_write_close(struct archive *a) { writeCloses++; return fail == 9 ? ARCHIVE_FAILED : 0; }
 static int archive_read_free(struct archive *a) { readFrees++; return fail == 10 ? ARCHIVE_FAILED : 0; }
 static int archive_write_free(struct archive *a) { writeFrees++; return fail == 11 ? ARCHIVE_FAILED : 0; }
-static void reset(int mode) { fail=mode;warning=headers=writtenHeaders=readCloses=writeCloses=readFrees=writeFrees=bodyCalls=0;entryPath="basebin/tool";entryHardlink=NULL; }
+static char *test_realpath(const char *path, char *resolved) {
+    if (fail == 12) { errno = EACCES; return NULL; }
+    if (strcmp(path, "/tmp") == 0 || strcmp(path, "/tmp/existing") == 0) {
+        strlcpy(resolved, "/private", PATH_MAX);
+        strlcat(resolved, path, PATH_MAX);
+        return resolved;
+    }
+    if (strcmp(path, ".") == 0) { strlcpy(resolved, "/work", PATH_MAX); return resolved; }
+    if (strcmp(path, "/") == 0) { strlcpy(resolved, "/", PATH_MAX); return resolved; }
+    errno = ENOENT; return NULL;
+}
+#define realpath test_realpath
+static void reset(int mode) { fail=mode;warning=headers=writtenHeaders=readCloses=writeCloses=readFrees=writeFrees=bodyCalls=0;writtenPath[0]=0;entryPath="basebin/tool";entryHardlink=NULL; }
 '''
 
 ARCHIVE_MAIN = r'''
 int main(void) {
     reset(0); assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 0);
     assert(readFrees == 1 && writeFrees == 1 && bodyCalls == 1);
-    for (int mode=1; mode<=11; mode++) {
+    assert(strcmp(writtenPath, "/private/tmp/staging/basebin/tool") == 0);
+    for (int mode=1; mode<=12; mode++) {
         reset(mode); assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1);
         assert(readFrees == (mode != 1)); assert(writeFrees == (mode > 2));
         assert(readCloses == readFrees && writeCloses == writeFrees);
         if (mode == 5) assert(bodyCalls == 0);
     }
+    reset(0); assert(libarchive_unarchive("payload.tar", "/tmp/existing") == 0);
+    assert(strcmp(writtenPath, "/private/tmp/existing/basebin/tool") == 0);
+    reset(0); assert(libarchive_unarchive("payload.tar", "/tmp/a/b") == 0);
+    assert(strcmp(writtenPath, "/private/tmp/a/b/basebin/tool") == 0);
+    reset(0); assert(libarchive_unarchive("payload.tar", "a/b") == 0);
+    assert(strcmp(writtenPath, "/work/a/b/basebin/tool") == 0);
+    reset(0); assert(libarchive_unarchive("payload.tar", "") == 1 && writtenHeaders == 0);
     reset(0); warning=1; assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 0);
     reset(0); entryPath=NULL; assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1);
     assert(readFrees == 1 && writeFrees == 1);
@@ -258,6 +280,8 @@ REAL_ARCHIVE_PREFIX = r'''
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
+#include <errno.h>
+#include <stdlib.h>
 '''
 REAL_ARCHIVE_MAIN = r'''
 int main(int argc, char **argv) {
@@ -304,9 +328,7 @@ def native_tests():
         tool.write_bytes(content)
         tool.chmod(0o755)
         os.symlink('tool', payload_basebin / 'link')
-        # Let tarfile derive directory, mode, and symlink headers from an
-        # actual filesystem tree; hand-built headers vary across libarchive
-        # versions when SECURE_SYMLINKS is enabled.
+        # Include both a directory and a legitimate leaf symlink.
         with tarfile.open(payload, 'w', dereference=False) as tar:
             tar.add(payload_basebin, arcname='basebin', recursive=True)
         output = Path(temp) / 'extracted'
@@ -314,6 +336,15 @@ def native_tests():
         assert (output / 'basebin/tool').read_bytes() == content
         assert (output / 'basebin/link').is_symlink()
         assert (output / 'basebin/link').read_bytes() == content
+        alias = Path(temp) / 'destination-alias'
+        os.symlink(Path(temp).resolve(), alias)
+        for destination in (alias / 'new/nested/output', alias / 'existing-output'):
+            if destination.name == 'existing-output':
+                destination.mkdir()
+            subprocess.run([str(binary), str(payload), str(destination)], check=True)
+            assert (destination / 'basebin/tool').read_bytes() == content
+            assert (destination / 'basebin/link').is_symlink()
+            assert (destination / 'basebin/link').read_bytes() == content
         blocked = Path(temp) / 'blocked'
         blocked.mkdir()
         sentinel = blocked / 'sentinel'

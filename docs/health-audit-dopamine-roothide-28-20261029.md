@@ -77,6 +77,23 @@ The basebin updater also previously set `JBUPDATE_PREV_VERSION` and `JBUPDATE_NE
 
 RC9 and RootHide 28 both prepend the destination directory to each archive pathname, but neither enabled libarchive's `ARCHIVE_EXTRACT_SECURE_NODOTDOT` or `ARCHIVE_EXTRACT_SECURE_SYMLINKS`. A `..` entry can therefore escape the extraction root; an archive can also create a symlink and then attempt to write a later entry through it. Hardlink targets use a separate archive field and likewise need confinement. The helper is used both for staged basebin updates and bootstrap extraction, so the destination may be a temporary directory or the live jailbreak root. RC9 now enables both libarchive protections, rejects absolute hardlink targets and any `..` hardlink path component, prefixes relative hardlink targets with the extraction root, and fails if the requested options cannot be applied. `tests/test_rc9_update.py` adds real-libarchive cases for traversal, a symlink pivot, and an absolute hardlink target, while retaining regular-file and leaf-symlink cases; the native stub also verifies relative hardlink traversal rejection. The 29 Python source-contract tests pass, but the new real-libarchive runtime cases require the macOS native test environment and have not run here. A full build/device test must also confirm that shipped archives do not rely on extracting through a previously created symlink or hardlink target.
 
+### CI follow-up: destination aliases
+
+Private Actions run `40873413441` at `caabb516` passed the injected archive
+tests but failed real extraction with `Cannot extract through symlink` for a
+destination under `/var/folders`. The two earlier fixture changes did not
+resolve this failure. Libarchive checks every destination path component,
+including the caller-supplied extraction directory; changing tar headers
+does not resolve filesystem aliases such as Darwin's `/var`.
+
+The extractor now resolves the existing destination prefix with `realpath`
+and appends any not-yet-created directory suffix before prefixing archive
+entries. Archive entry paths and hardlink targets retain their confinement
+checks. Native coverage includes existing and missing destinations under an
+explicit directory symlink, nested directories, relative destinations, and
+path-resolution failure. Local source-contract tests pass; macOS native and
+full TIPA validation must be recorded from the new CI run.
+
 ## Basebin trustcache collection errors
 
 RC9 and RootHide 28 both enumerate regular files, call `ensure_randomized_cdhash()`, and silently skip every nonzero return. That is needed for expected data files such as plists and `.version`, but it also hides failures to rewrite a valid Mach-O's signature, potentially publishing that file without its cdhash in the new basebin trustcache. RC9 now first classifies parseable Mach-O files with ChOma's read-only `fat_init_from_path()`; non-Mach-O data stays skipped, while randomization failure for a parsed Mach-O, resource lookup failure, or directory enumeration failure aborts trustcache preparation. Missing input paths and missing regular-file attributes also fail explicitly, with nonempty fallback diagnostics. Call-graph search found one RC9 caller: the basebin updater processes the extracted staging directory before replacing live files. It is not the initial jailbreak trustcache path, so a collection failure prevents staged publication. The focused source-contract check is in `tests/test_rc9_services.py`. Actual iOS 16 signature rewriting still requires native/device validation.
