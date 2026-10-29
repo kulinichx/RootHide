@@ -187,8 +187,10 @@ void jbupdate_update_system_info(void)
 		// Rebuild gSystemInfo
 		jbinfo_initialize_dynamic_offsets(systemInfoXdict);
 		jbinfo_initialize_hardcoded_offsets();
+#if !OS_OBJECT_USE_OBJC || !__has_feature(objc_arc)
 		xpc_release(newSystemInfoXdict);
 		xpc_release(systemInfoXdict);
+#endif
 	}
 }
 

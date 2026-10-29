@@ -119,7 +119,9 @@ static BOOL zqbb_wantsBlacklist(NSString *execName)
     if(!xplist) return NO;
 
     BOOL result = xpc_dictionary_get_bool(xplist, execName.UTF8String);
+#if !OS_OBJECT_USE_OBJC || !__has_feature(objc_arc)
     xpc_release(xplist);
+#endif
 
     return result;
 }

@@ -113,6 +113,24 @@ software manifest lists that toolchain. The separate Theos SDK remains
 builds. Native and full-build compatibility still require an executed CI
 run; changing runner configuration does not validate RC9's runtime code.
 
+### CI follow-up: ARC ownership compilation failure
+
+Public run `40885020218` (`affaf13a`, run number 558) acquired a macOS 15
+Intel runner, passed all six native regression scripts, and reached the full
+iOS build. This includes the real-libarchive alias, traversal, symlink-pivot,
+hardlink, truncated-archive, and permission-error cases. Full compilation
+then failed on explicit `xpc_release` calls in ARC-compiled `blacklist.m`
+and the new XPF wrapper. The earlier source-contract assertions had required
+those calls without accounting for ARC, and did not catch this defect.
+
+The pure-C XPF implementation now uses the `.c` extension so its manual
+cleanup matches the C XPF API. Its public declaration, and the C serializer
+`jbinfo_get_serialized`, declare their retained return values for Objective-C
+callers. The policy cache already had that annotation. Objective-C consumers
+now rely on ARC, retaining explicit release calls only when XPC objects are
+not managed by ARC; the app also clears its consumed instance variable.
+The next full run must validate compilation and packaging.
+
 ## Basebin trustcache collection errors
 
 RC9 and RootHide 28 both enumerate regular files, call `ensure_randomized_cdhash()`, and silently skip every nonzero return. That is needed for expected data files such as plists and `.version`, but it also hides failures to rewrite a valid Mach-O's signature, potentially publishing that file without its cdhash in the new basebin trustcache. RC9 now first classifies parseable Mach-O files with ChOma's read-only `fat_init_from_path()`; non-Mach-O data stays skipped, while randomization failure for a parsed Mach-O, resource lookup failure, or directory enumeration failure aborts trustcache preparation. Missing input paths and missing regular-file attributes also fail explicitly, with nonempty fallback diagnostics. Call-graph search found one RC9 caller: the basebin updater processes the extracted staging directory before replacing live files. It is not the initial jailbreak trustcache path, so a collection failure prevents staged publication. The focused source-contract check is in `tests/test_rc9_services.py`. Actual iOS 16 signature rewriting still requires native/device validation.

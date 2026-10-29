@@ -118,12 +118,12 @@ class ServiceContracts(unittest.TestCase):
         self.assertIn('resourceError.localizedDescription.UTF8String ?: "(unknown error)"', body)
 
     def test_roothide_xpf_offsets_are_appended_after_base_sets(self):
-        wrapper = source('BaseBin/libjailbreak/src/roothider/xpf.m')
+        wrapper = source('BaseBin/libjailbreak/src/roothider/xpf.c')
         header = source('BaseBin/libjailbreak/src/roothider/common.h')
         find_namecache = extract(wrapper, 'uint64_t xpf_find_namecache')
         append = extract(wrapper, 'int roothide_xpf_append_roothide_offsets')
         construct = extract(wrapper, 'xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper')
-        self.assertIn('xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper(const char *sets[]);', header)
+        self.assertIn('XPC_RETURNS_RETAINED xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper(const char *sets[]);', header)
         mismatch = find_namecache.split('if (nchashtbl != nchashmask - 8)', 1)[1].split('}', 1)[0]
         self.assertIn('nchashtbl = 0;', mismatch)
         self.assertIn('nchashmask = 0;', mismatch)
@@ -155,6 +155,9 @@ class ServiceContracts(unittest.TestCase):
             self.assertNotIn('sets[idx++] = "amfi_oids";', caller)
 
     def test_xpf_dictionaries_are_released_after_deserialization(self):
+        guard = '#if !OS_OBJECT_USE_OBJC || !__has_feature(objc_arc)'
+        self.assertIn('XPC_RETURNS_RETAINED xpc_object_t jbinfo_get_serialized(void);',
+                      source('BaseBin/libjailbreak/src/info.h'))
         initial = source('Application/Dopamine/Jailbreak/DOJailbreaker.m')
         initial_body = extract(initial, '- (NSError *)gatherSystemInformation')
         self.assertLess(
@@ -165,6 +168,9 @@ class ServiceContracts(unittest.TestCase):
             initial_body.index('xpc_release(_systemInfoXdict);'),
             initial_body.index('_systemInfoXdict = jbinfo_get_serialized();'),
         )
+        self.assertEqual(initial_body.count(guard), 2)
+        self.assertIn(guard + '\n    xpc_release(_systemInfoXdict);\n#endif\n    _systemInfoXdict = NULL;',
+                      initial_body)
 
         update = source('BaseBin/launchdhook/src/update.m')
         update_body = extract(update, 'void jbupdate_update_system_info')
@@ -172,6 +178,8 @@ class ServiceContracts(unittest.TestCase):
         release_merged = update_body.index('xpc_release(systemInfoXdict);')
         self.assertGreater(release_new, update_body.index('jbinfo_initialize_dynamic_offsets(systemInfoXdict);'))
         self.assertGreater(release_merged, update_body.index('jbinfo_initialize_dynamic_offsets(systemInfoXdict);'))
+        self.assertIn(guard + '\n\t\txpc_release(newSystemInfoXdict);\n\t\txpc_release(systemInfoXdict);\n#endif',
+                      update_body)
 
     def test_bootstrap_daemon_plist_patch_propagates_failures(self):
         bootstrapper = source('Application/Dopamine/Jailbreak/DOBootstrapper.m')
@@ -221,7 +229,8 @@ class ServiceContracts(unittest.TestCase):
     def test_injection_whitelist_uses_the_author_wantsblacklist_gate(self):
         text = source('BaseBin/libjailbreak/src/roothider/blacklist.m')
         wants_blacklist = extract(text, 'static BOOL zqbb_wantsBlacklist')
-        self.assertIn('xpc_release(xplist);', wants_blacklist)
+        self.assertIn('#if !OS_OBJECT_USE_OBJC || !__has_feature(objc_arc)\n    xpc_release(xplist);\n#endif',
+                      wants_blacklist)
 
         helper = extract(text, 'static bool zqbb_isBlacklistedExec')
         gate = helper.index('if(zqbb_wantsBlacklist(')

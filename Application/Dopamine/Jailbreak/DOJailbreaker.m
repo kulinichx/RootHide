@@ -315,7 +315,10 @@ static void initializeRootHideWhitelistDefaults(void)
     
     jbinfo_initialize_dynamic_offsets(_systemInfoXdict);
     jbinfo_initialize_hardcoded_offsets();
+#if !OS_OBJECT_USE_OBJC || !__has_feature(objc_arc)
     xpc_release(_systemInfoXdict);
+#endif
+    _systemInfoXdict = NULL;
 
     if ([NSBundle mainBundle].bundleIdentifier) {
         gSystemInfo.jailbreakInfo.appIdentifier = strdup([NSBundle mainBundle].bundleIdentifier.UTF8String);
@@ -332,7 +335,9 @@ static void initializeRootHideWhitelistDefaults(void)
             }
             return true;
         });
+#if !OS_OBJECT_USE_OBJC || !__has_feature(objc_arc)
         xpc_release(_systemInfoXdict);
+#endif
         _systemInfoXdict = NULL;
     }
     

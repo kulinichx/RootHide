@@ -60,7 +60,7 @@ int ensure_randomized_cdhash_for_slice(const char* inputPath, uint64_t offset, v
 char* generate_sandbox_extensions(audit_token_t *processToken, bool writable);
 
 int randomizeAndLoadBasebinTrustcache(const char* basebinPath);
-xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper(const char *sets[]);
+XPC_RETURNS_RETAINED xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper(const char *sets[]);
 
 bool otherJailbreakActived(bool postexploit);
 
