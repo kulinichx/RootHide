@@ -298,7 +298,10 @@ def native_tests():
         payload = Path(temp) / 'payload.tar'
         content = b'basebin extraction regression\n' * 256
         with tarfile.open(payload, 'w') as tar:
-            directory = tarfile.TarInfo('basebin')
+            # Keep the directory entry in canonical tar form. Some libarchive
+            # versions otherwise treat the following leaf symlink as an
+            # extraction-through-symlink case under SECURE_SYMLINKS.
+            directory = tarfile.TarInfo('basebin/')
             directory.type = tarfile.DIRTYPE
             directory.mode = 0o755
             directory.uid, directory.gid = os.getuid(), os.getgid()
