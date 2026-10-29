@@ -131,6 +131,14 @@ now rely on ARC, retaining explicit release calls only when XPC objects are
 not managed by ARC; the app also clears its consumed instance variable.
 The next full run must validate compilation and packaging.
 
+Public run `40885984595` (`97d62925`, run number 559) passed the native
+suite and built BaseBin, including the C XPF wrapper and launchdhook.
+The App build reached asset catalog compilation, where Xcode 16.2's
+`actool` rejected the installed simulator runtimes: SDK build `22C146`
+had no matching runtime among the image's installed versions. The workflow
+now selects the image's Xcode 16.4 and iPhoneOS 18.5 SDK, matching its
+installed iOS 18.5 runtime (`22F77`). No asset compilation is skipped.
+
 ## Basebin trustcache collection errors
 
 RC9 and RootHide 28 both enumerate regular files, call `ensure_randomized_cdhash()`, and silently skip every nonzero return. That is needed for expected data files such as plists and `.version`, but it also hides failures to rewrite a valid Mach-O's signature, potentially publishing that file without its cdhash in the new basebin trustcache. RC9 now first classifies parseable Mach-O files with ChOma's read-only `fat_init_from_path()`; non-Mach-O data stays skipped, while randomization failure for a parsed Mach-O, resource lookup failure, or directory enumeration failure aborts trustcache preparation. Missing input paths and missing regular-file attributes also fail explicitly, with nonempty fallback diagnostics. Call-graph search found one RC9 caller: the basebin updater processes the extracted staging directory before replacing live files. It is not the initial jailbreak trustcache path, so a collection failure prevents staged publication. The focused source-contract check is in `tests/test_rc9_services.py`. Actual iOS 16 signature rewriting still requires native/device validation.
