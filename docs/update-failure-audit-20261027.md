@@ -23,5 +23,7 @@ RC9 与 zqbb 的更新循环均忽略 remove/copy 返回值；两边 libarchive_
 - Windows 本地 23 项源码契约通过，git diff --check 通过。
 - 新增 tests/test_rc9_update.py --native：抽取实际更新函数，真实临时文件配合文件系统失败注入；覆盖校验、plist 写入、随机化、删除、复制及标记失败，确认失败不生成成功标记，正常 payload 不触碰既有 gen/dyld 与 .fakelib。
 - 同脚本抽取实际解包函数，模拟分配、open、header、数据、finish、close/free 失败；另链接真实 libarchive 验证正常文件/符号链接、目标阻塞及截断 tar。
-- macOS 原生测试、完整 iPhoneOS 构建结果待 CI 确认，不能将测试已编写等同测试已通过。
+- 0478d481f0234144d9adca14d372c922e7e84504 的 full run 40504724306 已成功：全部原生测试、真实 libarchive 集成测试、完整 iPhoneOS 构建及 TIPA 上传通过。本地证据为 artifacts/2026-10-27-health-status/build-0478d48.json 和对应日志。
+- 首次 run 40503844116 缺少 archive.h，已调整依赖安装顺序并指定 Homebrew libarchive；第二次 run 40504182159 的阻塞目标是假设错误（libarchive 可把普通文件替换成目录），已改为真实不可写目录后通过，没有跳过测试。
+- 生产修复为 b9011595，640a5a4/0478d48 仅调整测试依赖与夹具。安装包为 Dopamine_3.0.7-0478d48_roothide.tipa；用户手动下载，本轮未完成本地新包静态核验或新版真机全流程验收。
 - 本次不是完整事务恢复：复制到一半失败仍可能留下部分替换；调用方保留原有失败停止行为；App 重建 basebin 的先删后解包顺序未改变。断电／进程中断恢复仍需独立设计与验证。

@@ -13,6 +13,7 @@
 #include <mach-o/dyld.h>
 #include <sys/proc_info.h>
 #include <dispatch/dispatch.h>
+#include <choma/Fat.h>
 
 #include "../libjailbreak.h"
 #include "../codesign.h"
@@ -547,31 +548,75 @@ void hideDeveloperMode()
 
 int randomizeAndLoadBasebinTrustcache(const char* basebinPath)
 {
+    if (!basebinPath || !basebinPath[0]) {
+        JBLogError("BaseBin trustcache path is empty");
+        return -1;
+    }
+
     cdhash_t* basebins_cdhashes=NULL;
     uint32_t basebins_cdhashesCount=0;
+    __block BOOL enumerationFailed = NO;
 
-    NSDirectoryEnumerator<NSURL *> *directoryEnumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:@(basebinPath)] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+    NSDirectoryEnumerator<NSURL *> *directoryEnumerator = [[NSFileManager defaultManager]
+        enumeratorAtURL:[NSURL fileURLWithPath:@(basebinPath)]
+        includingPropertiesForKeys:nil
+        options:0
+        errorHandler:^BOOL(NSURL *url, NSError *error) {
+            JBLogError("Failed to enumerate basebin trustcache input: %s (%s)",
+                       url.path.fileSystemRepresentation ?: "(unknown path)",
+                       error.localizedDescription.UTF8String ?: "(unknown error)");
+            enumerationFailed = YES;
+            return NO;
+        }];
     if(!directoryEnumerator) {
         return -1;
     }
     for(NSURL* fileURL in directoryEnumerator)
     {
         NSNumber* isFile = nil;
-        [fileURL getResourceValue:&isFile forKey:NSURLIsRegularFileKey error:nil];
-        if(!isFile || !isFile.boolValue) continue;
+        NSError *resourceError = nil;
+        if (![fileURL getResourceValue:&isFile forKey:NSURLIsRegularFileKey error:&resourceError]) {
+            JBLogError("Failed to inspect basebin trustcache input: %s (%s)",
+                       fileURL.path.fileSystemRepresentation ?: "(unknown path)",
+                       resourceError.localizedDescription.UTF8String ?: "(unknown error)");
+            free(basebins_cdhashes);
+            return -5;
+        }
+        if (!isFile) {
+            JBLogError("Missing regular-file attribute for basebin trustcache input: %s",
+                       fileURL.path.fileSystemRepresentation ?: "(unknown path)");
+            free(basebins_cdhashes);
+            return -5;
+        }
+        if (!isFile.boolValue) continue;
+
+        Fat *fat = fat_init_from_path(fileURL.path.fileSystemRepresentation);
+        if (!fat) continue;
+        fat_free(fat);
 
         cdhash_t cdhash={0};
-        if(ensure_randomized_cdhash(fileURL.path.fileSystemRepresentation, cdhash) == 0) {
-            cdhash_t *new_cdhashes = realloc(basebins_cdhashes, (basebins_cdhashesCount+1) * sizeof(cdhash_t));
-            if(!new_cdhashes) {
-                JBLogError("Failed to grow BaseBin cdhash accumulator");
-                free(basebins_cdhashes);
-                return -2;
-            }
-            basebins_cdhashes = new_cdhashes;
-            memcpy(&basebins_cdhashes[basebins_cdhashesCount], cdhash, sizeof(cdhash_t));
-            basebins_cdhashesCount++;
+        int randomizeResult = ensure_randomized_cdhash(fileURL.path.fileSystemRepresentation, cdhash);
+        if (randomizeResult != 0) {
+            JBLogError("Failed to randomize basebin Mach-O: %s (%d)",
+                       fileURL.path.fileSystemRepresentation, randomizeResult);
+            free(basebins_cdhashes);
+            return -5;
         }
+
+        cdhash_t *new_cdhashes = realloc(basebins_cdhashes, (basebins_cdhashesCount+1) * sizeof(cdhash_t));
+        if(!new_cdhashes) {
+            JBLogError("Failed to grow BaseBin cdhash accumulator");
+            free(basebins_cdhashes);
+            return -2;
+        }
+        basebins_cdhashes = new_cdhashes;
+        memcpy(&basebins_cdhashes[basebins_cdhashesCount], cdhash, sizeof(cdhash_t));
+        basebins_cdhashesCount++;
+    }
+
+    if (enumerationFailed) {
+        free(basebins_cdhashes);
+        return -5;
     }
 
     if(!basebins_cdhashes) {

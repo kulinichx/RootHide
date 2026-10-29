@@ -4,6 +4,7 @@
 #include <libjailbreak/kcall_arm64.h>
 #include <libjailbreak/signatures.h>
 #include <libjailbreak/basebin_gen.h>
+#include <libjailbreak/roothider/common.h>
 #include <xpc/xpc.h>
 #include <dlfcn.h>
 
@@ -53,6 +54,8 @@ int jbupdate_basebin(const char *basebinTarPath)
 
 		// Validate the extracted payload before modifying the live basebin.
 		NSString *tmpExtractionPath = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+		BOOL updateMarkersSet = NO;
+		BOOL updateCompleted = NO;
 		@try {
 			if (libarchive_unarchive(basebinTarPath, tmpExtractionPath.fileSystemRepresentation) != 0) return 2;
 			NSString *tmpBasebinPath = [tmpExtractionPath stringByAppendingPathComponent:@"basebin"];
@@ -62,6 +65,14 @@ int jbupdate_basebin(const char *basebinTarPath)
 			if (!newVersion.length) return 6;
 			int r = jbupdate_patch_launchdaemons(tmpBasebinPath);
 			if (r != 0) return r;
+
+			// Reserve finalizer state before changing trustcache or live files.
+			if (setenv("JBUPDATE_PREV_VERSION", prevVersion.UTF8String, 1) != 0) return 14;
+			if (setenv("JBUPDATE_NEW_VERSION", newVersion.UTF8String, 1) != 0) {
+				unsetenv("JBUPDATE_PREV_VERSION");
+				return 14;
+			}
+			updateMarkersSet = YES;
 
 			// Keep zqbb's RootHide randomization/trust operation and vnode lifecycle.
 			if (randomizeAndLoadBasebinTrustcache(tmpBasebinPath.fileSystemRepresentation) != 0) return 5;
@@ -75,14 +86,13 @@ int jbupdate_basebin(const char *basebinTarPath)
 				if (![fm copyItemAtPath:newBasebinPath toPath:oldBasebinPath error:nil]) return 9;
 			}
 
-			// Publish update markers only after all files have been installed.
-			if (setenv("JBUPDATE_PREV_VERSION", prevVersion.UTF8String, 1) != 0) return 14;
-			if (setenv("JBUPDATE_NEW_VERSION", newVersion.UTF8String, 1) != 0) {
-				unsetenv("JBUPDATE_PREV_VERSION");
-				return 14;
-			}
+			updateCompleted = YES;
 			return 0;
 		} @finally {
+			if (updateMarkersSet && !updateCompleted) {
+				unsetenv("JBUPDATE_PREV_VERSION");
+				unsetenv("JBUPDATE_NEW_VERSION");
+			}
 			// Cleanup must also run for invalid payloads and failed replacements.
 			[fm removeItemAtPath:tmpExtractionPath error:nil];
 		}
@@ -147,20 +157,7 @@ void jbupdate_update_system_info(void)
 			if (xpf_set_is_supported("perfkrw")) {
 				sets[idx++] = "perfkrw";
 			}
-
-
-/********************** roothide *************************/
-sets[idx++] = "namecache";
-
-if (xpf_set_is_supported("amfi_oids")) {
-	sets[idx++] = "amfi_oids";
-}
-
-sets[idx] = NULL;
-/********************** roothide *************************/
-
-
-			newSystemInfoXdict = xpf_construct_offset_dictionary((const char **)sets);
+			newSystemInfoXdict = roothide_xpf_construct_offset_dictionary_wrapper((const char **)sets);
 			if (!newSystemInfoXdict) {
 				error = xpf_get_error();
 			}
@@ -190,6 +187,8 @@ sets[idx] = NULL;
 		// Rebuild gSystemInfo
 		jbinfo_initialize_dynamic_offsets(systemInfoXdict);
 		jbinfo_initialize_hardcoded_offsets();
+		xpc_release(newSystemInfoXdict);
+		xpc_release(systemInfoXdict);
 	}
 }
 

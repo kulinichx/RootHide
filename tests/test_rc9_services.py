@@ -3,6 +3,7 @@ The tested functions are extracted from production sources, not rewritten models
 """
 import argparse
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
@@ -85,6 +86,137 @@ class ServiceContracts(unittest.TestCase):
         early_return = dispatch.index('if (roothide_handle_xpc_msg(xmsg)) return -2;')
         domain_lookup = dispatch.index('xpc_dictionary_get_value(xmsg, "jb-domain")')
         self.assertLess(early_return, domain_lookup)
+
+    def test_staged_update_reports_environment_failure(self):
+        handler = extract(
+            source('BaseBin/launchdhook/src/jbserver/jbdomain_platform.c'),
+            'static int platform_stage_jailbreak_update',
+        )
+        access_check = handler.index('if (!access(updateTar, F_OK))')
+        env_check = handler.index(
+            'if (setenv("STAGED_JAILBREAK_UPDATE", updateTar, 1) != 0) return 2;'
+        )
+        self.assertLess(access_check, env_check)
+        self.assertLess(env_check, handler.index('return 0;'))
+
+    def test_basebin_trustcache_does_not_silently_skip_macho_failures(self):
+        body = extract(
+            source('BaseBin/libjailbreak/src/roothider/common.m'),
+            'int randomizeAndLoadBasebinTrustcache',
+        )
+        self.assertLess(
+            body.index('Fat *fat = fat_init_from_path('),
+            body.index('ensure_randomized_cdhash('),
+        )
+        self.assertIn('if (!fat) continue;', body)
+        self.assertIn('if (randomizeResult != 0)', body)
+        self.assertIn('free(basebins_cdhashes);', body)
+        self.assertIn('return -5;', body)
+        self.assertIn('if (enumerationFailed)', body)
+        self.assertIn('if (!basebinPath || !basebinPath[0])', body)
+        self.assertIn('if (!isFile)', body)
+        self.assertIn('resourceError.localizedDescription.UTF8String ?: "(unknown error)"', body)
+
+    def test_roothide_xpf_offsets_are_appended_after_base_sets(self):
+        wrapper = source('BaseBin/libjailbreak/src/roothider/xpf.m')
+        header = source('BaseBin/libjailbreak/src/roothider/common.h')
+        find_namecache = extract(wrapper, 'uint64_t xpf_find_namecache')
+        append = extract(wrapper, 'int roothide_xpf_append_roothide_offsets')
+        construct = extract(wrapper, 'xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper')
+        self.assertIn('xpc_object_t roothide_xpf_construct_offset_dictionary_wrapper(const char *sets[]);', header)
+        mismatch = find_namecache.split('if (nchashtbl != nchashmask - 8)', 1)[1].split('}', 1)[0]
+        self.assertIn('nchashtbl = 0;', mismatch)
+        self.assertIn('nchashmask = 0;', mismatch)
+        self.assertNotIn('= -1;', mismatch)
+        self.assertIn('xpf_item_register("kernelSymbol.nchashtbl"', append)
+        self.assertIn('xpf_item_register("kernelSymbol.launch_env_logging"', append)
+        self.assertIn('xpf_offset_dictionary_add_set(xdict, &gNameCacheSet)', append)
+        self.assertIn('xpf_offset_dictionary_add_set(xdict, &gAMFIOidsSet)', append)
+        self.assertLess(
+            construct.index('xpf_construct_offset_dictionary(sets)'),
+            construct.index('roothide_xpf_append_roothide_offsets(xdict)'),
+        )
+        failure = construct.index('if (roothide_xpf_append_roothide_offsets(xdict) != 0)')
+        self.assertLess(
+            construct.index('xpc_release(xdict);', failure),
+            construct.index('return NULL;', failure),
+        )
+
+        for path, assignment in (
+            ('Application/Dopamine/Jailbreak/DOJailbreaker.m', '_systemInfoXdict ='),
+            ('BaseBin/launchdhook/src/update.m', 'newSystemInfoXdict ='),
+        ):
+            caller = source(path)
+            self.assertIn(
+                assignment + ' roothide_xpf_construct_offset_dictionary_wrapper((const char **)sets);',
+                caller,
+            )
+            self.assertNotIn('sets[idx++] = "namecache";', caller)
+            self.assertNotIn('sets[idx++] = "amfi_oids";', caller)
+
+    def test_xpf_dictionaries_are_released_after_deserialization(self):
+        initial = source('Application/Dopamine/Jailbreak/DOJailbreaker.m')
+        initial_body = extract(initial, '- (NSError *)gatherSystemInformation')
+        self.assertLess(
+            initial_body.index('jbinfo_initialize_dynamic_offsets(_systemInfoXdict);'),
+            initial_body.index('xpc_release(_systemInfoXdict);'),
+        )
+        self.assertLess(
+            initial_body.index('xpc_release(_systemInfoXdict);'),
+            initial_body.index('_systemInfoXdict = jbinfo_get_serialized();'),
+        )
+
+        update = source('BaseBin/launchdhook/src/update.m')
+        update_body = extract(update, 'void jbupdate_update_system_info')
+        release_new = update_body.index('xpc_release(newSystemInfoXdict);')
+        release_merged = update_body.index('xpc_release(systemInfoXdict);')
+        self.assertGreater(release_new, update_body.index('jbinfo_initialize_dynamic_offsets(systemInfoXdict);'))
+        self.assertGreater(release_merged, update_body.index('jbinfo_initialize_dynamic_offsets(systemInfoXdict);'))
+
+    def test_bootstrap_daemon_plist_patch_propagates_failures(self):
+        bootstrapper = source('Application/Dopamine/Jailbreak/DOBootstrapper.m')
+        patch_one = extract(bootstrapper, '- (NSError *)patchBasebinDaemonPlist:')
+        self.assertIn('if (!plistDict)', patch_one)
+        self.assertIn('if (![plistDict writeToFile:plistPath atomically:YES])', patch_one)
+
+        patch_all = extract(bootstrapper, '- (NSError *)patchBasebinDaemonPlistsAtPath:')
+        self.assertIn('error:&error', patch_all)
+        self.assertIn('if (error) return error;', patch_all)
+
+        active_bootstrap = bootstrapper.rsplit('- (void)prepareBootstrapWithCompletion:', 1)[1]
+        self.assertIn('error = [self replaceBasebinFromBundledArchive];', active_bootstrap)
+        self.assertIn('completion(error);', active_bootstrap)
+
+        plist_paths = sorted((ROOT / 'BaseBin/_external/basebin/LaunchDaemons').glob('*.plist'))
+        self.assertTrue(plist_paths)
+        for plist_path in plist_paths:
+            with plist_path.open('rb') as plist_file:
+                plist = plistlib.load(plist_file)
+            arguments = plist.get('ProgramArguments')
+            self.assertIsInstance(arguments, list, plist_path.name)
+            self.assertTrue(arguments, plist_path.name)
+            self.assertTrue(all(isinstance(value, str) for value in arguments), plist_path.name)
+            self.assertTrue(any('@JBROOT@' in value for value in arguments), plist_path.name)
+
+    def test_bootstrap_basebin_publication_is_recoverable(self):
+        bootstrapper = source('Application/Dopamine/Jailbreak/DOBootstrapper.m')
+        recovery = extract(bootstrapper, '- (NSError *)recoverBasebinPublication')
+        self.assertIn('if (hasBackup && !hasBasebin)', recovery)
+        self.assertIn('if (hasBackup && isPublishedGeneration)', recovery)
+        self.assertIn('Ambiguous basebin recovery state', recovery)
+        self.assertIn('stageRootPath', recovery)
+
+        publish = extract(bootstrapper, '- (NSError *)replaceBasebinFromBundledArchive')
+        self.assertIn('extractTar:archivePath toPath:stageRootPath', publish)
+        self.assertIn('patchBasebinDaemonPlistsAtPath:stageBasebinPath', publish)
+        self.assertIn('writeToFile:readyPath', publish)
+        self.assertLess(publish.index('writeToFile:readyPath'), publish.index('moveItemAtPath:basebinPath toPath:backupPath'))
+        self.assertLess(publish.index('moveItemAtPath:basebinPath toPath:backupPath'), publish.index('moveItemAtPath:stageBasebinPath toPath:basebinPath'))
+        self.assertIn('restoreError', publish)
+
+        active_bootstrap = bootstrapper.rsplit('- (void)prepareBootstrapWithCompletion:', 1)[1]
+        self.assertIn('replaceBasebinFromBundledArchive', active_bootstrap)
+        self.assertIn('--transform "s/^.build/basebin/"', source('BaseBin/Makefile'))
 
     def test_injection_whitelist_uses_the_author_wantsblacklist_gate(self):
         text = source('BaseBin/libjailbreak/src/roothider/blacklist.m')

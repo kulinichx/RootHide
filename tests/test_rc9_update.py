@@ -20,14 +20,25 @@ class UpdateContracts(unittest.TestCase):
         self.assertLess(body.index('jbupdate_patch_launchdaemons(tmpBasebinPath)'),
                         body.index('randomizeAndLoadBasebinTrustcache('))
         self.assertLess(body.index('if (!newVersion.length)'), body.index('removeItemAtPath:oldBasebinPath'))
+        self.assertLess(body.index('setenv("JBUPDATE_PREV_VERSION"'),
+                        body.index('randomizeAndLoadBasebinTrustcache('))
+        self.assertLess(body.index('setenv("JBUPDATE_NEW_VERSION"'),
+                        body.index('removeItemAtPath:oldBasebinPath'))
+        self.assertIn('if (updateMarkersSet && !updateCompleted)', body)
         self.assertIn('if (![fm copyItemAtPath:', body)
         self.assertIn('@finally', body)
-        self.assertLess(body.index('copyItemAtPath:'), body.index('setenv('))
 
     def test_extract_reports_write_header_errors_and_cleans_up(self):
         body = extract(source(UTIL), 'int libarchive_unarchive(')
         header = body.split('r = archive_write_header(ext, entry);', 1)[1].split('else if', 1)[0]
         self.assertIn('if (r < ARCHIVE_WARN) goto out;', header)
+        self.assertIn('flags |= ARCHIVE_EXTRACT_SECURE_NODOTDOT;', body)
+        self.assertIn('flags |= ARCHIVE_EXTRACT_SECURE_SYMLINKS;', body)
+        self.assertIn('archive_write_disk_set_options(ext, flags) != ARCHIVE_OK', body)
+        self.assertIn('archive_entry_hardlink(entry)', body)
+        self.assertIn("currentHardlink[0] == '/'", body)
+        self.assertIn("componentStart[0] == '.' && componentStart[1] == '.'", body)
+        self.assertIn('archive_entry_set_hardlink(entry, outputHardlink)', body)
         for operation in ('archive_read_close(a)', 'archive_read_free(a)',
                           'archive_write_close(ext)', 'archive_write_free(ext)'):
             self.assertIn(operation, body.split('out:', 1)[1])
@@ -143,7 +154,8 @@ int main(void) { @autoreleasepool {
     check(@"plist-write", 12, NO); assert(trustCalls == 0);
     check(@"tc-remove", 13, NO); check(@"list", 7, NO); check(@"empty", 7, NO);
     check(@"remove", 8, YES); check(@"copy", 9, YES);
-    check(@"marker1", 14, YES); check(@"marker2", 14, YES);
+    check(@"marker1", 14, NO); check(@"marker2", 14, NO);
+    assert(trustCalls == 0 && liveWrites == 0);
     reset(nil); [NSFileManager.defaultManager removeItemAtPath:[fixture stringByAppendingPathComponent:@"basebin/basebin.tc"] error:NULL];
     assert(run() == 3 && cleanups == 1 && liveWrites == 0 && trustCalls == 0);
     reset(nil); put([fixture stringByAppendingPathComponent:@"basebin/.version"], @"");
@@ -176,12 +188,15 @@ ARCHIVE_PREFIX = r'''
 #define ARCHIVE_EXTRACT_ACL 4
 #define ARCHIVE_EXTRACT_FFLAGS 8
 #define ARCHIVE_EXTRACT_OWNER 16
+#define ARCHIVE_EXTRACT_SECURE_SYMLINKS 32
+#define ARCHIVE_EXTRACT_SECURE_NODOTDOT 64
 struct archive { int writer; };
 struct archive_entry { int unused; };
 static struct archive reader, writer;
 static struct archive_entry entry;
 static int fail, warning, headers, readCloses, writeCloses, readFrees, writeFrees, bodyCalls;
 static const char *entryPath = "basebin/tool";
+static const char *entryHardlink;
 static struct archive *archive_read_new(void) { return fail == 1 ? NULL : &reader; }
 static struct archive *archive_write_disk_new(void) { return fail == 2 ? NULL : &writer; }
 static int archive_read_support_format_all(struct archive *a) { return 0; }
@@ -197,6 +212,8 @@ static int archive_read_next_header(struct archive *a, struct archive_entry **ou
 static const char *archive_error_string(struct archive *a) { return "injected archive error"; }
 static const char *archive_entry_pathname(struct archive_entry *e) { return entryPath; }
 static void archive_entry_set_pathname(struct archive_entry *e, const char *path) {}
+static const char *archive_entry_hardlink(struct archive_entry *e) { return entryHardlink; }
+static void archive_entry_set_hardlink(struct archive_entry *e, const char *path) {}
 static int archive_write_header(struct archive *a, struct archive_entry *e) { return fail == 5 ? ARCHIVE_FAILED : (warning ? ARCHIVE_WARN : 0); }
 static int archive_entry_size(struct archive_entry *e) { return 1; }
 static int copy_data(struct archive *a, struct archive *b) { bodyCalls++; return fail == 6 ? ARCHIVE_FAILED : 0; }
@@ -205,7 +222,7 @@ static int archive_read_close(struct archive *a) { readCloses++; return fail == 
 static int archive_write_close(struct archive *a) { writeCloses++; return fail == 9 ? ARCHIVE_FAILED : 0; }
 static int archive_read_free(struct archive *a) { readFrees++; return fail == 10 ? ARCHIVE_FAILED : 0; }
 static int archive_write_free(struct archive *a) { writeFrees++; return fail == 11 ? ARCHIVE_FAILED : 0; }
-static void reset(int mode) { fail=mode;warning=headers=readCloses=writeCloses=readFrees=writeFrees=bodyCalls=0;entryPath="basebin/tool"; }
+static void reset(int mode) { fail=mode;warning=headers=readCloses=writeCloses=readFrees=writeFrees=bodyCalls=0;entryPath="basebin/tool";entryHardlink=NULL; }
 '''
 
 ARCHIVE_MAIN = r'''
@@ -221,6 +238,10 @@ int main(void) {
     reset(0); warning=1; assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 0);
     reset(0); entryPath=NULL; assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1);
     assert(readFrees == 1 && writeFrees == 1);
+    reset(0); entryHardlink="/outside/file";
+    assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1 && headers == 0);
+    reset(0); entryHardlink="basebin/../../outside/file";
+    assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1 && headers == 0);
     char longPath[PATH_MAX+1]; memset(longPath, 'x', sizeof(longPath)-1); longPath[PATH_MAX]=0;
     reset(0); assert(libarchive_unarchive("payload.tar", longPath) == 1 && writeFrees == 1);
     reset(0); entryPath=longPath; assert(libarchive_unarchive("payload.tar", "/tmp") == 1 && writeFrees == 1);
@@ -312,7 +333,44 @@ def native_tests():
         damaged = Path(temp) / 'damaged.tar'
         damaged.write_bytes(payload.read_bytes()[:2048])
         assert subprocess.run([str(binary), str(damaged), str(Path(temp) / 'damaged-output')]).returncode == 1
-        print('PASS: real libarchive; regular file, symlink, blocked destination and truncated payload')
+        traversal = Path(temp) / 'traversal.tar'
+        with tarfile.open(traversal, 'w') as tar:
+            item = tarfile.TarInfo('../escape')
+            item.size = len(content)
+            tar.addfile(item, io.BytesIO(content))
+        outside = Path(temp) / 'escape'
+        outside.write_text('preserve', encoding='utf-8')
+        assert subprocess.run([str(binary), str(traversal), str(Path(temp) / 'traversal-output')]).returncode == 1
+        assert outside.read_text(encoding='utf-8') == 'preserve'
+
+        pivot = Path(temp) / 'pivot.tar'
+        with tarfile.open(pivot, 'w') as tar:
+            link = tarfile.TarInfo('basebin/pivot')
+            link.type = tarfile.SYMTYPE
+            link.linkname = '../../escape-dir'
+            tar.addfile(link)
+            item = tarfile.TarInfo('basebin/pivot/marker')
+            item.size = len(content)
+            tar.addfile(item, io.BytesIO(content))
+        escape_dir = Path(temp) / 'escape-dir'
+        escape_dir.mkdir()
+        marker = escape_dir / 'marker'
+        marker.write_text('preserve', encoding='utf-8')
+        assert subprocess.run([str(binary), str(pivot), str(Path(temp) / 'pivot-output')]).returncode == 1
+        assert marker.read_text(encoding='utf-8') == 'preserve'
+
+        hardlink = Path(temp) / 'hardlink.tar'
+        hardlink_outside = Path(temp) / 'hardlink-outside'
+        hardlink_outside.write_text('preserve', encoding='utf-8')
+        with tarfile.open(hardlink, 'w', format=tarfile.PAX_FORMAT) as tar:
+            item = tarfile.TarInfo('basebin/hardlink')
+            item.type = tarfile.LNKTYPE
+            item.linkname = str(hardlink_outside)
+            item.size = len(content)
+            tar.addfile(item, io.BytesIO(content))
+        assert subprocess.run([str(binary), str(hardlink), str(Path(temp) / 'hardlink-output')]).returncode == 1
+        assert hardlink_outside.read_text(encoding='utf-8') == 'preserve'
+        print('PASS: real libarchive; files, symlinks, traversal, symlink pivot, hardlink escape, blocked destination and truncated payload')
 
 
 if __name__ == '__main__':

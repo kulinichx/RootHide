@@ -304,31 +304,165 @@ NSString *const bootstrapErrorDomain = @"BootstrapErrorDomain";
 }
 #endif
 
-- (void)patchBasebinDaemonPlist:(NSString *)plistPath
+- (NSError *)patchBasebinDaemonPlist:(NSString *)plistPath
 {
     NSMutableDictionary *plistDict = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-    if (plistDict) {
-        bool madeChanges = NO;
-        NSMutableArray *programArguments = ((NSArray *)plistDict[@"ProgramArguments"]).mutableCopy;
-        for (NSString *argument in [programArguments reverseObjectEnumerator]) {
-            if ([argument containsString:@"@JBROOT@"]) {
-                programArguments[[programArguments indexOfObject:argument]] = [argument stringByReplacingOccurrencesOfString:@"@JBROOT@" withString:JBROOT_PATH(@"/")];
-                madeChanges = YES;
-            }
+    if (!plistDict) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed reading basebin daemon plist: %@", plistPath]}];
+    }
+
+    id argumentsValue = plistDict[@"ProgramArguments"];
+    if (![argumentsValue isKindOfClass:[NSArray class]]) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Invalid ProgramArguments in basebin daemon plist: %@", plistPath]}];
+    }
+
+    bool madeChanges = NO;
+    NSMutableArray *programArguments = [argumentsValue mutableCopy];
+    for (NSString *argument in [programArguments reverseObjectEnumerator]) {
+        if (![argument isKindOfClass:[NSString class]]) {
+            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Non-string ProgramArguments entry in basebin daemon plist: %@", plistPath]}];
         }
-        if (madeChanges) {
-            plistDict[@"ProgramArguments"] = programArguments.copy;
-            [plistDict writeToFile:plistPath atomically:NO];
+        if ([argument containsString:@"@JBROOT@"]) {
+            programArguments[[programArguments indexOfObject:argument]] = [argument stringByReplacingOccurrencesOfString:@"@JBROOT@" withString:JBROOT_PATH(@"/")];
+            madeChanges = YES;
         }
     }
+
+    if (madeChanges) {
+        plistDict[@"ProgramArguments"] = programArguments.copy;
+        if (![plistDict writeToFile:plistPath atomically:YES]) {
+            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed writing patched basebin daemon plist: %@", plistPath]}];
+        }
+    }
+    return nil;
 }
 
-- (void)patchBasebinDaemonPlists
+- (NSError *)patchBasebinDaemonPlistsAtPath:(NSString *)basebinPath
 {
-    NSURL *basebinDaemonsURL = [NSURL fileURLWithPath:JBROOT_PATH(@"/basebin/LaunchDaemons")];
-    for (NSURL *basebinDaemonURL in [[NSFileManager defaultManager] contentsOfDirectoryAtURL:basebinDaemonsURL includingPropertiesForKeys:nil options:0 error:nil]) {
-        [self patchBasebinDaemonPlist:basebinDaemonURL.path];
+    NSURL *basebinDaemonsURL = [NSURL fileURLWithPath:[basebinPath stringByAppendingPathComponent:@"LaunchDaemons"]];
+    NSError *error = nil;
+    NSArray<NSURL *> *daemonURLs = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:basebinDaemonsURL includingPropertiesForKeys:nil options:0 error:&error];
+    if (!daemonURLs) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed enumerating basebin daemons: %@", error.localizedDescription ?: basebinDaemonsURL.path]}];
     }
+    if (daemonURLs.count == 0) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : @"Basebin archive has no launch daemon plists"}];
+    }
+
+    BOOL foundStartupDaemon = NO;
+    for (NSURL *basebinDaemonURL in daemonURLs) {
+        if ([basebinDaemonURL.lastPathComponent isEqualToString:@"com.opa334.Dopamine.startup.plist"]) {
+            foundStartupDaemon = YES;
+        }
+        error = [self patchBasebinDaemonPlist:basebinDaemonURL.path];
+        if (error) return error;
+    }
+    if (!foundStartupDaemon) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : @"Basebin archive is missing the Dopamine startup daemon"}];
+    }
+    return nil;
+}
+
+- (NSError *)removeBasebinBackupAtPath:(NSString *)backupPath
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (![fileManager fileExistsAtPath:backupPath]) return nil;
+
+    NSError *error = nil;
+    if ([fileManager removeItemAtPath:backupPath error:&error]) return nil;
+
+    NSString *dyldOldPath = [backupPath stringByAppendingPathComponent:@"gen/dyld.old"];
+    if (![fileManager fileExistsAtPath:dyldOldPath]) return error;
+
+    NSString *prebootPath = [[DOEnvironmentManager sharedManager] activePrebootPath];
+    if (!prebootPath.length) return error;
+    NSString *orphanPath = [prebootPath stringByAppendingPathComponent:[NSString stringWithFormat:@"orphaned-%@", NSUUID.UUID.UUIDString]];
+    NSError *moveError = nil;
+    if (![fileManager moveItemAtPath:dyldOldPath toPath:orphanPath error:&moveError]) return moveError;
+    if (![fileManager removeItemAtPath:backupPath error:&error]) return error;
+    return nil;
+}
+
+- (NSError *)recoverBasebinPublication
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *rootPath = jbrootPrefix(@"/");
+    NSString *basebinPath = jbrootPrefix(@"/basebin");
+    NSString *stageRootPath = [rootPath stringByAppendingPathComponent:@".basebin-rc9-stage"];
+    NSString *backupPath = [rootPath stringByAppendingPathComponent:@".basebin-rc9-backup"];
+    NSString *readyPath = [basebinPath stringByAppendingPathComponent:@".rc9-publish-ready"];
+    BOOL hasBasebin = [fileManager fileExistsAtPath:basebinPath];
+    BOOL hasBackup = [fileManager fileExistsAtPath:backupPath];
+    BOOL isPublishedGeneration = hasBasebin && [fileManager fileExistsAtPath:readyPath];
+    NSError *error = nil;
+
+    if (hasBackup && !hasBasebin) {
+        if (![fileManager moveItemAtPath:backupPath toPath:basebinPath error:&error]) return error;
+    } else if (hasBackup && isPublishedGeneration) {
+        JBFixMobilePermissions();
+        error = [self removeBasebinBackupAtPath:backupPath];
+        if (error) return error;
+        if (![fileManager removeItemAtPath:readyPath error:&error]) return error;
+    } else if (hasBackup) {
+        return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing userInfo:@{NSLocalizedDescriptionKey : @"Ambiguous basebin recovery state; preserved live and backup directories"}];
+    } else if (isPublishedGeneration) {
+        JBFixMobilePermissions();
+        if (![fileManager removeItemAtPath:readyPath error:&error]) return error;
+    }
+
+    if ([fileManager fileExistsAtPath:stageRootPath] && ![fileManager removeItemAtPath:stageRootPath error:&error]) return error;
+    return nil;
+}
+
+- (NSError *)replaceBasebinFromBundledArchive
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSError *error = [self recoverBasebinPublication];
+    if (error) return error;
+
+    NSString *rootPath = jbrootPrefix(@"/");
+    NSString *basebinPath = jbrootPrefix(@"/basebin");
+    NSString *stageRootPath = [rootPath stringByAppendingPathComponent:@".basebin-rc9-stage"];
+    NSString *stageBasebinPath = [stageRootPath stringByAppendingPathComponent:@"basebin"];
+    NSString *backupPath = [rootPath stringByAppendingPathComponent:@".basebin-rc9-backup"];
+    NSString *readyPath = [stageBasebinPath stringByAppendingPathComponent:@".rc9-publish-ready"];
+    NSString *archivePath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"basebin.tar"];
+
+    if (![fileManager createDirectoryAtPath:stageRootPath withIntermediateDirectories:NO attributes:nil error:&error]) return error;
+    error = [self extractTar:archivePath toPath:stageRootPath];
+    if (!error && ![fileManager fileExistsAtPath:stageBasebinPath]) {
+        error = [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : @"basebin archive did not produce a basebin directory"}];
+    }
+    if (!error) error = [self patchBasebinDaemonPlistsAtPath:stageBasebinPath];
+
+    NSString *trustcachePath = [stageBasebinPath stringByAppendingPathComponent:@"basebin.tc"];
+    if (!error && [fileManager fileExistsAtPath:trustcachePath] && ![fileManager removeItemAtPath:trustcachePath error:&error]) {
+        if (!error) error = [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing userInfo:@{NSLocalizedDescriptionKey : @"Failed removing staged basebin trustcache"}];
+    }
+    if (!error && ![[NSData data] writeToFile:readyPath options:NSDataWritingAtomic error:&error]) {
+        if (!error) error = [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing userInfo:@{NSLocalizedDescriptionKey : @"Failed marking staged basebin ready"}];
+    }
+    if (error) {
+        [fileManager removeItemAtPath:stageRootPath error:nil];
+        return error;
+    }
+
+    BOOL hadBasebin = [fileManager fileExistsAtPath:basebinPath];
+    if (hadBasebin && ![fileManager moveItemAtPath:basebinPath toPath:backupPath error:&error]) {
+        [fileManager removeItemAtPath:stageRootPath error:nil];
+        return error;
+    }
+    if (![fileManager moveItemAtPath:stageBasebinPath toPath:basebinPath error:&error]) {
+        NSError *restoreError = nil;
+        if (hadBasebin && ![fileManager moveItemAtPath:backupPath toPath:basebinPath error:&restoreError]) {
+            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Publishing basebin failed (%@) and restoring the previous basebin failed (%@)", error.localizedDescription, restoreError.localizedDescription]}];
+        }
+        [fileManager removeItemAtPath:stageRootPath error:nil];
+        return error;
+    }
+
+    JBFixMobilePermissions();
+    return [self recoverBasebinPublication];
 }
 
 #if 0
@@ -1260,55 +1394,11 @@ int getCFMajorVersion(void)
         
         [[DOUIManager sharedInstance] sendLog:@"Updating BaseBin" debug:NO];
         
-        NSError* error=nil;
-        NSString *basebinPath = jbrootPrefix(@"/basebin");
-        if ([[NSFileManager defaultManager] fileExistsAtPath:basebinPath]) {
-            if (![[NSFileManager defaultManager] removeItemAtPath:basebinPath error:&error]) {
-                BOOL recovered = NO;
-
-                NSString *corruptedFilePath = [basebinPath stringByAppendingPathComponent:@"gen/dyld.old"];
-                if ([[NSFileManager defaultManager] fileExistsAtPath:corruptedFilePath]) {
-                    if (![[NSFileManager defaultManager] removeItemAtPath:corruptedFilePath error:nil]) {
-                        // Dopamine 3.0 - 3.0.6 could leave dyld.old corrupted after a jbupdate panic.
-                        // The file may be undeletable but can still be moved out of the jailbreak root.
-                        NSString *activePrebootPath = [[DOEnvironmentManager sharedManager] activePrebootPath];
-
-                        NSString *characterSet = @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-                        NSUInteger stringLen = 6;
-                        NSMutableString *randomString = [NSMutableString stringWithCapacity:stringLen];
-                        for (NSUInteger i = 0; i < stringLen; i++) {
-                            NSUInteger randomIndex = arc4random_uniform((uint32_t)[characterSet length]);
-                            unichar randomCharacter = [characterSet characterAtIndex:randomIndex];
-                            [randomString appendFormat:@"%C", randomCharacter];
-                        }
-
-                        NSString *orphanedName = [NSString stringWithFormat:@"orphaned-%@", randomString];
-                        NSString *orphanedPath = [activePrebootPath stringByAppendingPathComponent:orphanedName];
-                        [[NSFileManager defaultManager] moveItemAtPath:corruptedFilePath toPath:orphanedPath error:nil];
-
-                        if ([[NSFileManager defaultManager] removeItemAtPath:basebinPath error:&error]) {
-                            recovered = YES;
-                            error = nil;
-                        }
-                    }
-                }
-
-                if (!recovered) {
-                    completion([NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedExtracting userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed deleting existing basebin file with error: %@", error.localizedDescription]}]);
-                    return;
-                }
-            }
-        }
-        error = [self extractTar:[[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"basebin.tar"] toPath:jbrootPrefix(@"/")];
+        NSError *error = [self replaceBasebinFromBundledArchive];
         if (error) {
             completion(error);
             return;
         }
-        [self patchBasebinDaemonPlists];
-        [[NSFileManager defaultManager] removeItemAtPath:jbrootPrefix(@"/basebin/basebin.tc") error:nil];
-        
-        JBFixMobilePermissions();
-        
         completion(nil);
     }
 }

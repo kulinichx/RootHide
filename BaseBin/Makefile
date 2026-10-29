@@ -36,7 +36,7 @@ opainject: .build .include
 	$(MAKE) -C opainject FINALPACKAGE=1
 	@cp opainject/.theos/obj/opainject .build
 
-libjailbreak: .build .include ChOma
+libjailbreak: .build .include ChOma XPF
 	$(MAKE) -C libjailbreak
 	@cp libjailbreak/libjailbreak.dylib .build
 	@mkdir -p .include/libjailbreak

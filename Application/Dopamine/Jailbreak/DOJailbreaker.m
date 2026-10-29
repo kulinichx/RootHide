@@ -30,6 +30,7 @@
 #import <libjailbreak/jbclient_mach.h>
 #import <libjailbreak/kcall_arm64.h>
 #import <libjailbreak/basebin_gen.h>
+#import <libjailbreak/roothider/common.h>
 #import <CoreServices/LSApplicationProxy.h>
 #import <sys/utsname.h>
 #import "spawn.h"
@@ -284,20 +285,7 @@ static void initializeRootHideWhitelistDefaults(void)
         if (xpf_set_is_supported("perfkrw")) {
             sets[idx++] = "perfkrw";
         }
-
-
-/********************** roothide *************************/
-sets[idx++] = "namecache";
-
-if (xpf_set_is_supported("amfi_oids")) {
-    sets[idx++] = "amfi_oids";
-}
-
-sets[idx] = NULL;
-/********************** roothide *************************/
-
-
-        _systemInfoXdict = xpf_construct_offset_dictionary((const char **)sets);
+        _systemInfoXdict = roothide_xpf_construct_offset_dictionary_wrapper((const char **)sets);
         if (_systemInfoXdict) {
             xpc_dictionary_set_uint64(_systemInfoXdict, "kernelConstant.staticBase", gXPF.kernelBase);
             if (gXPF.sptm) {
@@ -327,6 +315,7 @@ sets[idx] = NULL;
     
     jbinfo_initialize_dynamic_offsets(_systemInfoXdict);
     jbinfo_initialize_hardcoded_offsets();
+    xpc_release(_systemInfoXdict);
 
     if ([NSBundle mainBundle].bundleIdentifier) {
         gSystemInfo.jailbreakInfo.appIdentifier = strdup([NSBundle mainBundle].bundleIdentifier.UTF8String);
@@ -343,6 +332,8 @@ sets[idx] = NULL;
             }
             return true;
         });
+        xpc_release(_systemInfoXdict);
+        _systemInfoXdict = NULL;
     }
     
     return nil;

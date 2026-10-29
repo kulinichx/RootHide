@@ -877,6 +877,8 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 	flags |= ARCHIVE_EXTRACT_ACL;
 	flags |= ARCHIVE_EXTRACT_FFLAGS;
 	flags |= ARCHIVE_EXTRACT_OWNER;
+	flags |= ARCHIVE_EXTRACT_SECURE_NODOTDOT;
+	flags |= ARCHIVE_EXTRACT_SECURE_SYMLINKS;
 
 	a = archive_read_new();
 	if (!a) goto out;
@@ -884,7 +886,7 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 	archive_read_support_filter_all(a);
 	ext = archive_write_disk_new();
 	if (!ext) goto out;
-	archive_write_disk_set_options(ext, flags);
+	if (archive_write_disk_set_options(ext, flags) != ARCHIVE_OK) goto out;
 	archive_write_disk_set_standard_lookup(ext);
 	if ((r = archive_read_open_filename(a, fileToExtract, 10240)))
 			goto out;
@@ -904,6 +906,23 @@ int libarchive_unarchive(const char *fileToExtract, const char *extractionPath)
 			    strlcat(outputPath, currentFile, sizeof(outputPath)) >= sizeof(outputPath)) goto out;
 
 			archive_entry_set_pathname(entry, outputPath);
+
+			const char *currentHardlink = archive_entry_hardlink(entry);
+			if (currentHardlink) {
+				char outputHardlink[PATH_MAX];
+				if (currentHardlink[0] == '/') goto out;
+				for (const char *component = currentHardlink; *component;) {
+					while (*component == '/') component++;
+					const char *componentStart = component;
+					while (*component && *component != '/') component++;
+					if (component - componentStart == 2 &&
+					    componentStart[0] == '.' && componentStart[1] == '.') goto out;
+				}
+				if (strlcpy(outputHardlink, extractionPath, sizeof(outputHardlink)) >= sizeof(outputHardlink) ||
+				    strlcat(outputHardlink, "/", sizeof(outputHardlink)) >= sizeof(outputHardlink) ||
+				    strlcat(outputHardlink, currentHardlink, sizeof(outputHardlink)) >= sizeof(outputHardlink)) goto out;
+				archive_entry_set_hardlink(entry, outputHardlink);
+			}
 			
 			r = archive_write_header(ext, entry);
 			if (r < ARCHIVE_OK) {

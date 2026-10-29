@@ -5,7 +5,7 @@
 
 ## 纠正之前的解释
 
-RC9 与 zqbb 参照版属于同一 Dopamine/RootHide 技术谱系。两个 common.c 当前分别编入 launchdhook 与 systemhook，是构建事实，不足以证明维护两份实现是必要设计，更不能把所有差异解释成 RC9 定制。
+RC9 与 zqbb 参照版属于同一 Dopamine/RootHide 技术谱系。两个 common.c 在修复前分别编入 launchdhook 与 systemhook，是构建事实，不足以证明维护两份实现是必要设计，更不能把所有差异解释成 RC9 定制。
 
 对齐原则：以本地 zqbb 参照版的 RootHide 行为及共享代码结构为主要对照依据。每个保留差异都应有明确目标、适用系统范围或测试证据。AI 生成、旧注释、能编译、旧源码检查通过都不是正确性的独立证明。
 
@@ -25,7 +25,7 @@ RC9 与 zqbb 参照版属于同一 Dopamine/RootHide 技术谱系。两个 commo
 - 1afe12d（2026-08-09）：当前历史中的 RootHide 布局修复，仅把 launchdhook 的 envbuf 路径改成 common/envbuf.c，仍编译 src/common.c。这说明分叉涉及历史集成，不是两个不同越狱产品的必然差别。
 - c33f420（2026-10-26）：两份共同加入分配失败、环境拼接等防护。
 - af6153c（2026-10-27）：两份共同改用 rc9_zqbb_jetsam_addend / rc9_zqbb_jetsam_limit。
-- c252f6a 已包含 af6153c；当前两个 common.c 与 c252f6a 对应文件完全一致。不能因此声称全面完成 zqbb 对齐。
+- c252f6a 已包含 af6153c；本轮修复前（1067408）的两个 common.c 与 c252f6a 对应文件完全一致。不能因此声称全面完成 zqbb 对齐。
 
 ## 修改前发现的未完成对齐项
 
@@ -64,6 +64,12 @@ RC9 公共目录版本的无条件拒绝可追溯到 d25433c 中普通 Dopamine 
 - RC9_LAUNCHD 编译边界仅排除客户端动态黑名单 IPC；launchd prehook 的 isBlacklistedPath/黑名单 PID 管理未改。
 - 保留既有缓存、防溢出、Jetsam 加法、APT transport trust-only 和 iOS16 范围；未移植 iOS17 persona 子系统。
 
-本地 8 项原有源码契约 + 4 项新增共享契约已通过。新增 tests/test_rc9_common.py --native 会分别编译 launchd/systemhook 两种模式的真实 C 函数及 envbuf，模拟 OS/XPC 边界，验证 SafeMode、TrollStore/TrollStoreLite 标记、动态黑名单、ProcessBlacklist、环境清理、NULL attr、APT、Jetsam、分配失败。已接入 CI；Windows 当前无可用 clang，尚未运行这组 native 测试或 Apple SDK 构建。真机兼容性仍需设备验证。
+本地 8 项既有源码契约 + 4 项新增共享契约已通过。私密 CI run 40493314095 在 macOS 上运行了原有 native 回归，以及 tests/test_rc9_common.py --native 的 systemhook/launchd 两种编译模式；ASan/UBSan 检查均通过。完整 Apple SDK 构建及 TIPA 上传成功，结束于 2026-10-27 19:06:13 +08:00。
 
-准备推到私密仓库独立分支并执行 full CI；构建结果以随后记录为准，当前不标记“全部对齐完成”。
+源码提交：b8800ef6974961aea7f173763d6f7329f47dd57f（bd755f9 产品修复 + b8800ef 测试夹具宏修正）。私密分支 codex/common-alignment-20261027；未合入长期 runtime/rc9-audit，未推公开仓库。
+安装包：Dopamine_3.0.7-b8800ef_roothide.tipa，28,890,920 bytes。
+TIPA SHA256：e1b3ce6e7128d21520d9779bcdbc7c0ee0c6945a6d4c36d375d8e2b684490763。
+外层 Actions ZIP SHA256：2406a389f0ede347dde94cdf9cd7a333d0aecc39adb235025c0b60f406b11558。二者不可混用。
+包内 BaseBinBuildID 与提交一致；两组件的 arm64/arm64e slice、共享符号唯一性、launchd 无客户端 blacklist/hookd 依赖已核验。见 artifacts/2026-10-27-common-alignment/package-verification.json。
+
+这些是专项测试与构建/静态包验证，不是全面健康审计已完成。b8800ef 尚无真机验收；双管理器 trust1 闪退根因及 trust2 修复未得到设备确认；lsd/UTType 初始化保护、RunningBoard iOS16 路径及其余核心调用链仍待审。2026-10-27 已将当前状态就地同步到用户指定的新版工作手册，原文已备份。详见 artifacts/2026-10-27-health-status/。
