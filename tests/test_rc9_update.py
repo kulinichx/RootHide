@@ -297,25 +297,18 @@ def native_tests():
                         '-L' + archive_prefix + '/lib', '-larchive', '-o', str(binary)], check=True)
         payload = Path(temp) / 'payload.tar'
         content = b'basebin extraction regression\n' * 256
-        with tarfile.open(payload, 'w') as tar:
-            # Keep the directory entry in canonical tar form. Some libarchive
-            # versions otherwise treat the following leaf symlink as an
-            # extraction-through-symlink case under SECURE_SYMLINKS.
-            directory = tarfile.TarInfo('basebin/')
-            directory.type = tarfile.DIRTYPE
-            directory.mode = 0o755
-            directory.uid, directory.gid = os.getuid(), os.getgid()
-            tar.addfile(directory)
-            item = tarfile.TarInfo('basebin/tool')
-            item.mode = 0o755
-            item.uid, item.gid = os.getuid(), os.getgid()
-            item.size = len(content)
-            tar.addfile(item, io.BytesIO(content))
-            link = tarfile.TarInfo('basebin/link')
-            link.type = tarfile.SYMTYPE
-            link.linkname = 'tool'
-            link.uid, link.gid = os.getuid(), os.getgid()
-            tar.addfile(link)
+        payload_source = Path(temp) / 'payload-source'
+        payload_basebin = payload_source / 'basebin'
+        payload_basebin.mkdir(parents=True)
+        tool = payload_basebin / 'tool'
+        tool.write_bytes(content)
+        tool.chmod(0o755)
+        os.symlink('tool', payload_basebin / 'link')
+        # Let tarfile derive directory, mode, and symlink headers from an
+        # actual filesystem tree; hand-built headers vary across libarchive
+        # versions when SECURE_SYMLINKS is enabled.
+        with tarfile.open(payload, 'w', dereference=False) as tar:
+            tar.add(payload_basebin, arcname='basebin', recursive=True)
         output = Path(temp) / 'extracted'
         subprocess.run([str(binary), str(payload), str(output)], check=True)
         assert (output / 'basebin/tool').read_bytes() == content
