@@ -94,6 +94,25 @@ explicit directory symlink, nested directories, relative destinations, and
 path-resolution failure. Local source-contract tests pass; macOS native and
 full TIPA validation must be recorded from the new CI run.
 
+### CI follow-up: hosted runner allocation
+
+Public manual run `40880284312` (`0575a045`, run number 557) ended without
+executing any steps. Its check annotations report that the hosted runner
+did not acquire the job after multiple attempts, with macOS arm64 capacity
+notices. This run provides no native-test or compilation result.
+
+GitHub's runner-images announcement `actions/runner-images#13518` schedules
+macOS 14 retirement for 2026-11-02, with a brownout on 2026-10-29 from
+14:00 UTC. Run 557 ended at 13:30 UTC, before that brownout; the annotation,
+not the brownout schedule, establishes its allocation failure.
+
+The RC9 build workflow now requests `macos-15-intel` and Xcode 16.2 with
+the matching iPhoneOS 18.2 SDK check. GitHub's published macOS 15 Intel
+software manifest lists that toolchain. The separate Theos SDK remains
+16.5. Manual dispatch now defaults to a full build, matching branch-push
+builds. Native and full-build compatibility still require an executed CI
+run; changing runner configuration does not validate RC9's runtime code.
+
 ## Basebin trustcache collection errors
 
 RC9 and RootHide 28 both enumerate regular files, call `ensure_randomized_cdhash()`, and silently skip every nonzero return. That is needed for expected data files such as plists and `.version`, but it also hides failures to rewrite a valid Mach-O's signature, potentially publishing that file without its cdhash in the new basebin trustcache. RC9 now first classifies parseable Mach-O files with ChOma's read-only `fat_init_from_path()`; non-Mach-O data stays skipped, while randomization failure for a parsed Mach-O, resource lookup failure, or directory enumeration failure aborts trustcache preparation. Missing input paths and missing regular-file attributes also fail explicitly, with nonempty fallback diagnostics. Call-graph search found one RC9 caller: the basebin updater processes the extracted staging directory before replacing live files. It is not the initial jailbreak trustcache path, so a collection failure prevents staged publication. The focused source-contract check is in `tests/test_rc9_services.py`. Actual iOS 16 signature rewriting still requires native/device validation.
@@ -124,7 +143,7 @@ The XPC dispatch, trustcache collection, and update-marker fixes above are produ
 
 At baseline `0478d48`, the reviewed areas in this report had 29 source-contract tests. The current worktree has 32 tests, including the basebin publication/recovery contract; all 32 pass under `C:\Users\KOKOL\AppData\Local\Programs\Python\Python314\python.exe -m unittest discover -s tests`, and `git diff --check` is clean. The updated bootstrap test now asserts the active `prepareBootstrapWithCompletion:` calls the staged publisher and that plist-patch errors are propagated. These source-contract checks do not execute the Objective-C filesystem state machine and do not retroactively validate the baseline commit. This is a scoped audit of the listed RC9 paths, not certification of every source file.
 
-Reviewing the remote build path found that the new XPF wrapper was called from the app and launchdhook but had no declaration in RC9's public `common.h`; an explicit declaration and source-contract assertion have now been added. The full macOS workflow builds the application and BaseBin, so it can verify this interface and the bootstrapper changes. The workflow is `workflow_dispatch`-only; no Apple compile has yet run for the current worktree.
+Reviewing the remote build path found that the new XPF wrapper was called from the app and launchdhook but had no declaration in RC9's public `common.h`; an explicit declaration and source-contract assertion have now been added. The full macOS workflow builds the application and BaseBin, so it can verify this interface and the bootstrapper changes. The workflow supports manual dispatch and automatically runs full builds on pushes to `codex/health-audit-20261027`; no successful Apple compile has yet been recorded for the current candidate.
 
 The result is not yet device-validated: the Objective-C/Foundation fault-injection tests require macOS, the iOS build requires Apple's SDK/toolchain, and neither is available on this Windows host. On-device iOS 16 behavior also remains unverified.
 

@@ -9,7 +9,7 @@ on:
       build_mode:
         description: Build scope
         required: true
-        default: focused
+        default: full
         type: choice
         options:
           - focused
@@ -27,11 +27,13 @@ env:
   THEOS: ${{ github.workspace }}/theos
   THEOS_COMMIT: 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
   IOS_SDK_VERSION: "16.5"
+  XCODE_VERSION: "16.2"
+  XCODE_IOS_SDK_VERSION: "18.2"
   TRUSTCACHE_COMMIT: aa0e8847529cf76576fce8d2dbc9e088c8f1a0df
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15-intel
     timeout-minutes: 60
 
     steps:
@@ -56,7 +58,9 @@ jobs:
             echo "ref=$GITHUB_REF"
             echo "head=$(git rev-parse HEAD)"
             echo "version=$(tr -d '\r\n' < BaseBin/_external/basebin/.version)"
-            echo "xcode_requested=15.4"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "xcode_requested=$XCODE_VERSION"
             echo "theos_commit=$THEOS_COMMIT"
             echo "trustcache_commit=$TRUSTCACHE_COMMIT"
             echo "submodules:"
@@ -66,13 +70,11 @@ jobs:
           } > artifacts/source-provenance.txt
           cat artifacts/source-provenance.txt
 
-      # Xcode 15.4 is the last toolchain used by the original Dopamine 3
-      # project layout. Newer Xcodes treat some command-line targets as
-      # macOS/Catalyst targets and fail to resolve their Swift packages.
+      # macOS 14 retires on 2026-11-02. Pin a toolchain shipped on macOS 15.
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "15.4"
+          xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Install Procursus tools
         uses: dhinakg/procursus-action@main
@@ -134,9 +136,9 @@ jobs:
           path: |
             ~/.swiftpm
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-xcode15.4-${{ hashFiles('**/Package.swift', '**/project.pbxproj') }}
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('**/Package.swift', '**/project.pbxproj') }}
           restore-keys: |
-            swiftpm-${{ runner.os }}-xcode15.4-
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-
 
       - name: Build trustcache
         if: env.BUILD_MODE == 'full'
@@ -156,7 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -version
-          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "17.5"
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "$XCODE_IOS_SDK_VERSION"
           test -d "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
           command -v make ldid
           make --version | head -n 1
