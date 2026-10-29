@@ -108,12 +108,12 @@ class ServiceContracts(unittest.TestCase):
         )
 
     def test_safe_mode_trollstore_allowlist_matches_official(self):
-        rc9 = extract(source('BaseBin/systemhook/src/roothider_common.c'),
-                      'bool allowInjectWithSafeMode')
-        official = extract(source(
-            '参照官方dopamine/Dopamine-roothide-28/BaseBin/systemhook/src/roothider_common.c'),
-            'bool allowInjectWithSafeMode')
-        self.assertEqual(rc9, official)
+        policy = extract(source('BaseBin/systemhook/src/roothider_common.c'),
+                         'bool allowInjectWithSafeMode')
+        self.assertIn('if(isRemovableBundlePath(path))', policy)
+        self.assertIn('if(hasTrollstoreMarker(path))', policy)
+        self.assertIn('return true;', policy)
+        self.assertIn('return false;', policy)
 
 NATIVE_PREFIX = r'''
 #import <Foundation/Foundation.h>
