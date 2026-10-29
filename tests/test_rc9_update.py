@@ -194,7 +194,7 @@ struct archive { int writer; };
 struct archive_entry { int unused; };
 static struct archive reader, writer;
 static struct archive_entry entry;
-static int fail, warning, headers, readCloses, writeCloses, readFrees, writeFrees, bodyCalls;
+static int fail, warning, headers, writtenHeaders, readCloses, writeCloses, readFrees, writeFrees, bodyCalls;
 static const char *entryPath = "basebin/tool";
 static const char *entryHardlink;
 static struct archive *archive_read_new(void) { return fail == 1 ? NULL : &reader; }
@@ -214,7 +214,7 @@ static const char *archive_entry_pathname(struct archive_entry *e) { return entr
 static void archive_entry_set_pathname(struct archive_entry *e, const char *path) {}
 static const char *archive_entry_hardlink(struct archive_entry *e) { return entryHardlink; }
 static void archive_entry_set_hardlink(struct archive_entry *e, const char *path) {}
-static int archive_write_header(struct archive *a, struct archive_entry *e) { return fail == 5 ? ARCHIVE_FAILED : (warning ? ARCHIVE_WARN : 0); }
+static int archive_write_header(struct archive *a, struct archive_entry *e) { writtenHeaders++; return fail == 5 ? ARCHIVE_FAILED : (warning ? ARCHIVE_WARN : 0); }
 static int archive_entry_size(struct archive_entry *e) { return 1; }
 static int copy_data(struct archive *a, struct archive *b) { bodyCalls++; return fail == 6 ? ARCHIVE_FAILED : 0; }
 static int archive_write_finish_entry(struct archive *a) { return fail == 7 ? ARCHIVE_FAILED : 0; }
@@ -222,7 +222,7 @@ static int archive_read_close(struct archive *a) { readCloses++; return fail == 
 static int archive_write_close(struct archive *a) { writeCloses++; return fail == 9 ? ARCHIVE_FAILED : 0; }
 static int archive_read_free(struct archive *a) { readFrees++; return fail == 10 ? ARCHIVE_FAILED : 0; }
 static int archive_write_free(struct archive *a) { writeFrees++; return fail == 11 ? ARCHIVE_FAILED : 0; }
-static void reset(int mode) { fail=mode;warning=headers=readCloses=writeCloses=readFrees=writeFrees=bodyCalls=0;entryPath="basebin/tool";entryHardlink=NULL; }
+static void reset(int mode) { fail=mode;warning=headers=writtenHeaders=readCloses=writeCloses=readFrees=writeFrees=bodyCalls=0;entryPath="basebin/tool";entryHardlink=NULL; }
 '''
 
 ARCHIVE_MAIN = r'''
@@ -239,9 +239,9 @@ int main(void) {
     reset(0); entryPath=NULL; assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1);
     assert(readFrees == 1 && writeFrees == 1);
     reset(0); entryHardlink="/outside/file";
-    assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1 && headers == 0);
+    assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1 && headers == 1 && writtenHeaders == 0);
     reset(0); entryHardlink="basebin/../../outside/file";
-    assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1 && headers == 0);
+    assert(libarchive_unarchive("payload.tar", "/tmp/staging") == 1 && headers == 1 && writtenHeaders == 0);
     char longPath[PATH_MAX+1]; memset(longPath, 'x', sizeof(longPath)-1); longPath[PATH_MAX]=0;
     reset(0); assert(libarchive_unarchive("payload.tar", longPath) == 1 && writeFrees == 1);
     reset(0); entryPath=longPath; assert(libarchive_unarchive("payload.tar", "/tmp") == 1 && writeFrees == 1);
