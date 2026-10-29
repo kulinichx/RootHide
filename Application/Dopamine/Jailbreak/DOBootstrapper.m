@@ -17,6 +17,8 @@
 #import <sys/stat.h>
 #import "NSString+Version.h"
 
+NSString *jbrootPrefix(NSString *path);
+
 #define LIBKRW_DOPAMINE_BUNDLED_VERSION @"2.0.3"
 #define LIBROOT_DOPAMINE_BUNDLED_VERSION @"1.0.1"
 #define BASEBIN_LINK_BUNDLED_VERSION @"1.0.0"
@@ -928,7 +930,6 @@ uint64_t jbrand_current();
 int is_jbroot_name(char* name);
 NSString* find_jbroot(BOOL force);
 ////////////////////////////////////////
-NSString* jbrootPrefix(NSString *path);
 NSString* rootfsPrefix(NSString* path);
 ///////////////////////////////////////////////////////
 

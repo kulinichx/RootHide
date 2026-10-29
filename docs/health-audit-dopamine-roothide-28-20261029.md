@@ -139,6 +139,13 @@ had no matching runtime among the image's installed versions. The workflow
 now selects the image's Xcode 16.4 and iPhoneOS 18.5 SDK, matching its
 installed iOS 18.5 runtime (`22F77`). No asset compilation is skipped.
 
+Public run `40887818486` (`f56d19cd`, run number 560) progressed past the
+previous toolchain mismatch, but the App compile found another defect in
+the staged-bootstrap change: `jbrootPrefix` was first called above its
+declaration. Its existing declaration is now placed before the first
+`DOBootstrapper` implementation. The declaration-order contract is checked,
+and the next full build must verify the App and final artifact.
+
 ## Basebin trustcache collection errors
 
 RC9 and RootHide 28 both enumerate regular files, call `ensure_randomized_cdhash()`, and silently skip every nonzero return. That is needed for expected data files such as plists and `.version`, but it also hides failures to rewrite a valid Mach-O's signature, potentially publishing that file without its cdhash in the new basebin trustcache. RC9 now first classifies parseable Mach-O files with ChOma's read-only `fat_init_from_path()`; non-Mach-O data stays skipped, while randomization failure for a parsed Mach-O, resource lookup failure, or directory enumeration failure aborts trustcache preparation. Missing input paths and missing regular-file attributes also fail explicitly, with nonempty fallback diagnostics. Call-graph search found one RC9 caller: the basebin updater processes the extracted staging directory before replacing live files. It is not the initial jailbreak trustcache path, so a collection failure prevents staged publication. The focused source-contract check is in `tests/test_rc9_services.py`. Actual iOS 16 signature rewriting still requires native/device validation.

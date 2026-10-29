@@ -208,6 +208,8 @@ class ServiceContracts(unittest.TestCase):
 
     def test_bootstrap_basebin_publication_is_recoverable(self):
         bootstrapper = source('Application/Dopamine/Jailbreak/DOBootstrapper.m')
+        self.assertLess(bootstrapper.index('NSString *jbrootPrefix(NSString *path);'),
+                        bootstrapper.index('@implementation DOBootstrapper'))
         recovery = extract(bootstrapper, '- (NSError *)recoverBasebinPublication')
         self.assertIn('if (hasBackup && !hasBasebin)', recovery)
         self.assertIn('if (hasBackup && isPublishedGeneration)', recovery)
