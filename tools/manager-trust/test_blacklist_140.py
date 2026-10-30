@@ -43,7 +43,8 @@ class Blacklist140Trust(unittest.TestCase):
 
     def test_cleanup_error_uses_nserror_without_changing_return_type(self):
         cleaner = (self.root / "RootHide/AppDataCleaner/AppDataCleaner.m").read_text(encoding="utf-8")
-        self.assertIn("NSString* clearAppData(AppInfo* app)", cleaner)
+        self.assertIn("NSString* clearAppData(RHMInstalledAppInfo* app)", cleaner)
+        self.assertNotIn("clearAppData(AppInfo*", cleaner)
         self.assertIn("NSError *removalError = nil;", cleaner)
         self.assertIn("error:&removalError", cleaner)
         self.assertNotIn("error:&error", cleaner)

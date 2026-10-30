@@ -1,6 +1,15 @@
 diff --git a/RootHide/AppDataCleaner/AppDataCleaner.m b/RootHide/AppDataCleaner/AppDataCleaner.m
 --- a/RootHide/AppDataCleaner/AppDataCleaner.m
 +++ b/RootHide/AppDataCleaner/AppDataCleaner.m
+@@ -9,7 +9,7 @@
+ 
+ BOOL isUUIDPathOf(NSString* path, NSString* parent);
+ 
+-NSString* clearAppData(AppInfo* app)
++NSString* clearAppData(RHMInstalledAppInfo* app)
+ {
+     NSString* error = nil;
+     NSLog(@"app.containerURL=%@", app.containerURL);
 @@ -18,10 +18,11 @@ NSString* clearAppData(AppInfo* app)
         && isUUIDPathOf(app.containerURL.path, @"/private/var/mobile/Containers/Data/Application/")
         && [NSFileManager.defaultManager fileExistsAtPath:app.containerURL.path])
