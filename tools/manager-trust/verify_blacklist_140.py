@@ -26,7 +26,7 @@ TRANSLATIONS = (
 )
 
 
-def verify(path, source):
+def verify(path, source, *, version="1.4.0"):
     raw = path.read_bytes()
     control, payload = build.deb_read(raw)
     fields = {}
@@ -36,7 +36,7 @@ def verify(path, source):
             fields[key] = value
     for key, value in (
         ("Package", "com.roothide.manager"),
-        ("Version", "1.4.0"),
+        ("Version", version),
         ("Architecture", "iphoneos-arm64e"),
     ):
         build.require(fields.get(key) == value, f"Unexpected {key}")
@@ -56,7 +56,7 @@ def verify(path, source):
     for key, value in (
         ("CFBundleIdentifier", "com.roothide.manager"),
         ("CFBundleExecutable", "RootHide"),
-        ("CFBundleShortVersionString", "1.4.0"),
+        ("CFBundleShortVersionString", version),
         ("MinimumOSVersion", "15.0"),
     ):
         build.require(info.get(key) == value, f"Unexpected bundle {key}")

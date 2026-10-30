@@ -1,0 +1,266 @@
+diff --git a/RootHide/AppDataCleaner/AppDataCleaner.m b/RootHide/AppDataCleaner/AppDataCleaner.m
+index 6a8413e..e706bfb 100644
+--- a/RootHide/AppDataCleaner/AppDataCleaner.m
++++ b/RootHide/AppDataCleaner/AppDataCleaner.m
+@@ -50,10 +50,11 @@ NSString* clearAppData(RHMInstalledAppInfo* app)
+        && isUUIDPathOf(app.containerURL.path, @"/private/var/mobile/Containers/Data/Application/")
+        && [NSFileManager.defaultManager fileExistsAtPath:app.containerURL.path])
+     {
+-        if([NSFileManager.defaultManager removeItemAtURL:app.containerURL error:&error]) {
++        NSError *removalError = nil;
++        if([NSFileManager.defaultManager removeItemAtURL:app.containerURL error:&removalError]) {
+             NSLog(@"removed %@", app.containerURL);
+         } else {
+-            error = [NSString stringWithFormat:Localized(@"Failed to remove app data container:\n%@"),error];
++            error = [NSString stringWithFormat:Localized(@"Failed to remove app data container:\n%@"),removalError];
+         }
+     }
+     return error;
+diff --git a/RootHide/AppDelegate.m b/RootHide/AppDelegate.m
+index 706d519..d15504a 100644
+--- a/RootHide/AppDelegate.m
++++ b/RootHide/AppDelegate.m
+@@ -13,6 +13,9 @@
+ #include <netinet/in.h>
+ #include <IOKit/IOKitLib.h>
+ 
++static NSString * const RHTrustedBindMountsKey = @"TrustedBindMountsV1";
++static NSString * const RHIgnoreVPNProxyWarningKey = @"IgnoreVPNProxyWarningV1";
++
+ @implementation AppDelegate
+ 
+ + (id)getDefaultsForKey:(NSString*)key {
+@@ -29,6 +32,135 @@
+     [defaults writeToFile:configFilePath atomically:YES];
+ }
+ 
+++ (BOOL)ignoreVPNProxyWarning {
++    NSNumber *ignore = [self getDefaultsForKey:RHIgnoreVPNProxyWarningKey];
++    return ignore.boolValue;
++}
++
+++ (NSString *)normalizedBindMountSource:(NSString *)source {
++    if(source.length == 0) return @"";
++
++    NSString *jbPrefix = jbroot(@"/");
++    if(jbPrefix.length > 0 && [source hasPrefix:jbPrefix]) {
++        NSString *relative = [source substringFromIndex:jbPrefix.length];
++        while([relative hasPrefix:@"/"]) {
++            relative = [relative substringFromIndex:1];
++        }
++        return [@"jbroot:/" stringByAppendingString:relative];
++    }
++
++    NSRange marker = [source rangeOfString:@"/.jbroot-"];
++    if(marker.location != NSNotFound) {
++        NSUInteger searchStart = NSMaxRange(marker);
++        if(searchStart < source.length) {
++            NSRange remainder = NSMakeRange(searchStart, source.length - searchStart);
++            NSRange slash = [source rangeOfString:@"/" options:0 range:remainder];
++            if(slash.location != NSNotFound && NSMaxRange(slash) <= source.length) {
++                NSString *relative = [source substringFromIndex:NSMaxRange(slash)];
++                return [@"jbroot:/" stringByAppendingString:relative];
++            }
++        }
++    }
++
++    if([source hasPrefix:@"/.jbroot/"]) {
++        return [@"jbroot:/" stringByAppendingString:
++                [source substringFromIndex:[@"/.jbroot/" length]]];
++    }
++
++    if([source hasPrefix:@"/var/jb/"]) {
++        return [@"jbroot:/" stringByAppendingString:
++                [source substringFromIndex:[@"/var/jb/" length]]];
++    }
++
++    return source;
++}
++
+++ (NSArray *)trustedBindMounts {
++    id stored = [self getDefaultsForKey:RHTrustedBindMountsKey];
++    if([stored isKindOfClass:[NSArray class]]) {
++        return stored;
++    }
++    return @[];
++}
++
+++ (NSDictionary *)bindMountFingerprintForSource:(NSString *)source
++                                         target:(NSString *)target {
++    return @{
++        @"fstype" : @"bindfs",
++        @"source" : [self normalizedBindMountSource:(source ?: @"")],
++        @"target" : (target ?: @""),
++    };
++}
++
+++ (BOOL)isTrustedBindMount:(NSDictionary *)fingerprint {
++    return [[self trustedBindMounts] containsObject:fingerprint];
++}
++
+++ (void)trustBindMount:(NSDictionary *)fingerprint {
++    if(!fingerprint) return;
++
++    NSMutableArray *trusted = [[self trustedBindMounts] mutableCopy];
++
++    if(![trusted containsObject:fingerprint]) {
++        [trusted addObject:fingerprint];
++        [self setDefaults:trusted forKey:RHTrustedBindMountsKey];
++    }
++}
++
+++ (void)showBindMountTrustPrompt:(NSDictionary *)fingerprint {
++    NSString *source = fingerprint[@"source"] ?: @"";
++    NSString *target = fingerprint[@"target"] ?: @"";
++
++    NSString *message = [NSString stringWithFormat:
++        @"%@\n\n%@:\n%@\n\n%@:\n%@",
++        Localized(@"Unknown Bindfs Mount(s)"),
++        Localized(@"Target"),
++        target,
++        Localized(@"Source"),
++        source];
++
++    UIAlertController *alert =
++        [UIAlertController alertControllerWithTitle:
++            Localized(@"BindFS Mount Trust")
++                                            message:message
++                                     preferredStyle:UIAlertControllerStyleAlert];
++
++    [alert addAction:
++        [UIAlertAction actionWithTitle:Localized(@"Trust This Mount")
++                                 style:UIAlertActionStyleDefault
++                               handler:^(__unused UIAlertAction *action) {
++        [AppDelegate trustBindMount:fingerprint];
++    }]];
++
++    [alert addAction:
++        [UIAlertAction actionWithTitle:Localized(@"Keep Warning")
++                                 style:UIAlertActionStyleCancel
++                               handler:nil]];
++
++    [self showAlert:alert];
++}
+++ (void)showVPNProxyWarningPrompt {
++    UIAlertController *alert =
++        [UIAlertController alertControllerWithTitle:
++            Localized(@"VPN/Proxy Warning")
++                                            message:Localized(@"Some apps may refuse to run because a VPN/Proxy is enabled.")
++                                     preferredStyle:UIAlertControllerStyleAlert];
++
++    [alert addAction:
++        [UIAlertAction actionWithTitle:Localized(@"Don't Show VPN/Proxy Warning Again")
++                                 style:UIAlertActionStyleDefault
++                               handler:^(__unused UIAlertAction *action) {
++        [AppDelegate setDefaults:@YES forKey:RHIgnoreVPNProxyWarningKey];
++    }]];
++
++    [alert addAction:
++        [UIAlertAction actionWithTitle:Localized(@"Keep Warning")
++                                 style:UIAlertActionStyleCancel
++                               handler:nil]];
++
++    [self showAlert:alert];
++}
++
+ + (void)showAlert:(UIAlertController*)alert {
+     
+     static dispatch_queue_t alertQueue = nil;
+@@ -239,29 +371,30 @@
+         @"/System/Library/Pearl/ReferenceFrames",
+         @"/System/Library/Caches/com.apple.factorydata",
+     ];
+-    
+-    NSMutableArray* unknownBindMounts = [NSMutableArray new];
+-    
++
+     struct statfs * ss=NULL;
+     int n = getmntinfo(&ss, 0); //MNT_NOWAIT);
+     for(int i=0; i<n; i++) {
+         if(strcmp(ss[i].f_fstypename,"bindfs")==0) {
+-            if(![defaultBindMounts containsObject:@(ss[i].f_mntonname)]) {
+-                [unknownBindMounts addObject:@(ss[i].f_mntonname)];
++            NSString *target = @(ss[i].f_mntonname);
++
++            if([defaultBindMounts containsObject:target]) {
++                continue;
+             }
++
++            NSString *source = @(ss[i].f_mntfromname);
++
++            NSDictionary *fingerprint =
++                [AppDelegate bindMountFingerprintForSource:source
++                                                    target:target];
++
++            if([AppDelegate isTrustedBindMount:fingerprint]) {
++                continue;
++            }
++
++            [AppDelegate showBindMountTrustPrompt:fingerprint];
+         }
+     }
+-    
+-    if(unknownBindMounts.count > 0)
+-    {
+-        NSMutableArray* items = [NSMutableArray new];
+-        for(NSString* mnt in unknownBindMounts) {
+-            [items addObject:[NSString stringWithFormat:@"\n\"%@\"", mnt]];
+-        }
+-        
+-        [AppDelegate showDetectionWarning:[NSString stringWithFormat:@"%@:\n%@\n",Localized(@"Unknown Bindfs Mount(s)"),[items componentsJoinedByString:@"\n"]]];
+-    }
+-    
+     dispatch_async(dispatch_get_global_queue(0, 0), ^{
+         
+         int ports[] = { 22, 2222 };
+@@ -322,8 +455,8 @@
+     
+     NSDictionary *proxySettings = (__bridge NSDictionary *)(CFNetworkCopySystemProxySettings());
+     NSNumber* vpn = proxySettings[(NSString *)kCFNetworkProxiesHTTPEnable];
+-    if(vpn && vpn.boolValue) {
+-        [AppDelegate showDetectionWarning:Localized(@"Some apps may refuse to run because a VPN/Proxy is enabled.")];
++    if(vpn && vpn.boolValue && ![AppDelegate ignoreVPNProxyWarning]) {
++        [AppDelegate showVPNProxyWarningPrompt];
+     }
+     
+     return YES;
+diff --git a/RootHide/en.lproj/Localizable.strings b/RootHide/en.lproj/Localizable.strings
+index b36b351..0be26e4 100644
+--- a/RootHide/en.lproj/Localizable.strings
++++ b/RootHide/en.lproj/Localizable.strings
+@@ -49,3 +49,15 @@
+ "Failed to remove app group container:\n%@" = "Failed to clear the app group container:\n%@";
+ "Failed to remove app data container:\n%@" = "Failed to clear the app data container:\n%@";
+ "Failed to remove app plugin container:\n%@" = "Failed to clear the app extension container:\n%@";
++
++/* Trusted BindFS Mounts */
++"BindFS Mount Trust" = "BindFS Mount Trust";
++"Jailbreak Detection Warning" = "Jailbreak Detection Warning";
++"Target" = "Target";
++"Source" = "Source";
++"Trust This Mount" = "Trust This Mount";
++"Keep Warning" = "Keep Warning";
++
++/* VPN/Proxy Warning */
++"VPN/Proxy Warning" = "VPN/Proxy Warning";
++"Don't Show VPN/Proxy Warning Again" = "Don't Show VPN/Proxy Warning Again";
+diff --git a/RootHide/zh_CN.lproj/Localizable.strings b/RootHide/zh_CN.lproj/Localizable.strings
+index d97647d..3457b43 100644
+--- a/RootHide/zh_CN.lproj/Localizable.strings
++++ b/RootHide/zh_CN.lproj/Localizable.strings
+@@ -49,3 +49,15 @@
+ "Failed to remove app group container:\n%@" = "无法清空应用组容器：\n%@";
+ "Failed to remove app data container:\n%@" = "无法清空应用数据容器：\n%@";
+ "Failed to remove app plugin container:\n%@" = "无法清空应用扩展容器：\n%@";
++
++/* Trusted BindFS Mounts */
++"BindFS Mount Trust" = "BindFS 挂载信任";
++"Jailbreak Detection Warning" = "越狱检测警告";
++"Target" = "目标";
++"Source" = "来源";
++"Trust This Mount" = "信任此挂载";
++"Keep Warning" = "继续提示";
++
++/* VPN/Proxy Warning */
++"VPN/Proxy Warning" = "VPN/代理警告";
++"Don't Show VPN/Proxy Warning Again" = "不再提示 VPN/代理";

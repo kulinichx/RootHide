@@ -1,0 +1,92 @@
+name: Build RootHide Manager 1.4.1 Trust Port
+
+on:
+  push:
+    branches:
+      - codex/manager-141-trust-port-20261031
+    paths:
+      - tools/manager-trust/**
+      - .github/workflows/manager-blacklist-141.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-blacklist:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned RootHide Theos and packaging tools
+        env:
+          THEOS: ${{ runner.temp }}/theos
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install dpkg ldid xz
+          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          git -C "$THEOS" checkout --detach 3ac89c984ec652fd16bcd91b33ae16de45ce76fa
+          "$THEOS/bin/install-sdk" latest
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+
+      - name: Check out pinned official RootHide Manager 1.4.1
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/RootHideManagerApp
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/RootHide/RootHideManagerApp.git "$SOURCE_DIR"
+          git -C "$SOURCE_DIR" checkout --detach 829f592ecb5b09ef3ac069aad6d55d7319680852
+          test "$(git -C "$SOURCE_DIR" rev-parse HEAD)" = "829f592ecb5b09ef3ac069aad6d55d7319680852"
+          test "$(sed -n 's/^Version: //p' "$SOURCE_DIR/control")" = "1.4.1"
+
+      - name: Apply and test blacklist trust migration
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/RootHideManagerApp
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/tools/manager-trust/source/blacklist/1.4.1/DetectionTrust.patch"
+          git -C "$SOURCE_DIR" apply --check "$patch"
+          git -C "$SOURCE_DIR" apply "$patch"
+          python3 "$GITHUB_WORKSPACE/tools/manager-trust/test_blacklist_141.py" "$SOURCE_DIR"
+          git -C "$SOURCE_DIR" diff --check
+
+      - name: Build and verify package
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/RootHideManagerApp
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$GITHUB_WORKSPACE/artifacts/manager-blacklist-141"
+          mkdir -p "$output"
+          cd "$SOURCE_DIR"
+          set +e
+          make package FINALPACKAGE=1 THEOS_PACKAGE_BASE_VERSION=1.4.1 messages=yes TARGET_XCPRETTY= 2>&1 | tee "$output/build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          test "$build_status" -eq 0
+          package_count="$(find packages -maxdepth 1 -type f -name '*.deb' -print | wc -l | tr -d ' ')"
+          test "$package_count" -eq 1
+          deb="$(find packages -maxdepth 1 -type f -name '*.deb' -print)"
+          test "$(dpkg-deb -f "$deb" Package)" = "com.roothide.manager"
+          test "$(dpkg-deb -f "$deb" Version)" = "1.4.1"
+          test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
+          python3 "$GITHUB_WORKSPACE/tools/manager-trust/verify_blacklist_141.py" "$deb" \
+            --source "$SOURCE_DIR" --report "$output/verification.json"
+          cp "$deb" "$output/com.roothide.manager_1.4.1-trust-port_iphoneos-arm64e.deb"
+          printf '%s\n' '829f592ecb5b09ef3ac069aad6d55d7319680852' > "$output/source-commit.txt"
+          cd "$output"
+          shasum -a 256 "com.roothide.manager_1.4.1-trust-port_iphoneos-arm64e.deb" > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RootHide-Manager-1.4.1-Trust-Port
+          path: artifacts/manager-blacklist-141/
+          if-no-files-found: warn
+          retention-days: 30

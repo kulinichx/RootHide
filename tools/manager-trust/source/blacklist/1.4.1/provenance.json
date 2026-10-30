@@ -1,0 +1,19 @@
+{
+  "upstream_repository": "https://github.com/RootHide/RootHideManagerApp.git",
+  "upstream_commit": "829f592ecb5b09ef3ac069aad6d55d7319680852",
+  "upstream_version": "1.4.1",
+  "official_package_sha256": "0ece665e49d20b214944492c2711ca1c497017ef8c0477c58e1b99feb717615e",
+  "trust_feature_source_commit": "b15df6a01b027d2e6850912576be9a6899ab151d",
+  "theos_commit": "3ac89c984ec652fd16bcd91b33ae16de45ce76fa",
+  "modified_files": [
+    "RootHide/AppDelegate.m",
+    "RootHide/AppDataCleaner/AppDataCleaner.m",
+    "RootHide/en.lproj/Localizable.strings",
+    "RootHide/zh_CN.lproj/Localizable.strings"
+  ],
+  "preferences": [
+    "TrustedBindMountsV1",
+    "IgnoreVPNProxyWarningV1"
+  ],
+  "device_tested": false
+}
