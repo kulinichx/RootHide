@@ -1,0 +1,88 @@
+name: Build RootHide Manager 1.4.0 kulinichx
+
+on:
+  push:
+    branches:
+      - codex/health-audit-20261027
+    paths:
+      - tools/manager-trust/source/blacklist/DetectionTrust.patch
+      - tools/manager-trust/test_blacklist_140.py
+      - .github/workflows/manager-blacklist-140.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-blacklist:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned RootHide Theos and packaging tools
+        env:
+          THEOS: ${{ runner.temp }}/theos
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install dpkg ldid xz
+          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          git -C "$THEOS" checkout --detach 3ac89c984ec652fd16bcd91b33ae16de45ce76fa
+          "$THEOS/bin/install-sdk" latest
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+
+      - name: Check out official RootHide Manager 1.4.0 source
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/RootHideManagerApp
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/RootHide/RootHideManagerApp.git "$SOURCE_DIR"
+          git -C "$SOURCE_DIR" checkout --detach 224589666166a932ec5ff4151748a20d21f0cf7e
+          test "$(git -C "$SOURCE_DIR" rev-parse HEAD)" = "224589666166a932ec5ff4151748a20d21f0cf7e"
+          test "$(sed -n 's/^Version: //p' "$SOURCE_DIR/control")" = "1.4.0"
+
+      - name: Apply and test blacklist-only migration
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/RootHideManagerApp
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/tools/manager-trust/source/blacklist/DetectionTrust.patch"
+          git -C "$SOURCE_DIR" apply --check "$patch"
+          git -C "$SOURCE_DIR" apply "$patch"
+          python3 "$GITHUB_WORKSPACE/tools/manager-trust/test_blacklist_140.py" "$SOURCE_DIR"
+          git -C "$SOURCE_DIR" diff --check
+          changed="$(git -C "$SOURCE_DIR" diff --name-only | sort)"
+          expected="$(printf '%s\n' RootHide/AppDelegate.m RootHide/en.lproj/Localizable.strings RootHide/zh_CN.lproj/Localizable.strings | sort)"
+          test "$changed" = "$expected"
+
+      - name: Build and verify package
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/RootHideManagerApp
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SOURCE_DIR"
+          make package FINALPACKAGE=1 THEOS_PACKAGE_BASE_VERSION=1.4.0
+          package_count="$(find packages -maxdepth 1 -type f -name '*.deb' -print | wc -l | tr -d ' ')"
+          test "$package_count" -eq 1
+          deb="$(find packages -maxdepth 1 -type f -name '*.deb' -print)"
+          test "$(dpkg-deb -f "$deb" Package)" = "com.roothide.manager"
+          test "$(dpkg-deb -f "$deb" Version)" = "1.4.0"
+          test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
+          dpkg-deb --contents "$deb" | grep -F 'Applications/RootHide.app/RootHide'
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140"
+          cp "$deb" "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/RootHide Manager-1.4.0-kulinichx-iphoneos-arm64e.deb"
+          printf '%s\n' '224589666166a932ec5ff4151748a20d21f0cf7e' > "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/source-commit.txt"
+          shasum -a 256 "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/RootHide Manager-1.4.0-kulinichx-iphoneos-arm64e.deb" > "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/SHA256SUMS.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RootHide-Manager-1.4.0-kulinichx
+          path: artifacts/manager-blacklist-140/
+          if-no-files-found: error
+          retention-days: 30
