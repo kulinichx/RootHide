@@ -277,15 +277,34 @@ int systemwide_process_checkin(audit_token_t *processToken, char **rootPathOut, 
 	if (stat(procPath, &sb) == 0) {
 		if (S_ISREG(sb.st_mode) && (sb.st_mode & (S_ISUID | S_ISGID))) {
 			uint64_t ucred = proc_ucred(proc);
+			uid_t uid = kread32(ucred + koffsetof(ucred, uid));
+			gid_t gid = kread32(ucred + koffsetof(ucred, groups));
+			uid_t ruid = kread32(ucred + koffsetof(ucred, ruid));
+			gid_t rgid = kread32(ucred + koffsetof(ucred, rgid));
+
 			if ((sb.st_mode & (S_ISUID))) {
 				kwrite32(proc + koffsetof(proc, svuid), sb.st_uid);
 				kwrite32(ucred + koffsetof(ucred, svuid), sb.st_uid);
 				kwrite32(ucred + koffsetof(ucred, uid), sb.st_uid);
+				uid = sb.st_uid;
 			}
 			if ((sb.st_mode & (S_ISGID))) {
 				kwrite32(proc + koffsetof(proc, svgid), sb.st_gid);
 				kwrite32(ucred + koffsetof(ucred, svgid), sb.st_gid);
 				kwrite32(ucred + koffsetof(ucred, groups), sb.st_gid);
+				gid = sb.st_gid;
+			}
+
+			if (gSystemInfo.kernelStruct.proc_ro.exists && koffsetof(proc_ro, task_tokens)) {
+				uint64_t procRo = kread_ptr(proc + koffsetof(proc, proc_ro));
+				if (procRo) {
+					uint64_t auditToken = procRo + koffsetof(proc_ro, task_tokens) +
+					                      koffsetof(task_token_ro_data, audit_token);
+					kwrite32(auditToken + 4, uid);
+					kwrite32(auditToken + 8, gid);
+					kwrite32(auditToken + 12, ruid);
+					kwrite32(auditToken + 16, rgid);
+				}
 			}
 			uint32_t flag = kread32(proc + koffsetof(proc, flag));
 			if ((flag & P_SUGID) != 0) {

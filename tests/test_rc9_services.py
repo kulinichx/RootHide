@@ -26,6 +26,20 @@ def extract(text, anchor):
     return text[start:end]
 
 class ServiceContracts(unittest.TestCase):
+    def test_setid_checkin_updates_task_audit_token(self):
+        systemwide = source('BaseBin/launchdhook/src/jbserver/jbdomain_systemwide.c')
+        checkin_start = systemwide.index('int systemwide_process_checkin')
+        checkin_end = systemwide.index('int systemwide_fork_fix', checkin_start)
+        checkin = systemwide[checkin_start:checkin_end]
+        self.assertIn('uid_t uid = kread32(ucred + koffsetof(ucred, uid));', checkin)
+        self.assertIn('gid_t gid = kread32(ucred + koffsetof(ucred, groups));', checkin)
+        self.assertIn('uid = sb.st_uid;', checkin)
+        self.assertIn('gid = sb.st_gid;', checkin)
+        self.assertIn('if (gSystemInfo.kernelStruct.proc_ro.exists && koffsetof(proc_ro, task_tokens))', checkin)
+        self.assertIn('koffsetof(task_token_ro_data, audit_token)', checkin)
+        for offset, field in ((4, 'uid'), (8, 'gid'), (12, 'ruid'), (16, 'rgid')):
+            self.assertIn(f'kwrite32(auditToken + {offset}, {field});', checkin)
+
     def test_uttype_is_enabled_as_guarded_group(self):
         text = source('BaseBin/roothidehooks/lsd.x')
         group = text.split('%group UTTypeHooks', 1)[1].split('%end // %group UTTypeHooks', 1)[0]
