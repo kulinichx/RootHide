@@ -1,0 +1,17 @@
+diff --git a/RootHide/AppDataCleaner/AppDataCleaner.m b/RootHide/AppDataCleaner/AppDataCleaner.m
+--- a/RootHide/AppDataCleaner/AppDataCleaner.m
++++ b/RootHide/AppDataCleaner/AppDataCleaner.m
+@@ -18,10 +18,11 @@ NSString* clearAppData(AppInfo* app)
+        && isUUIDPathOf(app.containerURL.path, @"/private/var/mobile/Containers/Data/Application/")
+        && [NSFileManager.defaultManager fileExistsAtPath:app.containerURL.path])
+     {
+-        if([NSFileManager.defaultManager removeItemAtURL:app.containerURL error:&error]) {
++        NSError *removalError = nil;
++        if([NSFileManager.defaultManager removeItemAtURL:app.containerURL error:&removalError]) {
+             NSLog(@"removed %@", app.containerURL);
+         } else {
+-            error = [NSString stringWithFormat:Localized(@"Failed to remove app data container:\n%@"),error];
++            error = [NSString stringWithFormat:Localized(@"Failed to remove app data container:\n%@"),removalError];
+         }
+     }
+     return error;

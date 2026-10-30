@@ -41,6 +41,14 @@ class Blacklist140Trust(unittest.TestCase):
                 self.assertIn(text, self.en)
                 self.assertIn(text, self.zh)
 
+    def test_cleanup_error_uses_nserror_without_changing_return_type(self):
+        cleaner = (self.root / "RootHide/AppDataCleaner/AppDataCleaner.m").read_text(encoding="utf-8")
+        self.assertIn("NSString* clearAppData(AppInfo* app)", cleaner)
+        self.assertIn("NSError *removalError = nil;", cleaner)
+        self.assertIn("error:&removalError", cleaner)
+        self.assertNotIn("error:&error", cleaner)
+        self.assertIn("return error;", cleaner)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

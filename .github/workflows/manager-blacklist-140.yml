@@ -1,12 +1,14 @@
-name: Build RootHide Manager 1.4.0 kulinichx
+name: Build RootHide Manager 1.4.0 Trust Port
 
 on:
   push:
     branches:
-      - codex/health-audit-20261027
+      - codex/manager-140-trust-port-20261030
     paths:
       - tools/manager-trust/source/blacklist/DetectionTrust.patch
+      - tools/manager-trust/source/blacklist/XcodeNSError.patch
       - tools/manager-trust/test_blacklist_140.py
+      - tools/manager-trust/verify_blacklist_140.py
       - .github/workflows/manager-blacklist-140.yml
   workflow_dispatch:
 
@@ -54,10 +56,13 @@ jobs:
           patch="$GITHUB_WORKSPACE/tools/manager-trust/source/blacklist/DetectionTrust.patch"
           git -C "$SOURCE_DIR" apply --check "$patch"
           git -C "$SOURCE_DIR" apply "$patch"
+          compatibility="$GITHUB_WORKSPACE/tools/manager-trust/source/blacklist/XcodeNSError.patch"
+          git -C "$SOURCE_DIR" apply --check "$compatibility"
+          git -C "$SOURCE_DIR" apply "$compatibility"
           python3 "$GITHUB_WORKSPACE/tools/manager-trust/test_blacklist_140.py" "$SOURCE_DIR"
           git -C "$SOURCE_DIR" diff --check
           changed="$(git -C "$SOURCE_DIR" diff --name-only | sort)"
-          expected="$(printf '%s\n' RootHide/AppDelegate.m RootHide/en.lproj/Localizable.strings RootHide/zh_CN.lproj/Localizable.strings | sort)"
+          expected="$(printf '%s\n' RootHide/AppDelegate.m RootHide/AppDataCleaner/AppDataCleaner.m RootHide/en.lproj/Localizable.strings RootHide/zh_CN.lproj/Localizable.strings | sort)"
           test "$changed" = "$expected"
 
       - name: Build and verify package
@@ -69,7 +74,7 @@ jobs:
           cd "$SOURCE_DIR"
           mkdir -p "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140"
           set +e
-          make package FINALPACKAGE=1 THEOS_PACKAGE_BASE_VERSION=1.4.0 V=1 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/build.log"
+          make package FINALPACKAGE=1 THEOS_PACKAGE_BASE_VERSION=1.4.0 messages=yes TARGET_XCPRETTY= 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/build.log"
           build_status=${PIPESTATUS[0]}
           set -e
           test "$build_status" -eq 0
@@ -80,15 +85,19 @@ jobs:
           test "$(dpkg-deb -f "$deb" Version)" = "1.4.0"
           test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
           dpkg-deb --contents "$deb" | grep -F 'Applications/RootHide.app/RootHide'
+          python3 "$GITHUB_WORKSPACE/tools/manager-trust/verify_blacklist_140.py" "$deb" \
+            --source "$SOURCE_DIR" \
+            --report "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/verification.json"
           mkdir -p "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140"
-          cp "$deb" "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/RootHide Manager-1.4.0-kulinichx-iphoneos-arm64e.deb"
+          cp "$deb" "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/com.roothide.manager_1.4.0-trust-port_iphoneos-arm64e.deb"
           printf '%s\n' '224589666166a932ec5ff4151748a20d21f0cf7e' > "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/source-commit.txt"
-          shasum -a 256 "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/RootHide Manager-1.4.0-kulinichx-iphoneos-arm64e.deb" > "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/SHA256SUMS.txt"
+          cd "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140"
+          shasum -a 256 "com.roothide.manager_1.4.0-trust-port_iphoneos-arm64e.deb" > SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: RootHide-Manager-1.4.0-kulinichx
+          name: RootHide-Manager-1.4.0-Trust-Port
           path: artifacts/manager-blacklist-140/
           if-no-files-found: warn
           retention-days: 30
