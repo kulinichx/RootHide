@@ -14,6 +14,10 @@ def verify(path, source):
     for subtype, _, blob in build.slices(binary):
         for text in ("_TrollStore", "_TrollStoreLite", "applicationProxy", "Scanning..."):
             build.require(text.encode() in blob, f"Missing 1.4.1 implementation: {text}")
+    build.require(
+        "Applications/RootHide.app/varCleanRules.json" in payload,
+        "Missing cleanup rules",
+    )
     for name, (_, data) in payload.items():
         if name.endswith(".json"):
             build.require(
