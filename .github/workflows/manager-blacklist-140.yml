@@ -67,7 +67,12 @@ jobs:
         run: |
           set -euo pipefail
           cd "$SOURCE_DIR"
-          make package FINALPACKAGE=1 THEOS_PACKAGE_BASE_VERSION=1.4.0
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140"
+          set +e
+          make package FINALPACKAGE=1 THEOS_PACKAGE_BASE_VERSION=1.4.0 V=1 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          test "$build_status" -eq 0
           package_count="$(find packages -maxdepth 1 -type f -name '*.deb' -print | wc -l | tr -d ' ')"
           test "$package_count" -eq 1
           deb="$(find packages -maxdepth 1 -type f -name '*.deb' -print)"
@@ -81,8 +86,9 @@ jobs:
           shasum -a 256 "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/RootHide Manager-1.4.0-kulinichx-iphoneos-arm64e.deb" > "$GITHUB_WORKSPACE/artifacts/manager-blacklist-140/SHA256SUMS.txt"
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: RootHide-Manager-1.4.0-kulinichx
           path: artifacts/manager-blacklist-140/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30

@@ -2,7 +2,7 @@
 
 Scope: the blacklist manager only. White-list manager work is paused.
 
-The user-confirmed functional reference is `cn.zqbb.inject.manager_3.2.1-5+trust2_iphoneos-arm64e.deb` (SHA-256 `a4a49541a8e2261be12ab4422820db5404039c3c17c8a37eb2f55a931a810572`). It is used as behavior reference only; its executable and Inject Manager hook are not copied into RootHide Manager.
+The functional source is the user-confirmed `com.roothide.manager_1.3.9+trust2_iphoneos-arm64e.deb` in `参照官方dopamine/黑白名单管理器`. The port uses its blacklist manager implementation recorded by `source/blacklist/provenance.json` (source commit `b15df6a01b027d2e6850912576be9a6899ab151d`), not the ZQBB Inject Manager.
 
 The target is the official `RootHide/RootHideManagerApp` source commit `224589666166a932ec5ff4151748a20d21f0cf7e`. Its Debian control version is `1.4.0`; the existing `source/blacklist/DetectionTrust.patch` passes `git apply --check` against that exact commit.
 
