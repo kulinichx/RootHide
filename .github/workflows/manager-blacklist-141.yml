@@ -78,15 +78,15 @@ jobs:
           test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
           python3 "$GITHUB_WORKSPACE/tools/manager-trust/verify_blacklist_141.py" "$deb" \
             --source "$SOURCE_DIR" --report "$output/verification.json"
-          cp "$deb" "$output/com.roothide.manager_1.4.1-trust-port_iphoneos-arm64e.deb"
+          cp "$deb" "$output/RootHide Manager-1.4.1-kulinichx-iphoneos-arm64e.deb"
           printf '%s\n' '829f592ecb5b09ef3ac069aad6d55d7319680852' > "$output/source-commit.txt"
           cd "$output"
-          shasum -a 256 "com.roothide.manager_1.4.1-trust-port_iphoneos-arm64e.deb" > SHA256SUMS.txt
+          shasum -a 256 "RootHide Manager-1.4.1-kulinichx-iphoneos-arm64e.deb" > SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: RootHide-Manager-1.4.1-Trust-Port
+          name: RootHide-Manager-1.4.1-kulinichx-Trust-Port
           path: artifacts/manager-blacklist-141/
           if-no-files-found: warn
           retention-days: 30

@@ -29,6 +29,9 @@ The candidate package retains upstream Debian version 1.4.1, identity,
 minimum iOS version, entitlements, installer, and cleanup rules. It ships no
 user preferences and adds no injected module. Embedded signature hashes
 are verified, not Apple developer signing or acceptance on a real device.
+The distributed filename is
+`RootHide Manager-1.4.1-kulinichx-iphoneos-arm64e.deb`; this label does not
+alter the internal package identifier or version.
 
 Device installation, migration of saved preferences, and interaction
 acceptance still require testing on the target device. Back up
