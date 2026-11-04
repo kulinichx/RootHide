@@ -2,13 +2,15 @@
 #include <roothide.h>
 #include <libjailbreak/jbclient_xpc.h>
 #import <fcntl.h>
+#import <objc/runtime.h>
 #include <stdint.h>
+#include <string.h>
 #include "common.h"
 
 static NSString *springboardJbrootPath(NSString *path)
 {
 	const char *rootPath = jbclient_get_jbroot();
-	if (!rootPath || !path.fileSystemRepresentation) {
+	if (!rootPath || rootPath[0] != '/' || !path.fileSystemRepresentation) {
 		return nil;
 	}
 	return [NSString stringWithFormat:@"%s%s", rootPath, path.fileSystemRepresentation];
@@ -54,6 +56,17 @@ static NSString *springboardJbrootPath(NSString *path)
 
 @interface XBSnapshotContainerIdentity : NSObject
 @property NSString* bundleIdentifier;
+@property (nonatomic, readonly, copy) NSString *snapshotContainerPath;
+@end
+
+@interface XBApplicationSnapshot : NSObject
+- (XBSnapshotContainerIdentity *)containerIdentity;
+- (NSString *)_configureDefaultPathWithinGroupForFormat:(long long)format;
+@end
+
+@interface XBApplicationSnapshotManifestImpl : NSObject
++ (long long)_outputFormatForSnapshot:(id)snapshot;
+- (BOOL)_imageAccessQueue_saveData:(NSData *)data forSnapshot:(XBApplicationSnapshot *)snapshot;
 @end
 
 %hook XBSnapshotContainerIdentity
@@ -69,9 +82,13 @@ static NSString *springboardJbrootPath(NSString *path)
 
 -(NSString *)snapshotContainerPath {
     NSString* path = %orig;
+    NSString *bundleIdentifier = self.bundleIdentifier;
+    if (![path isKindOfClass:NSString.class] ||
+        ![bundleIdentifier isKindOfClass:NSString.class] || !bundleIdentifier.length) return path;
 
-    if([path hasPrefix:@"/var/mobile/Library/SplashBoard/Snapshots/"] && (![self.bundleIdentifier hasPrefix:@"com.apple."] || is_apple_internal_identifier(self.bundleIdentifier.UTF8String))) {
+    if([path hasPrefix:@"/var/mobile/Library/SplashBoard/Snapshots/"] && (![bundleIdentifier hasPrefix:@"com.apple."] || is_apple_internal_identifier(bundleIdentifier.UTF8String))) {
         NSString *redirectedPath = springboardJbrootPath(path);
+        if (!redirectedPath) return path;
         BOOL isDirectory = NO;
         NSFileManager *fileManager = NSFileManager.defaultManager;
         BOOL exists = [fileManager fileExistsAtPath:redirectedPath isDirectory:&isDirectory];
@@ -96,6 +113,82 @@ static NSString *springboardJbrootPath(NSString *path)
 }
 
 %end
+
+static BOOL springboardSnapshotMethodMatches(Method method, const char *returnTypes, const char *argumentTypes)
+{
+	if (!method || !method_getTypeEncoding(method)) return NO;
+	NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:method_getTypeEncoding(method)];
+	size_t argumentCount = strlen(argumentTypes);
+	if (signature.numberOfArguments != argumentCount + 2 ||
+		!strchr(returnTypes, signature.methodReturnType[0])) return NO;
+	for (size_t index = 0; index < argumentCount; index++) {
+		if ([signature getArgumentTypeAtIndex:index + 2][0] != argumentTypes[index]) return NO;
+	}
+	return YES;
+}
+
+static BOOL springboardSnapshotWriteAPIAvailable(void)
+{
+	Class manifest = NSClassFromString(@"XBApplicationSnapshotManifestImpl");
+	Class snapshot = NSClassFromString(@"XBApplicationSnapshot");
+	Class identity = NSClassFromString(@"XBSnapshotContainerIdentity");
+	if (!manifest || !snapshot || !identity) return NO;
+	return springboardSnapshotMethodMatches(class_getInstanceMethod(manifest,
+			@selector(_imageAccessQueue_saveData:forSnapshot:)), "Bc", "@@") &&
+		springboardSnapshotMethodMatches(class_getClassMethod(manifest,
+			@selector(_outputFormatForSnapshot:)), "q", "@") &&
+		springboardSnapshotMethodMatches(class_getInstanceMethod(snapshot,
+			@selector(containerIdentity)), "@", "") &&
+		springboardSnapshotMethodMatches(class_getInstanceMethod(snapshot,
+			@selector(_configureDefaultPathWithinGroupForFormat:)), "@", "q") &&
+		springboardSnapshotMethodMatches(class_getInstanceMethod(identity,
+			@selector(bundleIdentifier)), "@", "") &&
+		springboardSnapshotMethodMatches(class_getInstanceMethod(identity,
+			@selector(snapshotContainerPath)), "@", "");
+}
+
+%group SnapshotWriteHooks
+%hook XBApplicationSnapshotManifestImpl
+
+- (BOOL)_imageAccessQueue_saveData:(NSData *)data forSnapshot:(XBApplicationSnapshot *)snapshot
+{
+	if (![data isKindOfClass:NSData.class] || !data.length ||
+		![snapshot isKindOfClass:NSClassFromString(@"XBApplicationSnapshot")]) {
+		return %orig;
+	}
+
+	XBSnapshotContainerIdentity *identity = snapshot.containerIdentity;
+	if (![identity isKindOfClass:NSClassFromString(@"XBSnapshotContainerIdentity")]) return %orig;
+	NSString *bundleIdentifier = identity.bundleIdentifier;
+	if (![bundleIdentifier isKindOfClass:NSString.class] || !bundleIdentifier.length) return %orig;
+	BOOL isStockAppleApp = [bundleIdentifier hasPrefix:@"com.apple."] &&
+		!is_apple_internal_identifier(bundleIdentifier.UTF8String);
+	if (isStockAppleApp) return %orig;
+
+	// Both paths use the current randomized RootHide root, not /var/jb.
+	NSString *snapshotRoot = springboardJbrootPath(@"/var/mobile/Library/SplashBoard/Snapshots");
+	if (!snapshotRoot) return %orig;
+	snapshotRoot = [snapshotRoot.stringByStandardizingPath stringByAppendingString:@"/"];
+	NSString *containerPath = identity.snapshotContainerPath;
+	if (![containerPath isKindOfClass:NSString.class] ||
+		![containerPath.stringByStandardizingPath hasPrefix:snapshotRoot]) return %orig;
+
+	NSString *path = [snapshot _configureDefaultPathWithinGroupForFormat:
+		[[self class] _outputFormatForSnapshot:snapshot]];
+	if (!path) return NO;
+	if (![path isKindOfClass:NSString.class]) return %orig;
+	path = path.stringByStandardizingPath;
+	if (![path hasPrefix:snapshotRoot]) return %orig;
+
+	NSFileManager *fileManager = NSFileManager.defaultManager;
+	if (![fileManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
+		withIntermediateDirectories:YES attributes:nil error:nil]) return %orig;
+	// Avoid the default file-protection operation on RootHide snapshot files.
+	return [data writeToFile:path options:0 error:nil];
+}
+
+%end
+%end // SnapshotWriteHooks
 
 static const void *kDenyQueryTagKey = &kDenyQueryTagKey;
 
@@ -162,4 +255,7 @@ void sbInit(void)
 {
 	NSLog(@"sbInit...");
 	%init();
+	if (springboardSnapshotWriteAPIAvailable()) {
+		%init(SnapshotWriteHooks);
+	}
 }

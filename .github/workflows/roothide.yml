@@ -99,6 +99,7 @@ jobs:
           python3 tests/test_rc9_trustcache.py --native
           python3 tests/test_rc9_dyld.py --native
           python3 tests/test_rc9_update.py --native
+          python3 tests/test_rc9_snapshots.py --native
 
       - name: Cache Theos
         id: cache-theos
