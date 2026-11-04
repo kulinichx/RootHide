@@ -1,0 +1,169 @@
+"""UI source contracts, not UIKit execution or iOS device validation."""
+import unittest
+
+from test_rc9_services import extract, source
+
+
+HEADER = "Application/Dopamine/UI/DOHeaderView.m"
+MAIN = "Application/Dopamine/UI/DOMainViewController.m"
+CREDITS = "Application/Dopamine/UI/Settings/Specifiers/DOCreditsCell.m"
+
+
+def header_method(selector):
+    return extract(source(HEADER), selector)
+
+
+def main_method(selector):
+    text = source(MAIN).split("@implementation DOMainViewController\n", 1)[1]
+    return extract(text, selector)
+
+
+class UptimeLifecycleContracts(unittest.TestCase):
+    def test_initialization_only_registers_observers_not_a_running_timer(self):
+        init = header_method("-(id)initWithImage:")
+        self.assertIn("[self updateLabel];", init)
+        self.assertNotIn("timerWithTimeInterval:", init)
+        self.assertNotIn("scheduledTimerWithTimeInterval:", source(HEADER))
+        self.assertEqual(init.count("addObserver:self"), 1)
+        for name in (
+            "UIApplicationDidBecomeActiveNotification",
+            "UIApplicationWillResignActiveNotification",
+            "UISceneDidActivateNotification", "UISceneWillDeactivateNotification",
+            "UIWindowDidBecomeVisibleNotification", "UIWindowDidBecomeHiddenNotification",
+        ):
+            self.assertEqual(init.count(name), 1)
+
+    def test_timer_requires_a_visible_page_window_and_active_scene_and_app(self):
+        resume = header_method("- (void)resumeUptimeUpdates")
+        guard = extract(resume, "if (!self.uptimeUpdatesEnabled")
+        for condition in (
+            "!self.window", "self.window.hidden",
+            "self.window.windowScene.activationState != UISceneActivationStateForegroundActive",
+            "UIApplication.sharedApplication.applicationState != UIApplicationStateActive",
+        ):
+            self.assertIn(condition, guard)
+        self.assertIn("[self stopUptimeTimer];", guard)
+        self.assertIn("return;", guard)
+        self.assertLess(resume.index(guard), resume.index("[self updateLabel];"))
+        self.assertLess(resume.index("[self updateLabel];"),
+                        resume.index("if (self.uptimeTimer) return;"))
+        self.assertLess(resume.index("if (self.uptimeTimer) return;"),
+                        resume.index("[NSTimer timerWithTimeInterval:"))
+
+    def test_timer_callback_has_weak_ownership_and_rechecks_visibility(self):
+        resume = header_method("- (void)resumeUptimeUpdates")
+        self.assertIn("__weak typeof(self) weakSelf = self;", resume)
+        callback = extract(resume, "block:^(NSTimer *timer)")
+        self.assertIn("__strong typeof(weakSelf) strongSelf = weakSelf;", callback)
+        self.assertIn("[timer invalidate];", callback)
+        self.assertIn("[strongSelf resumeUptimeUpdates];", callback)
+        self.assertNotIn("[self ", callback)
+        self.assertNotIn("target:self", resume)
+
+    def test_minute_alignment_and_clock_definition_are_preserved(self):
+        resume = header_method("- (void)resumeUptimeUpdates")
+        self.assertIn("timerWithTimeInterval:60.0 repeats:YES", resume)
+        self.assertIn("60.0 - fmod([self systemUptime], 60.0)", resume)
+        self.assertIn("dateWithTimeIntervalSinceNow:delay", resume)
+        self.assertIn("forMode:NSRunLoopCommonModes", resume)
+        clock = header_method("- (NSTimeInterval)systemUptime")
+        self.assertIn("clock_gettime(CLOCK_MONOTONIC_RAW, &ts);", clock)
+        self.assertIn("ts.tv_nsec / 1000000000.0", clock)
+        self.assertNotIn("mach_continuous_time", source(HEADER))
+        label = header_method("- (NSString *)formatUptime")
+        for value in (
+            "[self systemUptime]", "NSCalendarUnitDay", "NSCalendarUnitHour",
+            "NSCalendarUnitMinute", "NSDateComponentsFormatterUnitsStyleFull",
+            "System_Uptime_Less_Than_Minute", "System_Uptime_Prefix",
+            "uptime: less than 1 minute",
+        ):
+            self.assertIn(value, label)
+
+    def test_inactive_events_stop_before_state_changes_and_ignore_other_scenes(self):
+        handler = header_method("- (void)uptimeContextDidChange:")
+        self.assertIn("notification.object != self.window.windowScene) return;", handler)
+        self.assertIn("notification.object != self.window) return;", handler)
+        stop = extract(handler, "if ([name isEqualToString:UIApplicationWillResignActiveNotification]")
+        self.assertIn("UISceneWillDeactivateNotification", stop)
+        self.assertIn("UIWindowDidBecomeHiddenNotification", stop)
+        self.assertIn("[self stopUptimeTimer];", stop)
+        self.assertIn("[self resumeUptimeUpdates];", handler)
+
+    def test_window_moves_stop_old_timer_before_resuming(self):
+        move = header_method("- (void)didMoveToWindow")
+        self.assertIn("[super didMoveToWindow];", move)
+        self.assertLess(move.index("[self stopUptimeTimer];"),
+                        move.index("[self resumeUptimeUpdates];"))
+        setter = header_method("- (void)setUptimeUpdatesEnabled:")
+        self.assertLess(setter.index("_uptimeUpdatesEnabled = enabled;"),
+                        setter.index("[self resumeUptimeUpdates];"))
+
+    def test_stop_and_deallocation_release_timer_and_observers(self):
+        stop = header_method("- (void)stopUptimeTimer")
+        self.assertLess(stop.index("[self.uptimeTimer invalidate];"),
+                        stop.index("self.uptimeTimer = nil;"))
+        dealloc = header_method("- (void)dealloc")
+        self.assertIn("[_uptimeTimer invalidate];", dealloc)
+        self.assertIn("removeObserver:self", dealloc)
+        self.assertIn("_uptimeHeaderView.uptimeUpdatesEnabled = NO;",
+                      main_method("- (void)dealloc"))
+
+    def test_both_home_layouts_share_the_controller_visibility_gate(self):
+        text = source(MAIN).split("@implementation DOMainViewController\n", 1)[1]
+        self.assertEqual(text.count("DOHeaderView *headerView = [[DOHeaderView alloc]"), 2)
+        self.assertEqual(text.count("self.uptimeHeaderView = headerView;"), 2)
+        appear = main_method("- (void)viewWillAppear:")
+        disappear = main_method("- (void)viewWillDisappear:")
+        self.assertIn("[super viewWillAppear:animated];", appear)
+        self.assertIn("self.uptimeUpdatesVisible = YES;", appear)
+        self.assertIn("self.uptimeHeaderView.uptimeUpdatesEnabled = YES;", appear)
+        self.assertIn("[super viewWillDisappear:animated];", disappear)
+        self.assertIn("self.uptimeUpdatesVisible = NO;", disappear)
+        self.assertIn("self.uptimeHeaderView.uptimeUpdatesEnabled = NO;", disappear)
+
+    def test_replacing_header_disables_previous_instance_before_assignment(self):
+        setter = main_method("- (void)setUptimeHeaderView:")
+        self.assertLess(setter.index("_uptimeHeaderView.uptimeUpdatesEnabled = NO;"),
+                        setter.index("_uptimeHeaderView = headerView;"))
+        self.assertIn("_uptimeHeaderView.uptimeUpdatesEnabled = self.uptimeUpdatesVisible;", setter)
+
+
+class CreditsLayoutContracts(unittest.TestCase):
+    def test_only_outer_list_scrolls_and_names_and_links_are_preserved(self):
+        text = source(CREDITS)
+        init = extract(text.split("@implementation DOCreditsCell\n", 1)[1],
+                       "- (id)initWithSpecifier:")
+        self.assertIn("self.collectionView.scrollEnabled = NO;", init)
+        for value in (
+            '[specifier propertyForKey:@"names"]',
+            "self.collectionView.delegate = self;",
+            "self.collectionView.dataSource = self;",
+        ):
+            self.assertIn(value, init)
+        self.assertIn('[cell setName:name[@"name"] url:[NSURL URLWithString:name[@"link"]]];', text)
+        self.assertIn("openURL:self.url", text)
+
+    def test_width_invalidation_is_guarded_and_records_width_first(self):
+        text = source(CREDITS).split("@implementation DOCreditsCell\n", 1)[1]
+        layout = extract(text, "- (void)layoutSubviews")
+        self.assertIn("[super layoutSubviews];", layout)
+        self.assertIn("CGRectGetWidth(self.collectionView.bounds)", layout)
+        guard = extract(layout, "if (width > 0 && width != self.lastCollectionWidth)")
+        self.assertLess(guard.index("self.lastCollectionWidth = width;"),
+                        guard.index("invalidateLayout"))
+        self.assertEqual(layout.count("invalidateLayout"), 1)
+
+    def test_all_rows_have_height_for_the_unchanged_two_column_grid(self):
+        text = source(CREDITS).split("@implementation DOCreditsCell\n", 1)[1]
+        size = extract(text, "- (CGSize)collectionView:")
+        height = extract(text, "- (CGFloat)preferredHeightForWidth:")
+        self.assertIn("collectionView.frame.size.width/2, CREDITS_CELL_HEIGHT", size)
+        self.assertIn("CREDITS_CELL_HEIGHT * ceil(self.names.count/2.0)", height)
+        init = extract(text, "- (id)initWithSpecifier:")
+        for property_name in ("minimumInteritemSpacing", "minimumLineSpacing"):
+            self.assertIn(f"layout.{property_name} = 0;", init)
+        self.assertIn("layout.sectionInset = UIEdgeInsetsMake(0, 0, 0, 0);", init)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

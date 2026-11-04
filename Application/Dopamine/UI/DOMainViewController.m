@@ -1784,6 +1784,8 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 @property(nonatomic, strong) DOCustomLiquidGlassView *customGlassAvatarMaterialView;
 @property(nonatomic, strong) UIImageView *customGlassAvatarFallbackIconView;
 @property(nonatomic, strong) NSArray<UILabel *> *customGlassHeaderSubtitleLabels;
+@property(nonatomic, strong) DOHeaderView *uptimeHeaderView;
+@property(nonatomic, assign) BOOL uptimeUpdatesVisible;
 @property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarWidthConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *customGlassAvatarIconWidthConstraint;
@@ -1810,6 +1812,15 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 @end
 
 @implementation DOMainViewController
+
+- (void)setUptimeHeaderView:(DOHeaderView *)headerView
+{
+    if (_uptimeHeaderView != headerView) {
+        _uptimeHeaderView.uptimeUpdatesEnabled = NO;
+        _uptimeHeaderView = headerView;
+    }
+    _uptimeHeaderView.uptimeUpdatesEnabled = self.uptimeUpdatesVisible;
+}
 
 - (void)applyCustomGlassHomeAppearance
 {
@@ -2202,6 +2213,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         [DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By") withAlpha:0.8],
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
+    self.uptimeHeaderView = headerView;
     
     [stackView addArrangedSubview:headerView];
 
@@ -2837,6 +2849,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
         [DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By") withAlpha:0.8],
         [DOGlobalAppearance secondarySubtitleString:@" " withAlpha:0.8]
     ]];
+    self.uptimeHeaderView = headerView;
     [self configureCustomGlassHeaderView:headerView logoHeight:logoHeight subtitleScale:headerSubtitleScale];
 
     NSMutableArray<UILabel *> *headerSubtitleLabels = [NSMutableArray array];
@@ -3287,6 +3300,8 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    self.uptimeUpdatesVisible = YES;
+    self.uptimeHeaderView.uptimeUpdatesEnabled = YES;
     if (DORHSupporterIsVerified()) {
         [self applyCustomGlassHomeAppearance];
     }
@@ -3294,8 +3309,16 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
 }
 
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    self.uptimeUpdatesVisible = NO;
+    self.uptimeHeaderView.uptimeUpdatesEnabled = NO;
+}
+
 - (void)dealloc
 {
+    _uptimeHeaderView.uptimeUpdatesEnabled = NO;
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:DOCustomGlassThemeDidChangeNotification
                                                   object:nil];

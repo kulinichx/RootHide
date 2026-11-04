@@ -51,6 +51,23 @@ class SharedContracts(unittest.TestCase):
         body = function(COMMON, "spawn_config_for_executable")
         self.assertLess(body.index('jbuserconfig_get_value("ProcessBlacklist")'), body.index("zqbb_wantInject"))
 
+    def test_jetsam_changes_are_scoped_to_the_original_call(self):
+        body = function(COMMON, "spawn_exec_hook_common")
+        prepare = body.index("spawnEnvp = envc;")
+        save = body.index("originalMemlimitActive = *(int *)")
+        call = body.index("r = orig(spawnEnvp);")
+        restore = body.index("if (restoreJetsamLimits)")
+        cleanup = body.rindex("envbuf_free(envc)")
+        self.assertLess(prepare, save)
+        self.assertLess(save, call)
+        self.assertLess(call, restore)
+        self.assertLess(restore, cleanup)
+        self.assertIn("if (attrStruct && shouldInsertJBEnv)", body)
+        for field, offset in (("Active", "ACTIVE"), ("Inactive", "INACTIVE")):
+            self.assertIn(
+                f"*(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_{offset}) = "
+                f"originalMemlimit{field};", body[restore:])
+
 
 PREFIX = r'''
 #define _GNU_SOURCE
@@ -155,8 +172,9 @@ static const char *xpc_array_get_string(xpc_object_t o,size_t i) { assert(o==&bl
 '''
 
 MAIN = r'''
-static int trusts, calls, debug_calls, original_result;
-static bool seen_dyld;
+static int trusts, calls, debug_calls, original_result, original_errno;
+static bool seen_dyld, seen_attr;
+static int seen_active, seen_inactive;
 static char seen_libraries[1024], seen_safe[32], seen_ms[32];
 static void capture(char *const env[]) {
     ++calls;
@@ -167,10 +185,24 @@ static void capture(char *const env[]) {
 }
 static int trust(const char *p) { assert(p);++trusts;return 0; }
 static int debug(uint64_t p,bool all) { assert(p==42 && !all);++debug_calls;return 0; }
-static int original_spawn(pid_t *p,const char *path,struct _posix_spawn_args_desc *d,char *const a[],char *const e[]) {
-    (void)path;(void)d;(void)a;capture(e);if(p && original_result==0)*p=42;return original_result;
+static void capture_attributes(struct _posix_spawn_args_desc *d) {
+    seen_attr=d && d->attrp;
+    if (seen_attr) {
+        TestAttr *a=d->attrp;
+        seen_active=a->active;seen_inactive=a->inactive;
+    }
 }
-static int original_exec(const char *p,char *const a[],char *const e[]) { (void)p;(void)a;capture(e);return original_result; }
+static int original_spawn(pid_t *p,const char *path,struct _posix_spawn_args_desc *d,char *const a[],char *const e[]) {
+    (void)path;(void)a;capture(e);capture_attributes(d);
+    if(p && original_result==0)*p=42;
+    if(original_errno)errno=original_errno;
+    return original_result;
+}
+static int original_exec(const char *p,char *const a[],char *const e[]) {
+    (void)p;(void)a;capture(e);
+    if(original_errno)errno=original_errno;
+    return original_result;
+}
 static void reset(void) {
     assert(dictionary.refs==0 && blacklist.refs==0);
     fake_pid=1;marker_kind=0;hook_exists=true;
@@ -178,11 +210,14 @@ static void reset(void) {
     config_exists=value_exists=false;blacklist.type=XPC_TYPE_ARRAY;
     memset(blacklist_entries,0,sizeof(blacklist_entries));
     configured_addend=10;allocation_count=0;fail_at=-1;
-    trusts=calls=debug_calls=type_queries=flag_queries=ipc_queries=original_result=0;
+    trusts=calls=debug_calls=type_queries=flag_queries=ipc_queries=original_result=original_errno=0;
+    seen_attr=false;seen_active=seen_inactive=0;
 }
 static int run(const char *path,char *const env[],struct _posix_spawn_args_desc *desc,double multiplier) {
     return spawn_exec_hook_common(path,NULL,env,desc,trust,multiplier,^int(char *const patched[]) {
-        capture(patched);return original_result;
+        capture(patched);capture_attributes(desc);
+        if(original_errno)errno=original_errno;
+        return original_result;
     });
 }
 int main(void) {
@@ -204,8 +239,8 @@ int main(void) {
     reset();assert(run(NULL,NULL,NULL,0)==0 && calls==1 && trusts==0);
     reset();struct _posix_spawn_args_desc empty={NULL};pid_t pid=0;
     assert(posix_spawn_hook_shared(&pid,"/jb/tool",&empty,NULL,NULL,original_spawn,trust,debug,0)==0);
-    assert(pid==42 && calls==1 && type_queries==0 && flag_queries==0);
-    reset();original_result=-1;errno=ENOENT;
+    assert(pid==42 && calls==1 && !seen_attr && type_queries==0 && flag_queries==0);
+    reset();original_result=-1;original_errno=ENOENT;errno=0;
     assert(execve_hook_shared("/jb/tool",NULL,NULL,original_exec,trust)==-1 && errno==ENOENT && calls==1);
     reset();fail_at=0;
     assert(execve_hook_shared("/jb/tool",NULL,NULL,original_exec,trust)==-1 && errno==ENOMEM && calls==0);
@@ -215,14 +250,52 @@ int main(void) {
         reset();TestAttr a={driver ? POSIX_SPAWN_PROC_TYPE_DRIVER : 0,100,80,0};
         struct _posix_spawn_args_desc d={&a};hook_exists=driver!=0;
         char *env[]={safe_mode==1 ? "_SafeMode=1" : "_SafeMode=0",safe_mode==2 ? "_MSSafeMode=1" : "_MSSafeMode=0",NULL};
-        assert(run("/jb/tool",env,&d,3)==0 && !seen_dyld && a.active==100);
+        assert(run("/jb/tool",env,&d,3)==0 && !seen_dyld);
+        assert(seen_attr && seen_active==100 && seen_inactive==80);
+        assert(a.active==100 && a.inactive==80);
     }
     reset();TestAttr a={0,100,-1,POSIX_SPAWN_START_SUSPENDED};struct _posix_spawn_args_desc d={&a};
-    assert(posix_spawn_hook_shared(&pid,"/jb/tool",&d,NULL,NULL,original_spawn,trust,debug,0)==0);
-    assert(a.active==140 && a.inactive==-1 && debug_calls==1);
-    reset();a.active=INT_MAX-1;a.inactive=80;a.flags=0;configured_addend=INT_MAX;
-    assert(run("/jb/tool",NULL,&d,3)==0 && a.active==INT_MAX && a.inactive==INT_MAX);
-    reset();a.active=100;a.inactive=80;assert(run("/jb/tool",NULL,&d,1)==0 && a.active==100 && a.inactive==80);
+    /* Reuse the caller's descriptor: the child sees the addend once per spawn. */
+    for(int attempt=0;attempt<3;attempt++) {
+        assert(posix_spawn_hook_shared(&pid,"/jb/tool",&d,NULL,NULL,original_spawn,trust,debug,0)==0);
+        assert(seen_attr && seen_active==140 && seen_inactive==-1);
+        assert(a.active==100 && a.inactive==-1 && debug_calls==attempt+1);
+    }
+    reset();a.active=100;a.inactive=80;a.flags=POSIX_SPAWN_START_SUSPENDED;
+    original_result=EAGAIN;original_errno=EACCES;pid=123;errno=0;
+    assert(posix_spawn_hook_shared(&pid,"/jb/tool",&d,NULL,NULL,original_spawn,trust,debug,0)==EAGAIN);
+    assert(seen_active==140 && seen_inactive==120);
+    assert(a.active==100 && a.inactive==80 && pid==123 && debug_calls==0 && errno==EACCES);
+    reset();a.flags=0;original_result=-1;original_errno=ENOENT;errno=0;
+    assert(run("/jb/tool",NULL,&d,3)==-1 && errno==ENOENT);
+    assert(seen_active==140 && seen_inactive==120 && a.active==100 && a.inactive==80);
+
+    const struct { int active, inactive, configured, expected_active, expected_inactive; } limits[]={
+        {INT_MAX-1,80,INT_MAX,INT_MAX,INT_MAX},
+        {-1,-1,10,-1,-1}, {0,0,10,40,40}, {-2,-5,10,-2,-5},
+        {100,80,0,140,120}, {100,80,-10,140,120}
+    };
+    for(size_t i=0;i<sizeof(limits)/sizeof(limits[0]);i++) {
+        reset();a.active=limits[i].active;a.inactive=limits[i].inactive;configured_addend=limits[i].configured;
+        assert(run("/jb/tool",NULL,&d,3)==0);
+        assert(seen_active==limits[i].expected_active && seen_inactive==limits[i].expected_inactive);
+        assert(a.active==limits[i].active && a.inactive==limits[i].inactive);
+    }
+    const double multipliers[]={0,NAN,INFINITY,-INFINITY,1,0.5,-2,2};
+    const int addends[]={40,40,40,40,0,0,0,30};
+    for(size_t i=0;i<sizeof(multipliers)/sizeof(multipliers[0]);i++) {
+        reset();a.active=100;a.inactive=80;
+        assert(run("/jb/tool",NULL,&d,multipliers[i])==0);
+        assert(seen_active==100+addends[i] && seen_inactive==80+addends[i]);
+        assert(a.active==100 && a.inactive==80);
+    }
+    reset();whitelist_exists=true;a.active=100;a.inactive=80;
+    assert(run("/jb/tool",NULL,&d,3)==0 && !seen_dyld);
+    assert(seen_active==100 && seen_inactive==80 && a.active==100 && a.inactive==80);
+    reset();fake_pid=1;a.active=100;a.inactive=80;
+    char *safe_app[]={"_SafeMode=1",NULL};
+    assert(run(app,safe_app,&d,3)==0 && !seen_dyld);
+    assert(seen_active==100 && seen_inactive==80 && a.active==100 && a.inactive==80);
     assert(rc9_zqbb_jetsam_addend(0,3)==40 && rc9_zqbb_jetsam_addend(25,2)==45);
     assert(rc9_zqbb_jetsam_addend(10,NAN)==0 && rc9_zqbb_jetsam_limit(-1,40)==-1);
 
@@ -271,11 +344,15 @@ int main(void) {
     for(int removing=0;removing<2;removing++) {
         reset();whitelist_exists=removing;
         char *env[]={removing ? "DYLD_INSERT_LIBRARIES=/a.dylib:/usr/lib/systemhook-TEST.dylib" : "KEEP=ok",NULL};
-        assert(run("/jb/tool",env,NULL,0)==0);int allocations=allocation_count;
+        a.active=100;a.inactive=80;
+        assert(run("/jb/tool",env,&d,3)==0);int allocations=allocation_count;
+        assert(seen_active==(removing ? 100 : 140) && seen_inactive==(removing ? 80 : 120));
+        assert(a.active==100 && a.inactive==80);
         for(int failure=0;failure<allocations;failure++) {
             reset();whitelist_exists=removing;fail_at=failure;
-            int r=run("/jb/tool",env,NULL,0);
+            int r=run("/jb/tool",env,&d,3);
             assert(r==ENOMEM && calls==0);
+            assert(a.active==100 && a.inactive==80);
         }
     }
     reset();puts("PASS: shared common spawn, SafeMode, envbuf, blacklist, APT, jetsam and allocation failures");

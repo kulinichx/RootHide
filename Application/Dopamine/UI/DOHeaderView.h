@@ -11,6 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface DOHeaderView : UIView
 
+// The owning controller enables updates only while its page is visible.
+@property (nonatomic, assign) BOOL uptimeUpdatesEnabled;
+
 -(id)initWithImage:(UIImage *)image subtitles:(NSArray<NSAttributedString *> *)subtitles;
 
 @end

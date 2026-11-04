@@ -7,11 +7,14 @@
 
 #import "DOHeaderView.h"
 #import "DOThemeManager.h"
+#import <math.h>
+#import <time.h>
 
 @interface DOHeaderView ()
 
 @property (nonatomic) UIImageView *logoView;
 @property (nonatomic) UILabel *timerLabel;
+@property (nonatomic, strong) NSTimer *uptimeTimer;
 
 @end
 
@@ -68,19 +71,94 @@
         }
         
         [self updateLabel];
-        [NSTimer scheduledTimerWithTimeInterval:60.0 target:self selector:@selector(updateLabel) userInfo:nil repeats:YES];
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+        for (NSNotificationName name in @[
+            UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
+            UISceneDidActivateNotification, UISceneWillDeactivateNotification,
+            UIWindowDidBecomeVisibleNotification, UIWindowDidBecomeHiddenNotification
+        ]) {
+            [center addObserver:self selector:@selector(uptimeContextDidChange:) name:name object:nil];
+        }
     }
     return self;
+}
+
+- (void)setUptimeUpdatesEnabled:(BOOL)enabled {
+    _uptimeUpdatesEnabled = enabled;
+    [self resumeUptimeUpdates];
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self stopUptimeTimer];
+    [self resumeUptimeUpdates];
+}
+
+- (void)uptimeContextDidChange:(NSNotification *)notification {
+    NSNotificationName name = notification.name;
+    if (([name isEqualToString:UISceneDidActivateNotification] ||
+         [name isEqualToString:UISceneWillDeactivateNotification]) &&
+        notification.object != self.window.windowScene) return;
+    if (([name isEqualToString:UIWindowDidBecomeVisibleNotification] ||
+         [name isEqualToString:UIWindowDidBecomeHiddenNotification]) &&
+        notification.object != self.window) return;
+
+    if ([name isEqualToString:UIApplicationWillResignActiveNotification] ||
+        [name isEqualToString:UISceneWillDeactivateNotification] ||
+        [name isEqualToString:UIWindowDidBecomeHiddenNotification]) {
+        [self stopUptimeTimer];
+    } else {
+        [self resumeUptimeUpdates];
+    }
+}
+
+- (void)resumeUptimeUpdates {
+    if (!self.uptimeUpdatesEnabled || !self.window || self.window.hidden ||
+        self.window.windowScene.activationState != UISceneActivationStateForegroundActive ||
+        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        [self stopUptimeTimer];
+        return;
+    }
+
+    [self updateLabel];
+    if (self.uptimeTimer) return;
+
+    __weak typeof(self) weakSelf = self;
+    self.uptimeTimer = [NSTimer timerWithTimeInterval:60.0 repeats:YES block:^(NSTimer *timer) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            [timer invalidate];
+            return;
+        }
+        [strongSelf resumeUptimeUpdates];
+    }];
+    NSTimeInterval delay = 60.0 - fmod([self systemUptime], 60.0);
+    self.uptimeTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:delay];
+    [[NSRunLoop mainRunLoop] addTimer:self.uptimeTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopUptimeTimer {
+    [self.uptimeTimer invalidate];
+    self.uptimeTimer = nil;
+}
+
+- (void)dealloc {
+    [_uptimeTimer invalidate];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)updateLabel {
         self.timerLabel.text = [self formatUptime];
 }
 
-- (NSString *)formatUptime {
-    struct timespec ts;
+- (NSTimeInterval)systemUptime {
+    struct timespec ts = {0};
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    NSTimeInterval uptime = ts.tv_sec;
+    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+}
+
+- (NSString *)formatUptime {
+    NSTimeInterval uptime = [self systemUptime];
 
     if (uptime < 60) {
         NSString *lessThanMinute = NSLocalizedString(@"System_Uptime_Less_Than_Minute", nil);

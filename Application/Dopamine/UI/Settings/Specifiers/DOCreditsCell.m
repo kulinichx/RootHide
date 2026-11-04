@@ -7,6 +7,7 @@
 
 #import "DOCreditsCell.h"
 #import "DOGlobalAppearance.h"
+#import <math.h>
 
 #define CREDITS_CELL_HEIGHT 35
 
@@ -82,6 +83,7 @@
 @interface DOCreditsCell ()
 @property (nonatomic, strong) NSArray<NSDictionary*> *names;
 @property (nonatomic, strong) UICollectionView *collectionView;
+@property (nonatomic, assign) CGFloat lastCollectionWidth;
 @end
 
 @implementation DOCreditsCell
@@ -103,6 +105,7 @@
         self.collectionView.backgroundColor = [UIColor clearColor];
         self.collectionView.showsVerticalScrollIndicator = NO;
         self.collectionView.showsHorizontalScrollIndicator = NO;
+        self.collectionView.scrollEnabled = NO;
 
         [self.collectionView registerClass:[DOCreditsCellItem class] forCellWithReuseIdentifier:@"item"];
         self.collectionView.delegate = self;
@@ -119,6 +122,16 @@
         
     }
     return self;
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    CGFloat width = CGRectGetWidth(self.collectionView.bounds);
+    if (width > 0 && width != self.lastCollectionWidth) {
+        self.lastCollectionWidth = width;
+        [self.collectionView.collectionViewLayout invalidateLayout];
+    }
 }
 
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section

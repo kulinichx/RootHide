@@ -282,26 +282,6 @@ static int spawn_exec_hook_common(const char *path,
 	} while (0);
 
 
-	uint8_t *attrStruct = (uint8_t *)attr;
-	if (attrStruct) {
-		// If systemhook is being injected and jetsam limits are set, increase them with the ZQBB per-process addend
-		if (shouldInsertJBEnv) {
-			if (jetsamMultiplier == 0 || !isfinite(jetsamMultiplier)) jetsamMultiplier = 3; // default value (3x)
-			if (jetsamMultiplier > 1) {
-				int jetsamAddend = rc9_zqbb_jetsam_addend(zqbb_getJetsamAddend(path), jetsamMultiplier);
-				int memlimit_active = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE);
-				if (memlimit_active != -1) {
-					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = rc9_zqbb_jetsam_limit(memlimit_active, jetsamAddend);
-				}
-				int memlimit_inactive = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE);
-				if (memlimit_inactive != -1) {
-					*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = rc9_zqbb_jetsam_limit(memlimit_inactive, jetsamAddend);
-				}
-			}
-		}
-
-	}
-
 	int r = -1;
 	char **envc = NULL;
 	char *const *spawnEnvp = envp;
@@ -385,7 +365,30 @@ static int spawn_exec_hook_common(const char *path,
 		spawnEnvp = envc;
 	}
 
+	// Prepare the environment before touching caller-owned attributes: allocation
+	// failures above must leave the original limits intact, too.
+	uint8_t *attrStruct = (uint8_t *)attr;
+	int originalMemlimitActive = 0;
+	int originalMemlimitInactive = 0;
+	bool restoreJetsamLimits = false;
+	if (attrStruct && shouldInsertJBEnv) {
+		if (jetsamMultiplier == 0 || !isfinite(jetsamMultiplier)) jetsamMultiplier = 3;
+		if (jetsamMultiplier > 1) {
+			int jetsamAddend = rc9_zqbb_jetsam_addend(zqbb_getJetsamAddend(path), jetsamMultiplier);
+			originalMemlimitActive = *(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE);
+			originalMemlimitInactive = *(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE);
+			restoreJetsamLimits = true;
+			*(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = rc9_zqbb_jetsam_limit(originalMemlimitActive, jetsamAddend);
+			*(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = rc9_zqbb_jetsam_limit(originalMemlimitInactive, jetsamAddend);
+		}
+	}
+
 	r = orig(spawnEnvp);
+
+	if (restoreJetsamLimits) {
+		*(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = originalMemlimitActive;
+		*(int *)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = originalMemlimitInactive;
+	}
 
 	if (envc) envbuf_free(envc);
 

@@ -88,6 +88,9 @@ jobs:
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Release source and package-checker regressions
+        run: python3 -m unittest discover -s tests -v
+
       - name: Runtime policy regression tests
         run: |
           python3 tests/test_rc9_runtime_policy.py --native
@@ -219,6 +222,14 @@ jobs:
           cp Application/Dopamine.tipa "Application/${artifact}"
           echo "artifact=${artifact}" >> "$GITHUB_ENV"
 
+      - name: Verify full package identity
+        if: env.BUILD_MODE == 'full'
+        run: |
+          set -euo pipefail
+          python3 tools/release/verify_rc9.py "Application/${artifact}" \
+            --expected-build-id "$GITHUB_SHA" \
+            --output artifacts/rc9-package-identity.json
+
       - name: Upload focused artifact
         if: env.BUILD_MODE == 'focused'
         uses: actions/upload-artifact@v4
@@ -243,5 +254,6 @@ jobs:
           path: |
             Application/${{ env.artifact }}
             artifacts/source-provenance.txt
+            artifacts/rc9-package-identity.json
           if-no-files-found: error
           retention-days: 14
