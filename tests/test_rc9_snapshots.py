@@ -123,7 +123,8 @@ static Class replacementManifest;
 static int originalCalls, formatCalls;
 static BOOL originalResult = YES;
 static const char *jbclient_get_jbroot(void) {
-    return testRoot ? testRoot.fileSystemRepresentation : NULL;
+    // The real API returns C bytes; NSString rejects an empty filesystem path.
+    return testRoot ? (testRoot.length ? testRoot.fileSystemRepresentation : "") : NULL;
 }
 static BOOL is_apple_internal_identifier(const char *identifier) {
     return identifier && !strncmp(identifier, "com.apple.internal.", 19);
