@@ -237,12 +237,12 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
 
     def test_scroll_layout_preserves_glass_geometry_without_rebuilding_material(self):
         backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
-        self.assertIn("if (!CGRectEqualToRect(glass.frame, glassFrame))", backdrops)
+        self.assertIn("DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);", backdrops)
         self.assertLess(backdrops.index("[activeKeys addObject:key]"),
                         backdrops.index("if (CGRectIsEmpty(sectionRect)"))
         created = extract(backdrops, "if (created)")
         self.assertIn("[glass reloadMaterial];", created)
-        self.assertIn("[tableView sendSubviewToBack:glass];", created)
+        self.assertNotIn("sendSubviewToBack", backdrops)
         self.assertEqual(backdrops.count("[glass reloadMaterial];"),
                          created.count("[glass reloadMaterial];"))
         refresh = self.settings_method("- (void)customGlassRefreshPageAppearance")
@@ -251,6 +251,18 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertNotIn("reloadMaterial", layout)
         self.assertNotIn("reloadData", layout)
         self.assertNotIn("contentOffset", layout)
+
+    def test_settings_glass_stays_in_table_background_behind_reused_cells(self):
+        settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
+        background = extract(settings, "static UIView *DOCustomGlassSettingsBackground")
+        place = extract(settings, "static void DOPlaceCustomGlassSettingsSection")
+        self.assertIn("tableView.backgroundView = background;", background)
+        self.assertIn("[tableView convertRect:glassRect toView:background]", place)
+        self.assertIn("[background addSubview:glass];", place)
+        self.assertNotIn("[tableView insertSubview:glass", settings)
+        health = extract(settings, "- (void)refreshGlassAppearance")
+        self.assertIn("DOPlaceCustomGlassSettingsSection(self.tableView, self.sectionGlassView, sectionRect);",
+                      health)
 
     def test_base_list_does_not_reassign_an_unchanged_table_frame(self):
         base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")

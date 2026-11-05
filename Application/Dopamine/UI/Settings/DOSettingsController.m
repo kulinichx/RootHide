@@ -26,6 +26,33 @@
 
 static NSString * const DOCustomGlassSettingsDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
+static NSInteger const DOCustomGlassSettingsBackgroundTag = 0xC652;
+
+static UIView *DOCustomGlassSettingsBackground(UITableView *tableView)
+{
+    UIView *background = tableView.backgroundView;
+    if (background.tag != DOCustomGlassSettingsBackgroundTag) {
+        background = [[UIView alloc] initWithFrame:tableView.bounds];
+        background.tag = DOCustomGlassSettingsBackgroundTag;
+        background.backgroundColor = UIColor.clearColor;
+        background.opaque = NO;
+        background.userInteractionEnabled = NO;
+        tableView.backgroundView = background;
+    }
+    return background;
+}
+
+static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *glass, CGRect sectionRect)
+{
+    UIView *background = DOCustomGlassSettingsBackground(tableView);
+    if (glass.superview != background)
+        [background addSubview:glass];
+
+    CGRect glassRect = CGRectInset(sectionRect, 1.0, 0.5);
+    CGRect backgroundRect = [tableView convertRect:glassRect toView:background];
+    if (!CGRectEqualToRect(glass.frame, backgroundRect))
+        glass.frame = backgroundRect;
+}
 
 // Implemented in DOMainViewController.m. Keeping the declaration local avoids
 // adding a new project file while letting Settings consume the same renderer.
@@ -133,7 +160,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
             kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
             kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
         self.sectionGlassView = glass;
-        [tableView insertSubview:glass atIndex:0];
+        UIView *background = DOCustomGlassSettingsBackground(tableView);
+        [background addSubview:glass];
     }
 
     UIScreenEdgePanGestureRecognizer *edgeGesture =
@@ -223,9 +251,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     }
 
     self.sectionGlassView.hidden = NO;
-    self.sectionGlassView.frame = CGRectInset(sectionRect, 1.0, 0.5);
+    DOPlaceCustomGlassSettingsSection(self.tableView, self.sectionGlassView, sectionRect);
     [self.sectionGlassView reloadMaterial];
-    [self.tableView sendSubviewToBack:self.sectionGlassView];
 }
 
 - (void)refreshHealth
@@ -612,16 +639,15 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                 kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
                 kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             self.customGlassSectionBackdropViews[key] = glass;
-            [tableView insertSubview:glass atIndex:0];
+            UIView *background = DOCustomGlassSettingsBackground(tableView);
+            [background addSubview:glass];
             created = YES;
         }
 
         if (glass.hidden) glass.hidden = NO;
-        CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);
-        if (!CGRectEqualToRect(glass.frame, glassFrame)) glass.frame = glassFrame;
+        DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);
         if (created) {
             [glass reloadMaterial];
-            [tableView sendSubviewToBack:glass];
         }
     }
 
