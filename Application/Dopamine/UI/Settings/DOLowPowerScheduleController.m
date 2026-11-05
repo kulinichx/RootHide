@@ -430,8 +430,8 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
             scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightRegular]];
         cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
         cell.detailTextLabel.textColor = UIColor.systemBlueColor;
-        BOOL selected = (self.editingTime == 0 && start) || (self.editingTime == 1 && !start);
-        cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        BOOL isEditingTime = (self.editingTime == 0 && start) || (self.editingTime == 1 && !start);
+        cell.accessoryType = isEditingTime ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         cell.tintColor = UIColor.systemBlueColor;
         cell.accessibilityTraits |= UIAccessibilityTraitButton;
         cell.accessibilityHint = DOLocalizedString(@"LowPowerSchedule_EditTime");

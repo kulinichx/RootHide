@@ -130,6 +130,10 @@ class LowPowerScheduleContracts(unittest.TestCase):
         self.assertIn("self.saveButton.enabled = self.hasChanges", extract(ui, "- (void)draftChanged"))
         glass = extract(ui, "- (void)refreshScheduleGlassFrames")
         self.assertIn("if (CGRectIsEmpty(frame) || CGRectGetHeight(frame) < 2) continue;", glass)
+        time_row = extract(ui, "- (UITableViewCell *)tableView:")
+        self.assertIn("BOOL isEditingTime", time_row)
+        self.assertIn("UIView *selected =", time_row)
+        self.assertNotIn("BOOL selected =", time_row)
 
     def test_all_new_localization_keys_exist_in_english_and_simplified_chinese(self):
         keys = set(re.findall(r'@"(LowPowerSchedule_\w+)"', source(CONTROLLER)))
