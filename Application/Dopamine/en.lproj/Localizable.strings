@@ -198,8 +198,6 @@
 "Supporter_Removed" = "Supporter Removed";
 "Supporter_Removed_Message" = "Your supporter license has been removed. Restore the standard interface now.";
 
-"ScheduledEvents_Title" = "Scheduled Events";
-"ScheduledEvents_Back" = "Back";
 "LowPowerSchedule_Title" = "Low Power Mode";
 "LowPowerSchedule_EditTime" = "Adjust time";
 "LowPowerSchedule_OnAction" = "Turn on Low Power Mode";

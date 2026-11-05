@@ -80,7 +80,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     self.statusToken = -1;
     self.editingTime = NSNotFound;
     self.sectionGlassViews = [NSMutableDictionary new];
-    self.title = DOLocalizedString(@"ScheduledEvents_Title");
+    self.title = DOLocalizedString(@"LowPowerSchedule_Title");
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.backgroundColor = UIColor.clearColor;
     self.savedConfiguration = [DOEnvironmentManager.sharedManager lowPowerScheduleConfiguration];
@@ -111,7 +111,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     [self.view addSubview:self.tableView];
 
     UIButton *back = [self chromeButton:@"chevron.left" action:@selector(backPressed)
-        label:DOLocalizedString(@"ScheduledEvents_Back")];
+        label:DOLocalizedString(@"Button_Cancel")];
     self.backButton = back;
     self.saveButton = [self chromeButton:@"checkmark" action:@selector(savePressed)
         label:DOLocalizedString(@"LowPowerSchedule_Save")];
@@ -176,7 +176,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    [self refreshScheduleAppearance];
+    [self refreshScheduleGlassFrames];
 }
 
 - (void)viewDidDisappear:(BOOL)animated
@@ -194,7 +194,9 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)scheduleThemeDidChange:(NSNotification *)notification
 {
     __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf refreshScheduleAppearance]; });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf refreshScheduleAppearance];
+    });
 }
 
 - (void)styleScheduleCell:(UITableViewCell *)cell
@@ -210,11 +212,8 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     cell.textLabel.numberOfLines = 0;
 }
 
-- (void)refreshScheduleAppearance
+- (void)refreshScheduleGlassFrames
 {
-    self.backButton.tintColor = UIColor.labelColor;
-    self.saveButton.tintColor = UIColor.labelColor;
-    for (UITableViewCell *cell in self.tableView.visibleCells) [self styleScheduleCell:cell];
     for (DOCustomLiquidGlassView *glass in self.sectionGlassViews.allValues) glass.hidden = YES;
     if (!DORHSupporterIsVerified()) return;
 
@@ -239,9 +238,18 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         }
         glass.hidden = NO;
         glass.frame = CGRectInset(frame, 1, 0.5);
-        [glass reloadMaterial];
         [self.tableView sendSubviewToBack:glass];
     }
+}
+
+- (void)refreshScheduleAppearance
+{
+    self.backButton.tintColor = UIColor.labelColor;
+    self.saveButton.tintColor = UIColor.labelColor;
+    for (UITableViewCell *cell in self.tableView.visibleCells) [self styleScheduleCell:cell];
+    [self refreshScheduleGlassFrames];
+    for (DOCustomLiquidGlassView *glass in self.sectionGlassViews.allValues)
+        [glass reloadMaterial];
 }
 
 - (BOOL)hasChanges
@@ -279,7 +287,6 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         [self.timeFeedback impactOccurredWithIntensity:0.68];
         [self.timeFeedback prepare];
     }
-    [self updateTimeLabels];
     [self draftChanged];
 }
 
@@ -340,7 +347,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     self.runtimeStatus = [DOEnvironmentManager.sharedManager lowPowerScheduleStatus];
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
                  withRowAnimation:UITableViewRowAnimationNone];
-    [self.tableView setNeedsLayout];
+    [self refreshScheduleGlassFrames];
 }
 
 - (NSString *)statusText
@@ -440,7 +447,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     [self.endPicker removeFromSuperview];
     [tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
     [tableView layoutIfNeeded];
-    [self refreshScheduleAppearance];
+    [self refreshScheduleGlassFrames];
     if (self.editingTime != NSNotFound)
         [tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:self.editingTime + 2 inSection:0]
                         atScrollPosition:UITableViewScrollPositionNone animated:YES];

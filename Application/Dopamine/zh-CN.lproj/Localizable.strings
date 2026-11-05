@@ -195,8 +195,6 @@
 "Supporter_Removed" = "支持者授权已移除";
 "Supporter_Removed_Message" = "授权已移除，可恢复标准界面。";
 
-"ScheduledEvents_Title" = "计划事件";
-"ScheduledEvents_Back" = "返回";
 "LowPowerSchedule_Title" = "低电量模式";
 "LowPowerSchedule_EditTime" = "调整时间";
 "LowPowerSchedule_OnAction" = "开启低电量模式";
