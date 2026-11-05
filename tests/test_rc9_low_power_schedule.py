@@ -107,7 +107,7 @@ class LowPowerScheduleContracts(unittest.TestCase):
         project = source("Application/Dopamine.xcodeproj/project.pbxproj")
         self.assertEqual(project.count("DOLowPowerScheduleController.m in Sources"), 2)
         ui = source(CONTROLLER)
-        for token in ("UIDatePickerModeTime", "UIDatePickerStyleCompact", "UISwitch",
+        for token in ("UIDatePickerModeTime", "UIDatePickerStyleWheels", "UISwitch",
                       "start == end", "self.hasChanges", "notify_cancel(self.statusToken)",
                       "RC_LOW_POWER_QUERY", "LowPowerSchedule_Waiting"):
             self.assertIn(token, ui)
@@ -115,7 +115,7 @@ class LowPowerScheduleContracts(unittest.TestCase):
         self.assertNotIn("setPowerMode:", ui)
 
     def test_all_new_localization_keys_exist_in_english_and_simplified_chinese(self):
-        keys = set(re.findall(r'@"(LowPowerSchedule_\w+)"', source(CONTROLLER)))
+        keys = set(re.findall(r'@"((?:LowPowerSchedule|ScheduledEvents)_\w+)"', source(CONTROLLER)))
         keys.add("LowPowerSchedule_Title")
         for language in ("en", "zh-CN", "zh-Hans"):
             text = source(f"Application/Dopamine/{language}.lproj/Localizable.strings")

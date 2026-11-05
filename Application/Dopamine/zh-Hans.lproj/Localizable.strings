@@ -195,16 +195,21 @@
 "Supporter_Removed" = "支持者授权已移除";
 "Supporter_Removed_Message" = "授权已移除，可恢复标准界面。";
 
-"LowPowerSchedule_Title" = "低电量模式计划";
+"ScheduledEvents_Title" = "计划事件";
+"ScheduledEvents_Back" = "返回";
+"LowPowerSchedule_Title" = "低电量模式";
+"LowPowerSchedule_EditTime" = "调整时间";
+"LowPowerSchedule_OnAction" = "开启低电量模式";
+"LowPowerSchedule_OffAction" = "关闭低电量模式";
 "LowPowerSchedule_Enable" = "启用计划";
 "LowPowerSchedule_OnTime" = "开启时间";
 "LowPowerSchedule_OffTime" = "关闭时间";
 "LowPowerSchedule_Daily" = "每天重复";
 "LowPowerSchedule_Status" = "执行状态";
 "LowPowerSchedule_Save" = "保存";
-"LowPowerSchedule_Footer" = "每天按本地时间执行，支持跨午夜。保存已启用的计划后，立即按当前时段设置低电量模式；暂停计划不改变当前状态。手动切换后，保持到下一个计划事件。";
-"LowPowerSchedule_RuntimeFooter" = "由越狱环境中的 SpringBoard 执行，无需多巴胺界面常驻。更新后若执行端未加载，需重新加载越狱环境。锁屏休眠下的准时性仍待真机验证；关机或未越狱时不执行。";
-"LowPowerSchedule_Waiting" = "等待 SpringBoard 确认已保存的计划…";
+"LowPowerSchedule_Footer" = "每天按本地时间重复。保存已启用的计划后，立即应用当前时段的设置；暂停不改变当前低电量状态。手动切换保持到下一次计划执行。";
+"LowPowerSchedule_RuntimeFooter" = "关机或未越狱时不执行。";
+"LowPowerSchedule_Waiting" = "正在确认计划状态…";
 "LowPowerSchedule_Disabled" = "计划已暂停，当前低电量模式保持不变。";
 "LowPowerSchedule_Unsupported" = "系统接口不兼容，计划未运行。";
 "LowPowerSchedule_ApplyFailed" = "系统未接受上次省电请求。重试次数有限，请在下一事件后检查。";

@@ -1,15 +1,32 @@
 #import "DOLowPowerScheduleController.h"
 #import "DOEnvironmentManager.h"
 #import "DOUIManager.h"
+#import "../DOSupporterLicense.h"
 #import "../../../../BaseBin/roothidehooks/RCLowPowerSchedule.h"
 #include <notify.h>
+
+static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTheme.DidChange";
+
+// Shared renderer implemented by the existing RC9 main page.
+@interface DOCustomLiquidGlassView : UIView
+@property(nonatomic, assign) CGFloat materialScale;
+@property(nonatomic, assign) CGFloat preferredCornerRadius;
+- (instancetype)initWithCornerRadius:(CGFloat)cornerRadius baseTintAlpha:(CGFloat)baseTintAlpha;
+- (void)reloadMaterial;
+@end
 
 @interface DOLowPowerScheduleController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic, strong) UITableView *tableView;
 @property(nonatomic, strong) UISwitch *enabledSwitch;
 @property(nonatomic, strong) UIDatePicker *startPicker;
 @property(nonatomic, strong) UIDatePicker *endPicker;
+@property(nonatomic, strong) UIButton *backButton;
 @property(nonatomic, strong) UIButton *saveButton;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *sectionGlassViews;
+@property(nonatomic, strong) UIImpactFeedbackGenerator *timeFeedback;
+@property(nonatomic) NSInteger editingTime;
+@property(nonatomic) NSInteger lastStartMinute;
+@property(nonatomic) NSInteger lastEndMinute;
 @property(nonatomic, copy) NSDictionary *savedConfiguration;
 @property(nonatomic, copy) NSDictionary *runtimeStatus;
 @property(nonatomic, strong) NSDate *queryDate;
@@ -23,7 +40,10 @@
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.translatesAutoresizingMaskIntoConstraints = NO;
     button.tintColor = UIColor.labelColor;
-    [button setImage:[UIImage systemImageNamed:image] forState:UIControlStateNormal];
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightMedium];
+    [button setImage:[UIImage systemImageNamed:image withConfiguration:configuration]
+           forState:UIControlStateNormal];
     button.accessibilityLabel = label;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
@@ -33,14 +53,15 @@
 {
     UIDatePicker *picker = [UIDatePicker new];
     picker.datePickerMode = UIDatePickerModeTime;
-    picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
+    picker.preferredDatePickerStyle = UIDatePickerStyleWheels;
     picker.minuteInterval = 1;
     picker.locale = [NSLocale localeWithLocaleIdentifier:@"en_GB"];
     // Time-only editing must also allow a time missing in today's local DST.
     picker.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
     picker.date = [NSDate dateWithTimeIntervalSinceReferenceDate:minute * 60];
-    picker.frame = CGRectMake(0, 0, 150, 44);
-    [picker addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventValueChanged];
+    picker.translatesAutoresizingMaskIntoConstraints = NO;
+    [picker.heightAnchor constraintEqualToConstant:216].active = YES;
+    [picker addTarget:self action:@selector(timeChanged:) forControlEvents:UIControlEventValueChanged];
     return picker;
 }
 
@@ -57,7 +78,9 @@
 {
     [super viewDidLoad];
     self.statusToken = -1;
-    self.title = DOLocalizedString(@"LowPowerSchedule_Title");
+    self.editingTime = NSNotFound;
+    self.sectionGlassViews = [NSMutableDictionary new];
+    self.title = DOLocalizedString(@"ScheduledEvents_Title");
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.view.backgroundColor = UIColor.clearColor;
     self.savedConfiguration = [DOEnvironmentManager.sharedManager lowPowerScheduleConfiguration];
@@ -70,12 +93,17 @@
                 forControlEvents:UIControlEventValueChanged];
     self.startPicker = [self timePicker:[self.savedConfiguration[@"StartMinute"] integerValue]];
     self.endPicker = [self timePicker:[self.savedConfiguration[@"EndMinute"] integerValue]];
+    self.lastStartMinute = [self minuteFromPicker:self.startPicker];
+    self.lastEndMinute = [self minuteFromPicker:self.endPicker];
     self.startPicker.accessibilityLabel = DOLocalizedString(@"LowPowerSchedule_OnTime");
     self.endPicker.accessibilityLabel = DOLocalizedString(@"LowPowerSchedule_OffTime");
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.backgroundColor = UIColor.clearColor;
+    self.tableView.backgroundView = nil;
+    self.tableView.opaque = NO;
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -83,7 +111,8 @@
     [self.view addSubview:self.tableView];
 
     UIButton *back = [self chromeButton:@"chevron.left" action:@selector(backPressed)
-        label:DOLocalizedString(@"Button_Cancel")];
+        label:DOLocalizedString(@"ScheduledEvents_Back")];
+    self.backButton = back;
     self.saveButton = [self chromeButton:@"checkmark" action:@selector(savePressed)
         label:DOLocalizedString(@"LowPowerSchedule_Save")];
     self.saveButton.enabled = NO;
@@ -124,22 +153,95 @@
     __weak typeof(self) weakSelf = self;
     int token = -1;
     if (notify_register_dispatch(RC_LOW_POWER_STATUS_CHANGED, &token, dispatch_get_main_queue(),
-        ^(__unused int value) { [weakSelf refreshStatus]; }) == NOTIFY_STATUS_OK)
+        ^(__unused int value) {
+            if (weakSelf.viewIfLoaded.window &&
+                weakSelf.navigationController.topViewController == weakSelf) [weakSelf refreshStatus];
+        }) == NOTIFY_STATUS_OK)
         self.statusToken = token;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidBecomeActive:)
         name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillResignActive:)
+        name:UIApplicationWillResignActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(scheduleThemeDidChange:)
+        name:DOScheduleThemeDidChangeNotification object:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    [self refreshScheduleAppearance];
     [self requestStatus];
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    [self refreshScheduleAppearance];
+}
+
+- (void)viewDidDisappear:(BOOL)animated
+{
+    [super viewDidDisappear:animated];
+    self.timeFeedback = nil;
 }
 
 - (void)dealloc
 {
-    if (self.statusToken >= 0) notify_cancel(self.statusToken);
+    if (self.isViewLoaded && self.statusToken >= 0) notify_cancel(self.statusToken);
     [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void)scheduleThemeDidChange:(NSNotification *)notification
+{
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf refreshScheduleAppearance]; });
+}
+
+- (void)styleScheduleCell:(UITableViewCell *)cell
+{
+    cell.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    cell.backgroundColor = DORHSupporterIsVerified() ? UIColor.clearColor :
+        [UIColor.secondarySystemGroupedBackgroundColor colorWithAlphaComponent:0.82];
+    cell.contentView.backgroundColor = UIColor.clearColor;
+    cell.backgroundView = nil;
+    cell.textLabel.textColor = UIColor.labelColor;
+    cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
+    cell.textLabel.numberOfLines = 0;
+}
+
+- (void)refreshScheduleAppearance
+{
+    self.backButton.tintColor = UIColor.labelColor;
+    self.saveButton.tintColor = UIColor.labelColor;
+    for (UITableViewCell *cell in self.tableView.visibleCells) [self styleScheduleCell:cell];
+    for (DOCustomLiquidGlassView *glass in self.sectionGlassViews.allValues) glass.hidden = YES;
+    if (!DORHSupporterIsVerified()) return;
+
+    for (NSInteger section = 0; section < self.tableView.numberOfSections; section++) {
+        NSInteger rows = [self.tableView numberOfRowsInSection:section];
+        if (!rows) continue;
+        CGRect first = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:section]];
+        CGRect last = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:rows - 1 inSection:section]];
+        CGRect frame = CGRectUnion(first, last);
+        if (CGRectIsEmpty(frame) || CGRectGetHeight(frame) < 2) continue;
+        DOCustomLiquidGlassView *glass = self.sectionGlassViews[@(section)];
+        if (!glass) {
+            glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:18 baseTintAlpha:0.038];
+            glass.userInteractionEnabled = NO;
+            glass.materialScale = 0.88;
+            glass.preferredCornerRadius = 18;
+            glass.layer.cornerRadius = 18;
+            glass.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+                kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+            self.sectionGlassViews[@(section)] = glass;
+            [self.tableView insertSubview:glass atIndex:0];
+        }
+        glass.hidden = NO;
+        glass.frame = CGRectInset(frame, 1, 0.5);
+        [glass reloadMaterial];
+        [self.tableView sendSubviewToBack:glass];
+    }
 }
 
 - (BOOL)hasChanges
@@ -154,6 +256,67 @@
     self.saveButton.enabled = self.hasChanges;
 }
 
+- (void)prepareTimeFeedback
+{
+    if (!self.timeFeedback)
+        self.timeFeedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid];
+    [self.timeFeedback prepare];
+}
+
+- (void)timeChanged:(UIDatePicker *)picker
+{
+    NSInteger minute = [self minuteFromPicker:picker];
+    NSInteger previous = picker == self.startPicker ? self.lastStartMinute : self.lastEndMinute;
+    if (picker == self.startPicker) self.lastStartMinute = minute;
+    else self.lastEndMinute = minute;
+    BOOL editingThisPicker = (self.editingTime == 0 && picker == self.startPicker) ||
+        (self.editingTime == 1 && picker == self.endPicker);
+    if (minute != previous && editingThisPicker && self.viewIfLoaded.window &&
+        self.navigationController.topViewController == self &&
+        UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+        // Match GlassFolders' crisp detent feedback, once per changed value.
+        [self prepareTimeFeedback];
+        [self.timeFeedback impactOccurredWithIntensity:0.68];
+        [self.timeFeedback prepare];
+    }
+    [self updateTimeLabels];
+    [self draftChanged];
+}
+
+- (UILabel *)timeLabelForPicker:(UIDatePicker *)picker
+{
+    NSInteger minute = [self minuteFromPicker:picker];
+    UILabel *label = [UILabel new];
+    label.text = [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
+    label.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
+        scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightRegular]];
+    label.adjustsFontForContentSizeCategory = YES;
+    label.textColor = UIColor.systemBlueColor;
+    [label sizeToFit];
+    return label;
+}
+
+- (BOOL)isPickerRow:(NSIndexPath *)indexPath
+{
+    return indexPath.section == 0 && self.editingTime != NSNotFound &&
+        indexPath.row == self.editingTime + 2;
+}
+
+- (BOOL)isStartRow:(NSIndexPath *)indexPath
+{
+    return indexPath.section == 0 && indexPath.row == 1;
+}
+
+- (void)updateTimeLabels
+{
+    for (NSIndexPath *indexPath in self.tableView.indexPathsForVisibleRows) {
+        if (indexPath.section != 0 || indexPath.row == 0 || [self isPickerRow:indexPath]) continue;
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+        cell.accessoryView = [self timeLabelForPicker:[self isStartRow:indexPath] ?
+            self.startPicker : self.endPicker];
+    }
+}
+
 - (void)requestStatus
 {
     self.queryDate = NSDate.date;
@@ -163,7 +326,13 @@
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification
 {
-    [self requestStatus];
+    if (self.viewIfLoaded.window && self.navigationController.topViewController == self)
+        [self requestStatus];
+}
+
+- (void)applicationWillResignActive:(NSNotification *)notification
+{
+    self.timeFeedback = nil;
 }
 
 - (void)refreshStatus
@@ -171,6 +340,7 @@
     self.runtimeStatus = [DOEnvironmentManager.sharedManager lowPowerScheduleStatus];
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
                  withRowAnimation:UITableViewRowAnimationNone];
+    [self.tableView setNeedsLayout];
 }
 
 - (NSString *)statusText
@@ -195,7 +365,7 @@
     formatter.dateStyle = NSDateFormatterShortStyle;
     formatter.timeStyle = NSDateFormatterShortStyle;
     NSString *action = DOLocalizedString([next[@"PowerMode"] boolValue] ?
-        @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
+        @"LowPowerSchedule_OnAction" : @"LowPowerSchedule_OffAction");
     return [NSString stringWithFormat:DOLocalizedString(@"LowPowerSchedule_Next"),
         [formatter stringFromDate:next[@"Date"]], action];
 }
@@ -203,11 +373,11 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    return section == 0 ? 3 : 1;
+    return section == 0 ? (self.editingTime == NSNotFound ? 3 : 4) : 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return DOLocalizedString(section == 0 ? @"LowPowerSchedule_Daily" : @"LowPowerSchedule_Status");
+    return DOLocalizedString(section == 0 ? @"LowPowerSchedule_Title" : @"LowPowerSchedule_Status");
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
@@ -216,21 +386,64 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    cell.backgroundColor = [UIColor.secondarySystemGroupedBackgroundColor colorWithAlphaComponent:0.82];
-    cell.textLabel.textColor = UIColor.labelColor;
-    cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    cell.textLabel.adjustsFontForContentSizeCategory = YES;
-    cell.textLabel.numberOfLines = 0;
+    [self styleScheduleCell:cell];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     if (indexPath.section == 1) {
         cell.textLabel.text = self.statusText;
+    } else if ([self isPickerRow:indexPath]) {
+        UIDatePicker *picker = self.editingTime == 0 ? self.startPicker : self.endPicker;
+        [cell.contentView addSubview:picker];
+        [NSLayoutConstraint activateConstraints:@[
+            [picker.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor],
+            [picker.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor],
+            [picker.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
+            [picker.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
+        ]];
+    } else if (indexPath.row == 0) {
+        cell.textLabel.text = DOLocalizedString(@"LowPowerSchedule_Enable");
+        cell.accessoryView = self.enabledSwitch;
     } else {
-        NSArray *keys = @[@"LowPowerSchedule_Enable", @"LowPowerSchedule_OnTime", @"LowPowerSchedule_OffTime"];
-        cell.textLabel.text = DOLocalizedString(keys[indexPath.row]);
-        cell.accessoryView = indexPath.row == 0 ? self.enabledSwitch :
-            (indexPath.row == 1 ? self.startPicker : self.endPicker);
+        BOOL start = [self isStartRow:indexPath];
+        cell.textLabel.text = DOLocalizedString(start ? @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
+        cell.accessoryView = [self timeLabelForPicker:start ? self.startPicker : self.endPicker];
+        cell.accessibilityTraits |= UIAccessibilityTraitButton;
+        cell.accessibilityHint = DOLocalizedString(@"LowPowerSchedule_EditTime");
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        UIView *selected = [[UIView alloc] initWithFrame:CGRectZero];
+        selected.backgroundColor = [UIColor colorWithWhite:1 alpha:0.05];
+        cell.selectedBackgroundView = selected;
     }
     return cell;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    return [self isPickerRow:indexPath] ? 232 : UITableViewAutomaticDimension;
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell
+    forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [self styleScheduleCell:cell];
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section != 0 || indexPath.row == 0 || [self isPickerRow:indexPath]) return;
+    NSInteger editing = [self isStartRow:indexPath] ? 0 : 1;
+    self.editingTime = self.editingTime == editing ? NSNotFound : editing;
+    if (self.editingTime != NSNotFound) [self prepareTimeFeedback];
+    else self.timeFeedback = nil;
+    // Reattach only the selected native wheel; both times stay on this page.
+    [self.startPicker removeFromSuperview];
+    [self.endPicker removeFromSuperview];
+    [tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+    [tableView layoutIfNeeded];
+    [self refreshScheduleAppearance];
+    if (self.editingTime != NSNotFound)
+        [tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:self.editingTime + 2 inSection:0]
+                        atScrollPosition:UITableViewScrollPositionNone animated:YES];
 }
 
 - (void)savePressed

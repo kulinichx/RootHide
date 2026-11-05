@@ -1049,10 +1049,10 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                 
                 if (envManager.isJailbroken) {
                     PSSpecifier *lowPowerSchedule = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSStaticTextCell edit:nil];
-                    [lowPowerSchedule setProperty:@"LowPowerSchedule_Title" forKey:@"title"];
+                    [lowPowerSchedule setProperty:@"ScheduledEvents_Title" forKey:@"title"];
                     [lowPowerSchedule setProperty:[DOButtonCell class] forKey:@"cellClass"];
                     [lowPowerSchedule setProperty:buttonHeight forKey:@"height"];
-                    [lowPowerSchedule setProperty:@"battery.25" forKey:@"image"];
+                    [lowPowerSchedule setProperty:@"calendar.badge.clock" forKey:@"image"];
                     [lowPowerSchedule setProperty:@"lowPowerSchedulePressed" forKey:@"action"];
                     [specifiers addObject:lowPowerSchedule];
 
