@@ -34,6 +34,10 @@
     
     int screen_width = fromViewController.navigationController.view.bounds.size.width;
 
+    CGRect finalFrame = [transitionContext finalFrameForViewController:toViewController];
+    if (!CGRectIsNull(finalFrame) && !CGRectIsEmpty(finalFrame))
+        toViewController.view.frame = finalFrame;
+
     [[transitionContext containerView] addSubview:toViewController.view];
 
     screen_width *= _forwards ? 1 : -1;

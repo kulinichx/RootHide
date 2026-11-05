@@ -184,6 +184,15 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertNotIn("orig.size.width =", extension)
         self.assertIn("return orig;", extension)
 
+    def test_push_transition_applies_the_computed_final_frame(self):
+        transition = source("Application/Dopamine/UI/Transition/DOModalTransitionPush.m")
+        animate = extract(transition, "- (void)animateTransition:")
+        self.assertIn("CGRect finalFrame = [transitionContext finalFrameForViewController:toViewController];",
+                      animate)
+        self.assertIn("toViewController.view.frame = finalFrame;", animate)
+        self.assertLess(animate.index("toViewController.view.frame = finalFrame;"),
+                        animate.index("[[transitionContext containerView] addSubview:toViewController.view]"))
+
     def test_schedule_uses_safe_area_padding_and_native_bounce_not_large_blank_space(self):
         schedule = source("Application/Dopamine/UI/Settings/DOLowPowerScheduleController.m")
         insets = extract(schedule, "- (void)refreshScheduleScrollInsets")
@@ -203,7 +212,7 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
                         "_table.alwaysBounceVertical = YES;"):
             self.assertIn(setting, load)
         appearance = self.settings_method("- (void)customGlassInstallPageAppearance")
-        self.assertIn("tableView.clipsToBounds = YES;", appearance)
+        self.assertIn("tableView.layer.masksToBounds = NO;", appearance)
 
     def test_scroll_layout_preserves_glass_geometry_without_rebuilding_material(self):
         backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")

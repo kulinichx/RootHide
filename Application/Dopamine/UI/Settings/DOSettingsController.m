@@ -747,7 +747,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     tableView.backgroundView = nil;
     tableView.layer.cornerRadius = 0.0;
     tableView.layer.borderWidth = 0.0;
-    tableView.clipsToBounds = YES;
+    tableView.layer.masksToBounds = NO;
 
     self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
     [self customGlassInstallBackNavigation];
