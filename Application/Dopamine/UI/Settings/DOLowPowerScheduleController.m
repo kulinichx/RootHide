@@ -23,7 +23,9 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 @property(nonatomic, strong) UIButton *saveButton;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *sectionGlassViews;
 @property(nonatomic, strong) UIImpactFeedbackGenerator *timeFeedback;
+@property(nonatomic, copy) NSArray<NSLayoutConstraint *> *timePickerCellConstraints;
 @property(nonatomic) NSInteger editingTime;
+@property(nonatomic) BOOL timePickerExpanded;
 @property(nonatomic) NSInteger lastStartMinute;
 @property(nonatomic) NSInteger lastEndMinute;
 @property(nonatomic, copy) NSDictionary *savedConfiguration;
@@ -78,6 +80,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     [super viewDidLoad];
     self.statusToken = -1;
     self.editingTime = 0;
+    self.timePickerExpanded = NO;
     self.sectionGlassViews = [NSMutableDictionary new];
     self.title = DOLocalizedString(@"LowPowerSchedule_Title");
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -264,7 +267,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 
 - (void)draftChanged
 {
-    self.saveButton.enabled = self.hasChanges;
+    self.saveButton.enabled = self.hasChanges || self.timePickerExpanded;
 }
 
 - (void)prepareTimeFeedback
@@ -295,6 +298,60 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (NSDate *)dateForMinute:(NSInteger)minute
 {
     return [NSDate dateWithTimeIntervalSinceReferenceDate:minute * 60];
+}
+
+- (void)attachTimePickerToCell:(UITableViewCell *)cell
+{
+    if (self.timePicker.superview == cell.contentView) {
+        self.timePicker.hidden = NO;
+        return;
+    }
+    [NSLayoutConstraint deactivateConstraints:self.timePickerCellConstraints ?: @[]];
+    self.timePickerCellConstraints = nil;
+    [self.timePicker removeFromSuperview];
+    self.timePicker.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:self.timePicker];
+    self.timePickerCellConstraints = @[
+        [self.timePicker.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor],
+        [self.timePicker.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor],
+        [self.timePicker.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
+        [self.timePicker.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
+    ];
+    [NSLayoutConstraint activateConstraints:self.timePickerCellConstraints];
+    self.timePicker.hidden = NO;
+}
+
+- (void)setTimePickerExpanded:(BOOL)expanded animated:(BOOL)animated
+{
+    if (self.timePickerExpanded == expanded) {
+        [self draftChanged];
+        return;
+    }
+    if (!expanded) {
+        // Remove the fixed-height wheel before collapsing its zero-height row.
+        [NSLayoutConstraint deactivateConstraints:self.timePickerCellConstraints ?: @[]];
+        self.timePickerCellConstraints = nil;
+        [self.timePicker removeFromSuperview];
+        self.timePicker.hidden = YES;
+    }
+    self.timePickerExpanded = expanded;
+    void (^updates)(void) = ^{
+        [self.tableView beginUpdates];
+        [self.tableView endUpdates];
+    };
+    if (animated) {
+        [UIView animateWithDuration:0.22 animations:updates];
+    } else {
+        updates();
+    }
+    if (expanded) {
+        [self.tableView layoutIfNeeded];
+        NSIndexPath *pickerPath = [NSIndexPath indexPathForRow:3 inSection:0];
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:pickerPath];
+        if (cell) [self attachTimePickerToCell:cell];
+    }
+    [self refreshScheduleGlassFrames];
+    [self draftChanged];
 }
 
 - (BOOL)isStartRow:(NSIndexPath *)indexPath
@@ -410,13 +467,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     if (indexPath.section == 1) {
         cell.textLabel.text = self.statusText;
     } else if (indexPath.row == 3) {
-        [cell.contentView addSubview:self.timePicker];
-        [NSLayoutConstraint activateConstraints:@[
-            [self.timePicker.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor],
-            [self.timePicker.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor],
-            [self.timePicker.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
-            [self.timePicker.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
-        ]];
+        if (self.timePickerExpanded) [self attachTimePickerToCell:cell];
     } else if (indexPath.row == 0) {
         cell.textLabel.text = DOLocalizedString(@"LowPowerSchedule_Enable");
         cell.accessoryView = self.enabledSwitch;
@@ -445,7 +496,8 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return indexPath.section == 0 && indexPath.row == 3 ? 232 : UITableViewAutomaticDimension;
+    return indexPath.section == 0 && indexPath.row == 3 ?
+        (self.timePickerExpanded ? 232 : 0) : UITableViewAutomaticDimension;
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell
@@ -463,12 +515,17 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         self.lastStartMinute : self.lastEndMinute];
     self.timePicker.accessibilityLabel = DOLocalizedString(self.editingTime == 0 ?
         @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
+    [self setTimePickerExpanded:YES animated:YES];
     [self updateTimeLabels];
     [self prepareTimeFeedback];
 }
 
 - (void)savePressed
 {
+    if (!self.hasChanges) {
+        [self setTimePickerExpanded:NO animated:YES];
+        return;
+    }
     NSInteger start = self.lastStartMinute;
     NSInteger end = self.lastEndMinute;
     if (start == end) {
@@ -483,7 +540,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         return;
     }
     self.savedConfiguration = [DOEnvironmentManager.sharedManager lowPowerScheduleConfiguration];
-    self.saveButton.enabled = NO;
+    [self setTimePickerExpanded:NO animated:YES];
     [self requestStatus];
 }
 
