@@ -18,8 +18,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 @interface DOLowPowerScheduleController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic, strong) UITableView *tableView;
 @property(nonatomic, strong) UISwitch *enabledSwitch;
-@property(nonatomic, strong) UIDatePicker *startPicker;
-@property(nonatomic, strong) UIDatePicker *endPicker;
+@property(nonatomic, strong) UIDatePicker *timePicker;
 @property(nonatomic, strong) UIButton *backButton;
 @property(nonatomic, strong) UIButton *saveButton;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *sectionGlassViews;
@@ -49,7 +48,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     return button;
 }
 
-- (UIDatePicker *)timePicker:(NSInteger)minute
+- (UIDatePicker *)timePickerForMinute:(NSInteger)minute
 {
     UIDatePicker *picker = [UIDatePicker new];
     picker.datePickerMode = UIDatePickerModeTime;
@@ -78,7 +77,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 {
     [super viewDidLoad];
     self.statusToken = -1;
-    self.editingTime = NSNotFound;
+    self.editingTime = 0;
     self.sectionGlassViews = [NSMutableDictionary new];
     self.title = DOLocalizedString(@"LowPowerSchedule_Title");
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -91,12 +90,10 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     self.enabledSwitch.on = [self.savedConfiguration[@"Enabled"] boolValue];
     [self.enabledSwitch addTarget:self action:@selector(draftChanged)
                 forControlEvents:UIControlEventValueChanged];
-    self.startPicker = [self timePicker:[self.savedConfiguration[@"StartMinute"] integerValue]];
-    self.endPicker = [self timePicker:[self.savedConfiguration[@"EndMinute"] integerValue]];
-    self.lastStartMinute = [self minuteFromPicker:self.startPicker];
-    self.lastEndMinute = [self minuteFromPicker:self.endPicker];
-    self.startPicker.accessibilityLabel = DOLocalizedString(@"LowPowerSchedule_OnTime");
-    self.endPicker.accessibilityLabel = DOLocalizedString(@"LowPowerSchedule_OffTime");
+    self.lastStartMinute = [self.savedConfiguration[@"StartMinute"] integerValue];
+    self.lastEndMinute = [self.savedConfiguration[@"EndMinute"] integerValue];
+    self.timePicker = [self timePickerForMinute:self.lastStartMinute];
+    self.timePicker.accessibilityLabel = DOLocalizedString(@"LowPowerSchedule_OnTime");
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -255,8 +252,8 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (BOOL)hasChanges
 {
     return self.enabledSwitch.on != [self.savedConfiguration[@"Enabled"] boolValue] ||
-        [self minuteFromPicker:self.startPicker] != [self.savedConfiguration[@"StartMinute"] integerValue] ||
-        [self minuteFromPicker:self.endPicker] != [self.savedConfiguration[@"EndMinute"] integerValue];
+        self.lastStartMinute != [self.savedConfiguration[@"StartMinute"] integerValue] ||
+        self.lastEndMinute != [self.savedConfiguration[@"EndMinute"] integerValue];
 }
 
 - (void)draftChanged
@@ -274,12 +271,10 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)timeChanged:(UIDatePicker *)picker
 {
     NSInteger minute = [self minuteFromPicker:picker];
-    NSInteger previous = picker == self.startPicker ? self.lastStartMinute : self.lastEndMinute;
-    if (picker == self.startPicker) self.lastStartMinute = minute;
+    NSInteger previous = self.editingTime == 0 ? self.lastStartMinute : self.lastEndMinute;
+    if (self.editingTime == 0) self.lastStartMinute = minute;
     else self.lastEndMinute = minute;
-    BOOL editingThisPicker = (self.editingTime == 0 && picker == self.startPicker) ||
-        (self.editingTime == 1 && picker == self.endPicker);
-    if (minute != previous && editingThisPicker && self.viewIfLoaded.window &&
+    if (minute != previous && self.viewIfLoaded.window &&
         self.navigationController.topViewController == self &&
         UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
         // Match GlassFolders' crisp detent feedback, once per changed value.
@@ -287,12 +282,17 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         [self.timeFeedback impactOccurredWithIntensity:0.68];
         [self.timeFeedback prepare];
     }
+    [self updateTimeLabels];
     [self draftChanged];
 }
 
-- (UILabel *)timeLabelForPicker:(UIDatePicker *)picker
+- (NSDate *)dateForMinute:(NSInteger)minute
 {
-    NSInteger minute = [self minuteFromPicker:picker];
+    return [NSDate dateWithTimeIntervalSinceReferenceDate:minute * 60];
+}
+
+- (UILabel *)timeLabelForMinute:(NSInteger)minute
+{
     UILabel *label = [UILabel new];
     label.text = [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
     label.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
@@ -303,12 +303,6 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     return label;
 }
 
-- (BOOL)isPickerRow:(NSIndexPath *)indexPath
-{
-    return indexPath.section == 0 && self.editingTime != NSNotFound &&
-        indexPath.row == self.editingTime + 2;
-}
-
 - (BOOL)isStartRow:(NSIndexPath *)indexPath
 {
     return indexPath.section == 0 && indexPath.row == 1;
@@ -317,10 +311,12 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)updateTimeLabels
 {
     for (NSIndexPath *indexPath in self.tableView.indexPathsForVisibleRows) {
-        if (indexPath.section != 0 || indexPath.row == 0 || [self isPickerRow:indexPath]) continue;
+        if (indexPath.section != 0 || indexPath.row == 0 || indexPath.row == 3) continue;
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-        cell.accessoryView = [self timeLabelForPicker:[self isStartRow:indexPath] ?
-            self.startPicker : self.endPicker];
+        UILabel *label = (UILabel *)cell.accessoryView;
+        if (![label isKindOfClass:UILabel.class]) continue;
+        NSInteger minute = [self isStartRow:indexPath] ? self.lastStartMinute : self.lastEndMinute;
+        label.text = [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
     }
 }
 
@@ -380,7 +376,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    return section == 0 ? (self.editingTime == NSNotFound ? 3 : 4) : 1;
+    return section == 0 ? 4 : 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
@@ -397,14 +393,13 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     if (indexPath.section == 1) {
         cell.textLabel.text = self.statusText;
-    } else if ([self isPickerRow:indexPath]) {
-        UIDatePicker *picker = self.editingTime == 0 ? self.startPicker : self.endPicker;
-        [cell.contentView addSubview:picker];
+    } else if (indexPath.row == 3) {
+        [cell.contentView addSubview:self.timePicker];
         [NSLayoutConstraint activateConstraints:@[
-            [picker.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor],
-            [picker.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor],
-            [picker.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
-            [picker.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
+            [self.timePicker.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor],
+            [self.timePicker.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor],
+            [self.timePicker.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
+            [self.timePicker.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
         ]];
     } else if (indexPath.row == 0) {
         cell.textLabel.text = DOLocalizedString(@"LowPowerSchedule_Enable");
@@ -412,7 +407,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     } else {
         BOOL start = [self isStartRow:indexPath];
         cell.textLabel.text = DOLocalizedString(start ? @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
-        cell.accessoryView = [self timeLabelForPicker:start ? self.startPicker : self.endPicker];
+        cell.accessoryView = [self timeLabelForMinute:start ? self.lastStartMinute : self.lastEndMinute];
         cell.accessibilityTraits |= UIAccessibilityTraitButton;
         cell.accessibilityHint = DOLocalizedString(@"LowPowerSchedule_EditTime");
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -425,7 +420,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return [self isPickerRow:indexPath] ? 232 : UITableViewAutomaticDimension;
+    return indexPath.section == 0 && indexPath.row == 3 ? 232 : UITableViewAutomaticDimension;
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell
@@ -437,26 +432,19 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section != 0 || indexPath.row == 0 || [self isPickerRow:indexPath]) return;
-    NSInteger editing = [self isStartRow:indexPath] ? 0 : 1;
-    self.editingTime = self.editingTime == editing ? NSNotFound : editing;
-    if (self.editingTime != NSNotFound) [self prepareTimeFeedback];
-    else self.timeFeedback = nil;
-    // Reattach only the selected native wheel; both times stay on this page.
-    [self.startPicker removeFromSuperview];
-    [self.endPicker removeFromSuperview];
-    [tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
-    [tableView layoutIfNeeded];
-    [self refreshScheduleGlassFrames];
-    if (self.editingTime != NSNotFound)
-        [tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:self.editingTime + 2 inSection:0]
-                        atScrollPosition:UITableViewScrollPositionNone animated:YES];
+    if (indexPath.section != 0 || indexPath.row == 0 || indexPath.row == 3) return;
+    self.editingTime = [self isStartRow:indexPath] ? 0 : 1;
+    self.timePicker.date = [self dateForMinute:self.editingTime == 0 ?
+        self.lastStartMinute : self.lastEndMinute];
+    self.timePicker.accessibilityLabel = DOLocalizedString(self.editingTime == 0 ?
+        @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
+    [self prepareTimeFeedback];
 }
 
 - (void)savePressed
 {
-    NSInteger start = [self minuteFromPicker:self.startPicker];
-    NSInteger end = [self minuteFromPicker:self.endPicker];
+    NSInteger start = self.lastStartMinute;
+    NSInteger end = self.lastEndMinute;
     if (start == end) {
         [self showMessage:DOLocalizedString(@"LowPowerSchedule_SameTime")];
         return;

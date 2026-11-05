@@ -113,6 +113,9 @@ class LowPowerScheduleContracts(unittest.TestCase):
             self.assertIn(token, ui)
         self.assertIn('status[@"Revision"] isEqual:self.savedConfiguration[@"Revision"]', ui)
         self.assertNotIn("setPowerMode:", ui)
+        self.assertIn("self.timePicker.date =", ui)
+        self.assertNotIn("reloadSections:[NSIndexSet indexSetWithIndex:0]", ui)
+        self.assertNotIn("scrollToRowAtIndexPath", ui)
 
     def test_all_new_localization_keys_exist_in_english_and_simplified_chinese(self):
         keys = set(re.findall(r'@"(LowPowerSchedule_\w+)"', source(CONTROLLER)))

@@ -210,7 +210,7 @@
 "LowPowerSchedule_Save" = "Save";
 "LowPowerSchedule_Footer" = "Repeats daily in local time. Saving an enabled schedule applies the current period immediately. Pausing leaves Low Power Mode unchanged. Manual changes remain until the next event.";
 "LowPowerSchedule_RuntimeFooter" = "No events run while powered off or not jailbroken.";
-"LowPowerSchedule_Waiting" = "Confirming schedule status…";
+"LowPowerSchedule_Waiting" = "Waiting for SpringBoard. Reload the jailbreak environment after an update.";
 "LowPowerSchedule_Disabled" = "Schedule paused; current Low Power Mode is unchanged.";
 "LowPowerSchedule_Unsupported" = "Required system interfaces are unavailable. No schedule is running.";
 "LowPowerSchedule_ApplyFailed" = "The system rejected the last power-mode request. Retries are bounded; check again after the next event.";
