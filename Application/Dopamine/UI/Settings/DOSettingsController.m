@@ -26,6 +26,35 @@
 
 static NSString * const DOCustomGlassSettingsDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
+static NSInteger const DOCustomGlassSettingsBackgroundTag = 0xC652;
+
+static UIView *DOCustomGlassSettingsBackground(UITableView *tableView)
+{
+    UIView *background = tableView.backgroundView;
+    if (background.tag != DOCustomGlassSettingsBackgroundTag) {
+        background = [[UIView alloc] initWithFrame:tableView.bounds];
+        background.tag = DOCustomGlassSettingsBackgroundTag;
+        background.backgroundColor = UIColor.clearColor;
+        background.opaque = NO;
+        background.userInteractionEnabled = NO;
+        background.clipsToBounds = YES;
+        background.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        tableView.backgroundView = background;
+    }
+    return background;
+}
+
+static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *glass, CGRect sectionRect)
+{
+    UIView *background = DOCustomGlassSettingsBackground(tableView);
+    if (glass.superview != background)
+        [background addSubview:glass];
+
+    CGRect glassRect = CGRectInset(sectionRect, 1.0, 0.5);
+    CGRect backgroundRect = [tableView convertRect:glassRect toView:background];
+    if (!CGRectEqualToRect(glass.frame, backgroundRect))
+        glass.frame = backgroundRect;
+}
 
 // Implemented in DOMainViewController.m. Keeping the declaration local avoids
 // adding a new project file while letting Settings consume the same renderer.
@@ -393,6 +422,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 @interface DOSettingsController ()
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
+@property(nonatomic, assign) CGFloat customGlassLastContentOffsetY;
+@property(nonatomic, assign) BOOL customGlassHasContentOffset;
 
 - (void)customGlassRefreshSettingsScrollInsets;
 
@@ -612,16 +643,13 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                 kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
                 kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             self.customGlassSectionBackdropViews[key] = glass;
-            [tableView insertSubview:glass atIndex:0];
             created = YES;
         }
 
         if (glass.hidden) glass.hidden = NO;
-        CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);
-        if (!CGRectEqualToRect(glass.frame, glassFrame)) glass.frame = glassFrame;
+        DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);
         if (created) {
             [glass reloadMaterial];
-            [tableView sendSubviewToBack:glass];
         }
     }
 
@@ -629,6 +657,9 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         if (![activeKeys containsObject:key])
             glass.hidden = YES;
     }];
+
+    self.customGlassLastContentOffsetY = tableView.contentOffset.y;
+    self.customGlassHasContentOffset = YES;
 }
 
 - (void)customGlassApplyPageAppearance
@@ -765,6 +796,29 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView
+{
+    if (scrollView != _table || !DORHSupporterIsVerified())
+        return;
+
+    CGFloat offsetY = scrollView.contentOffset.y;
+    if (!self.customGlassHasContentOffset) {
+        [self customGlassRefreshSectionBackdrops];
+        return;
+    }
+
+    CGFloat offsetDelta = offsetY - self.customGlassLastContentOffsetY;
+    if (offsetDelta == 0.0)
+        return;
+
+    for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues) {
+        CGRect frame = glass.frame;
+        frame.origin.y -= offsetDelta;
+        glass.frame = frame;
+    }
+    self.customGlassLastContentOffsetY = offsetY;
 }
 
 - (void)viewDidLayoutSubviews
