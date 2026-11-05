@@ -65,26 +65,24 @@ static inline NSDate *rcLowPowerDateForMinute(NSInteger minute, NSDate *now,
     components.hour = minute / 60;
     components.minute = minute % 60;
     components.second = 0;
-    if (next) {
-        return [calendar nextDateAfterDate:now
-                       matchingComponents:components
-                                  options:NSCalendarMatchNextTime | NSCalendarMatchFirst];
-    }
-
     NSDateComponents *day = [calendar components:NSCalendarUnitEra |
         NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
     NSDate *dayStart = [calendar dateFromComponents:day];
     if (!dayStart) return nil;
-    // Starting just before local midnight makes 00:00 a valid candidate.
+    // Starting just before local midnight makes 00:00 valid and makes
+    // repeated fall-back times resolve to the first occurrence of the day.
     NSDate *candidate = [calendar nextDateAfterDate:[dayStart dateByAddingTimeInterval:-0.001]
                                 matchingComponents:components
                                            options:NSCalendarMatchNextTime | NSCalendarMatchFirst];
-    if (candidate && [candidate compare:now] != NSOrderedDescending) return candidate;
+    NSComparisonResult comparison = candidate ? [candidate compare:now] : NSOrderedAscending;
+    if (next ? comparison == NSOrderedDescending : comparison != NSOrderedDescending)
+        return candidate;
 
-    NSDate *previousDay = [calendar dateByAddingUnit:NSCalendarUnitDay value:-1
-                                               toDate:dayStart options:0];
-    if (!previousDay) return nil;
-    return [calendar nextDateAfterDate:[previousDay dateByAddingTimeInterval:-0.001]
+    NSInteger dayOffset = next ? 1 : -1;
+    NSDate *adjacentDay = [calendar dateByAddingUnit:NSCalendarUnitDay value:dayOffset
+                                              toDate:dayStart options:0];
+    if (!adjacentDay) return nil;
+    return [calendar nextDateAfterDate:[adjacentDay dateByAddingTimeInterval:-0.001]
                     matchingComponents:components
                                options:NSCalendarMatchNextTime | NSCalendarMatchFirst];
 }
