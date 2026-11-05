@@ -12,7 +12,6 @@
 #import "DOThemeManager.h"
 #import "DOCustomGlassMediaStore.h"
 #import "DOSupporterLicense.h"
-#import "Settings/DOSettingsController.h"
 #import "Settings/DOLowPowerScheduleController.h"
 #import <QuartzCore/QuartzCore.h>
 #import <CoreImage/CoreImage.h>
@@ -1092,12 +1091,10 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     orig.origin.x = (self.view.frame.size.width - orig.size.width) / 2;
     orig.origin.y = (self.view.frame.size.height - orig.size.height) / 2;
 
-    // Preserve the centered top edge while giving long settings pages a
-    // viewport that reaches the screen bottom.
-    BOOL extendsToBottom =
-        [viewController isKindOfClass:[DOLowPowerScheduleController class]] ||
-        [viewController isKindOfClass:[DOSettingsController class]];
-    if (extendsToBottom)
+    // The schedule editor needs extra viewport for its final controls. Keep
+    // the Preferences settings list at its native modal height so it remains
+    // scrollable when its content is shorter than the full screen.
+    if ([viewController isKindOfClass:[DOLowPowerScheduleController class]])
         orig.size.height = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(orig);
 
     return orig;

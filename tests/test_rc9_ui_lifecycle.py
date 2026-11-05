@@ -170,22 +170,21 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         text = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
         return extract(text.split("@implementation DOSettingsController\n", 1)[1], selector)
 
-    def test_settings_and_schedule_extend_modal_bottom_without_moving_header(self):
+    def test_only_schedule_extends_modal_bottom_without_moving_header(self):
         navigation = source("Application/Dopamine/UI/DONavigationController.m")
         frame = extract(navigation.split("@implementation DONavigationController\n", 1)[1],
                         "-(CGRect)_frameForViewController:")
-        guard = "BOOL extendsToBottom ="
+        guard = "if ([viewController isKindOfClass:[DOLowPowerScheduleController class]])"
         self.assertIn('#import "Settings/DOLowPowerScheduleController.h"', navigation)
-        self.assertIn('#import "Settings/DOSettingsController.h"', navigation)
+        self.assertNotIn('#import "Settings/DOSettingsController.h"', navigation)
         self.assertLess(frame.index("orig.origin.y ="), frame.index(guard))
         extension = frame.split(guard, 1)[1]
-        self.assertIn("[viewController isKindOfClass:[DOLowPowerScheduleController class]]", extension)
-        self.assertIn("[viewController isKindOfClass:[DOSettingsController class]]", extension)
         self.assertIn("orig.size.height = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(orig);",
                       extension)
         self.assertNotIn("orig.origin.y =", extension)
         self.assertNotIn("orig.size.width =", extension)
         self.assertIn("return orig;", extension)
+        self.assertNotIn("DOSettingsController", frame)
 
     def test_push_transition_applies_the_computed_final_frame(self):
         transition = source("Application/Dopamine/UI/Transition/DOModalTransitionPush.m")
