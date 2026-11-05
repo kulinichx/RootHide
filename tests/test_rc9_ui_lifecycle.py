@@ -165,5 +165,70 @@ class CreditsLayoutContracts(unittest.TestCase):
         self.assertIn("layout.sectionInset = UIEdgeInsetsMake(0, 0, 0, 0);", init)
 
 
+class SettingsScrollLayoutContracts(unittest.TestCase):
+    def settings_method(self, selector):
+        text = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
+        return extract(text.split("@implementation DOSettingsController\n", 1)[1], selector)
+
+    def test_schedule_extends_modal_bottom_without_moving_header_or_other_pages(self):
+        navigation = source("Application/Dopamine/UI/DONavigationController.m")
+        frame = extract(navigation.split("@implementation DONavigationController\n", 1)[1],
+                        "-(CGRect)_frameForViewController:")
+        guard = "if ([viewController isKindOfClass:[DOLowPowerScheduleController class]])"
+        self.assertIn('#import "Settings/DOLowPowerScheduleController.h"', navigation)
+        self.assertLess(frame.index("orig.origin.y ="), frame.index(guard))
+        extension = frame.split(guard, 1)[1]
+        self.assertIn("orig.size.height = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(orig);",
+                      extension)
+        self.assertNotIn("orig.origin.y =", extension)
+        self.assertNotIn("orig.size.width =", extension)
+        self.assertIn("return orig;", extension)
+
+    def test_schedule_uses_safe_area_padding_and_native_bounce_not_large_blank_space(self):
+        schedule = source("Application/Dopamine/UI/Settings/DOLowPowerScheduleController.m")
+        insets = extract(schedule, "- (void)refreshScheduleScrollInsets")
+        self.assertIn("self.view.safeAreaInsets.bottom + 24.0", insets)
+        self.assertNotIn("160.0", insets)
+        load = extract(schedule, "- (void)viewDidLoad")
+        for setting in ("self.tableView.bounces = YES;",
+                        "self.tableView.alwaysBounceVertical = YES;"):
+            self.assertIn(setting, load)
+
+    def test_preferences_heights_are_resolved_before_scrolling_and_bounce_is_not_disabled(self):
+        load = self.settings_method("- (void)viewDidLoad")
+        for setting in ("_table.estimatedRowHeight = 0;",
+                        "_table.estimatedSectionHeaderHeight = 0;",
+                        "_table.estimatedSectionFooterHeight = 0;",
+                        "_table.bounces = YES;",
+                        "_table.alwaysBounceVertical = YES;"):
+            self.assertIn(setting, load)
+        appearance = self.settings_method("- (void)customGlassInstallPageAppearance")
+        self.assertIn("tableView.clipsToBounds = YES;", appearance)
+
+    def test_scroll_layout_preserves_glass_geometry_without_rebuilding_material(self):
+        backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
+        self.assertIn("if (!CGRectEqualToRect(glass.frame, glassFrame))", backdrops)
+        self.assertLess(backdrops.index("[activeKeys addObject:key]"),
+                        backdrops.index("if (CGRectIsEmpty(sectionRect)"))
+        created = extract(backdrops, "if (created)")
+        self.assertIn("[glass reloadMaterial];", created)
+        self.assertIn("[tableView sendSubviewToBack:glass];", created)
+        self.assertEqual(backdrops.count("[glass reloadMaterial];"),
+                         created.count("[glass reloadMaterial];"))
+        refresh = self.settings_method("- (void)customGlassRefreshPageAppearance")
+        self.assertIn("[glass reloadMaterial];", refresh)
+        layout = self.settings_method("- (void)viewDidLayoutSubviews")
+        self.assertNotIn("reloadMaterial", layout)
+        self.assertNotIn("reloadData", layout)
+        self.assertNotIn("contentOffset", layout)
+
+    def test_base_list_does_not_reassign_an_unchanged_table_frame(self):
+        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
+        layout = extract(base, "- (void)viewDidLayoutSubviews")
+        self.assertIn("if (!CGRectEqualToRect(_table.frame, tableFrame))", layout)
+        self.assertIn("_table.frame = tableFrame;", layout)
+        self.assertNotIn("contentOffset", layout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

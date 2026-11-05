@@ -12,6 +12,7 @@
 #import "DOThemeManager.h"
 #import "DOCustomGlassMediaStore.h"
 #import "DOSupporterLicense.h"
+#import "Settings/DOLowPowerScheduleController.h"
 #import <QuartzCore/QuartzCore.h>
 #import <CoreImage/CoreImage.h>
 #import <AVFoundation/AVFoundation.h>
@@ -1089,6 +1090,11 @@ static CGFloat DOCustomGlassNavigationScrimAlpha(CGFloat luminance, CGFloat hier
     orig.size.height *= [DOGlobalAppearance isSmallDevice] ? 0.8 : 0.7;
     orig.origin.x = (self.view.frame.size.width - orig.size.width) / 2;
     orig.origin.y = (self.view.frame.size.height - orig.size.height) / 2;
+
+    // Keep the schedule header aligned with Settings, but let its list reach
+    // the screen bottom instead of clipping at the old centered modal edge.
+    if ([viewController isKindOfClass:[DOLowPowerScheduleController class]])
+        orig.size.height = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(orig);
 
     return orig;
 

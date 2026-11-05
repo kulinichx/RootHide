@@ -104,6 +104,8 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     self.tableView.backgroundView = nil;
     self.tableView.opaque = NO;
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    self.tableView.bounces = YES;
+    self.tableView.alwaysBounceVertical = YES;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
@@ -218,7 +220,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)refreshScheduleScrollInsets
 {
     if (!self.tableView) return;
-    CGFloat bottom = MAX(160.0, self.view.safeAreaInsets.bottom + 112.0);
+    CGFloat bottom = self.view.safeAreaInsets.bottom + 24.0;
     UIEdgeInsets insets = self.tableView.contentInset;
     insets.bottom = bottom;
     if (!UIEdgeInsetsEqualToEdgeInsets(self.tableView.contentInset, insets))

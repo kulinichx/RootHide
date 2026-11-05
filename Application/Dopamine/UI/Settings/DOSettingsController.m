@@ -592,29 +592,35 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
         CGRect firstRect = [tableView rectForRowAtIndexPath:firstIndexPath];
         CGRect lastRect = [tableView rectForRowAtIndexPath:lastIndexPath];
         CGRect sectionRect = CGRectUnion(firstRect, lastRect);
+        NSNumber *key = @(section);
+        [activeKeys addObject:key];
+        // Retain the last geometry during transient Preferences layout passes.
         if (CGRectIsEmpty(sectionRect) || CGRectGetHeight(sectionRect) < 2.0)
             continue;
 
-        NSNumber *key = @(section);
-        [activeKeys addObject:key];
         DOCustomLiquidGlassView *glass = self.customGlassSectionBackdropViews[key];
+        BOOL created = NO;
         if (!glass) {
             glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:18.0 baseTintAlpha:0.038];
             glass.userInteractionEnabled = NO;
             glass.materialScale = 0.88;
+            glass.preferredCornerRadius = 18.0;
+            glass.layer.cornerRadius = 18.0;
+            glass.layer.maskedCorners =
+                kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+                kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             self.customGlassSectionBackdropViews[key] = glass;
             [tableView insertSubview:glass atIndex:0];
+            created = YES;
         }
 
-        glass.hidden = NO;
-        glass.frame = CGRectInset(sectionRect, 1.0, 0.5);
-        glass.preferredCornerRadius = 18.0;
-        glass.layer.cornerRadius = 18.0;
-        glass.layer.maskedCorners =
-            kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
-            kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
-        [glass reloadMaterial];
-        [tableView sendSubviewToBack:glass];
+        if (glass.hidden) glass.hidden = NO;
+        CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);
+        if (!CGRectEqualToRect(glass.frame, glassFrame)) glass.frame = glassFrame;
+        if (created) {
+            [glass reloadMaterial];
+            [tableView sendSubviewToBack:glass];
+        }
     }
 
     [self.customGlassSectionBackdropViews enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, DOCustomLiquidGlassView *glass, BOOL *stop) {
@@ -648,6 +654,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     [tableView setNeedsLayout];
     [tableView layoutIfNeeded];
     [self customGlassRefreshSectionBackdrops];
+    for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
+        [glass reloadMaterial];
 
     UIView *backButton = [self.view viewWithTag:0xC653];
     if (backButton)
@@ -739,7 +747,7 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
     tableView.backgroundView = nil;
     tableView.layer.cornerRadius = 0.0;
     tableView.layer.borderWidth = 0.0;
-    tableView.layer.masksToBounds = NO;
+    tableView.clipsToBounds = YES;
 
     self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
     [self customGlassInstallBackNavigation];
@@ -779,6 +787,14 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+
+    // Preferences supplies actual row/header/footer heights. Estimates can
+    // revise the content origin while the first sections are bouncing.
+    _table.estimatedRowHeight = 0;
+    _table.estimatedSectionHeaderHeight = 0;
+    _table.estimatedSectionFooterHeight = 0;
+    _table.bounces = YES;
+    _table.alwaysBounceVertical = YES;
 
     // Back navigation is functional UI and must not depend on supporter state.
     [self customGlassInstallBackNavigation];
