@@ -211,8 +211,10 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 
 - (void)refreshScheduleGlassFrames
 {
-    for (DOCustomLiquidGlassView *glass in self.sectionGlassViews.allValues) glass.hidden = YES;
-    if (!DORHSupporterIsVerified()) return;
+    if (!DORHSupporterIsVerified()) {
+        for (DOCustomLiquidGlassView *glass in self.sectionGlassViews.allValues) glass.hidden = YES;
+        return;
+    }
 
     for (NSInteger section = 0; section < self.tableView.numberOfSections; section++) {
         NSInteger rows = [self.tableView numberOfRowsInSection:section];
@@ -220,8 +222,10 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         CGRect first = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:section]];
         CGRect last = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:rows - 1 inSection:section]];
         CGRect frame = CGRectUnion(first, last);
+        // Keep the last valid frame during transient foreground/layout passes.
         if (CGRectIsEmpty(frame) || CGRectGetHeight(frame) < 2) continue;
         DOCustomLiquidGlassView *glass = self.sectionGlassViews[@(section)];
+        BOOL created = NO;
         if (!glass) {
             glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:18 baseTintAlpha:0.038];
             glass.userInteractionEnabled = NO;
@@ -232,10 +236,12 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
                 kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             self.sectionGlassViews[@(section)] = glass;
             [self.tableView insertSubview:glass atIndex:0];
+            created = YES;
         }
-        glass.hidden = NO;
-        glass.frame = CGRectInset(frame, 1, 0.5);
-        [self.tableView sendSubviewToBack:glass];
+        CGRect glassFrame = CGRectInset(frame, 1, 0.5);
+        if (glass.hidden) glass.hidden = NO;
+        if (!CGRectEqualToRect(glass.frame, glassFrame)) glass.frame = glassFrame;
+        if (created) [self.tableView sendSubviewToBack:glass];
     }
 }
 
@@ -291,18 +297,6 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     return [NSDate dateWithTimeIntervalSinceReferenceDate:minute * 60];
 }
 
-- (UILabel *)timeLabelForMinute:(NSInteger)minute
-{
-    UILabel *label = [UILabel new];
-    label.text = [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
-    label.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
-        scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightRegular]];
-    label.adjustsFontForContentSizeCategory = YES;
-    label.textColor = UIColor.systemBlueColor;
-    [label sizeToFit];
-    return label;
-}
-
 - (BOOL)isStartRow:(NSIndexPath *)indexPath
 {
     return indexPath.section == 0 && indexPath.row == 1;
@@ -313,18 +307,31 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     for (NSIndexPath *indexPath in self.tableView.indexPathsForVisibleRows) {
         if (indexPath.section != 0 || indexPath.row == 0 || indexPath.row == 3) continue;
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-        UILabel *label = (UILabel *)cell.accessoryView;
-        if (![label isKindOfClass:UILabel.class]) continue;
         NSInteger minute = [self isStartRow:indexPath] ? self.lastStartMinute : self.lastEndMinute;
-        label.text = [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
+        cell.detailTextLabel.text =
+            [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
+        BOOL selected = (self.editingTime == 0 && [self isStartRow:indexPath]) ||
+            (self.editingTime == 1 && ![self isStartRow:indexPath]);
+        cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        cell.tintColor = UIColor.systemBlueColor;
     }
 }
 
 - (void)requestStatus
 {
-    self.queryDate = NSDate.date;
-    [self refreshStatus];
+    NSDate *queryDate = NSDate.date;
+    self.queryDate = queryDate;
+    if (![self.runtimeStatus[@"Revision"] isEqual:self.savedConfiguration[@"Revision"]])
+        [self refreshStatus];
     notify_post(RC_LOW_POWER_QUERY);
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if ([weakSelf.queryDate isEqualToDate:queryDate] &&
+            weakSelf.viewIfLoaded.window &&
+            weakSelf.navigationController.topViewController == weakSelf &&
+            UIApplication.sharedApplication.applicationState == UIApplicationStateActive)
+            [weakSelf refreshStatus];
+    });
 }
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification
@@ -341,9 +348,18 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)refreshStatus
 {
     self.runtimeStatus = [DOEnvironmentManager.sharedManager lowPowerScheduleStatus];
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
-                 withRowAnimation:UITableViewRowAnimationNone];
-    [self refreshScheduleGlassFrames];
+    NSIndexPath *statusPath = [NSIndexPath indexPathForRow:0 inSection:1];
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:statusPath];
+    NSString *text = self.statusText;
+    if (![cell.textLabel.text isEqualToString:text]) {
+        cell.textLabel.text = text;
+        [cell setNeedsLayout];
+        [cell layoutIfNeeded];
+        [UIView performWithoutAnimation:^{
+            [self.tableView beginUpdates];
+            [self.tableView endUpdates];
+        }];
+    }
 }
 
 - (NSString *)statusText
@@ -388,7 +404,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
     [self styleScheduleCell:cell];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     if (indexPath.section == 1) {
@@ -407,7 +423,16 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     } else {
         BOOL start = [self isStartRow:indexPath];
         cell.textLabel.text = DOLocalizedString(start ? @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
-        cell.accessoryView = [self timeLabelForMinute:start ? self.lastStartMinute : self.lastEndMinute];
+        NSInteger minute = start ? self.lastStartMinute : self.lastEndMinute;
+        cell.detailTextLabel.text =
+            [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
+        cell.detailTextLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
+            scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightRegular]];
+        cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
+        cell.detailTextLabel.textColor = UIColor.systemBlueColor;
+        BOOL selected = (self.editingTime == 0 && start) || (self.editingTime == 1 && !start);
+        cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        cell.tintColor = UIColor.systemBlueColor;
         cell.accessibilityTraits |= UIAccessibilityTraitButton;
         cell.accessibilityHint = DOLocalizedString(@"LowPowerSchedule_EditTime");
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -438,6 +463,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         self.lastStartMinute : self.lastEndMinute];
     self.timePicker.accessibilityLabel = DOLocalizedString(self.editingTime == 0 ?
         @"LowPowerSchedule_OnTime" : @"LowPowerSchedule_OffTime");
+    [self updateTimeLabels];
     [self prepareTimeFeedback];
 }
 

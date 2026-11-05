@@ -116,6 +116,20 @@ class LowPowerScheduleContracts(unittest.TestCase):
         self.assertIn("self.timePicker.date =", ui)
         self.assertNotIn("reloadSections:[NSIndexSet indexSetWithIndex:0]", ui)
         self.assertNotIn("scrollToRowAtIndexPath", ui)
+        foreground = extract(ui, "- (void)applicationDidBecomeActive:")
+        self.assertIn("[self requestStatus]", foreground)
+        self.assertNotIn("[self refreshStatus]", foreground)
+        request = extract(ui, "- (void)requestStatus")
+        self.assertIn("if (![self.runtimeStatus[@\"Revision\"] isEqual:self.savedConfiguration[@\"Revision\"]])", request)
+        self.assertIn("[self refreshStatus]", request)
+        self.assertIn("dispatch_after", request)
+        self.assertIn("2 * NSEC_PER_SEC", request)
+        self.assertIn("UIApplication.sharedApplication.applicationState == UIApplicationStateActive", request)
+        self.assertIn("self.enabledSwitch.on != [self.savedConfiguration[@\"Enabled\"] boolValue]",
+                      extract(ui, "- (BOOL)hasChanges"))
+        self.assertIn("self.saveButton.enabled = self.hasChanges", extract(ui, "- (void)draftChanged"))
+        glass = extract(ui, "- (void)refreshScheduleGlassFrames")
+        self.assertIn("if (CGRectIsEmpty(frame) || CGRectGetHeight(frame) < 2) continue;", glass)
 
     def test_all_new_localization_keys_exist_in_english_and_simplified_chinese(self):
         keys = set(re.findall(r'@"(LowPowerSchedule_\w+)"', source(CONTROLLER)))
