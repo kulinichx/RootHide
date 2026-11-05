@@ -63,9 +63,10 @@ class LowPowerScheduleContracts(unittest.TestCase):
 
     def test_calendar_handles_local_time_without_fixed_daily_seconds(self):
         text = source(HEADER)
-        event = extract(text, "static inline NSDictionary *rcLowPowerEvent")
+        event = extract(text, "static inline NSDate *rcLowPowerDateForMinute")
+        event += extract(text, "static inline NSDictionary *rcLowPowerEvent")
         for token in ("NSCalendarMatchNextTime", "NSCalendarMatchFirst",
-                      "NSCalendarSearchBackwards", "matchingComponents:"):
+                      "dateFromComponents:", "dateByAddingUnit:", "matchingComponents:"):
             self.assertIn(token, event)
         self.assertNotIn("86400", event)
         self.assertIn("NSTimeZone.localTimeZone", text)

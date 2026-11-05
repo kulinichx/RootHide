@@ -58,25 +58,48 @@ static inline NSDictionary *rcLowPowerDefaultConfiguration(void)
 // Use calendar matching, not 24-hour arithmetic: local days can be 23 or 25 hours.
 // Missing spring-forward times run at the next valid time; repeated times use
 // the first occurrence. If two events collapse onto one instant, OFF wins.
+static inline NSDate *rcLowPowerDateForMinute(NSInteger minute, NSDate *now,
+                                              NSCalendar *calendar, BOOL next)
+{
+    NSDateComponents *components = [NSDateComponents new];
+    components.hour = minute / 60;
+    components.minute = minute % 60;
+    components.second = 0;
+    if (next) {
+        return [calendar nextDateAfterDate:now
+                       matchingComponents:components
+                                  options:NSCalendarMatchNextTime | NSCalendarMatchFirst];
+    }
+
+    NSDateComponents *day = [calendar components:NSCalendarUnitEra |
+        NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
+    NSDate *dayStart = [calendar dateFromComponents:day];
+    if (!dayStart) return nil;
+    // Starting just before local midnight makes 00:00 a valid candidate.
+    NSDate *candidate = [calendar nextDateAfterDate:[dayStart dateByAddingTimeInterval:-0.001]
+                                matchingComponents:components
+                                           options:NSCalendarMatchNextTime | NSCalendarMatchFirst];
+    if (candidate && [candidate compare:now] != NSOrderedDescending) return candidate;
+
+    NSDate *previousDay = [calendar dateByAddingUnit:NSCalendarUnitDay value:-1
+                                               toDate:dayStart options:0];
+    if (!previousDay) return nil;
+    return [calendar nextDateAfterDate:[previousDay dateByAddingTimeInterval:-0.001]
+                    matchingComponents:components
+                               options:NSCalendarMatchNextTime | NSCalendarMatchFirst];
+}
+
 static inline NSDictionary *rcLowPowerEvent(NSDictionary *configuration,
                                             NSDate *now, NSCalendar *calendar,
                                             BOOL next)
 {
     if (!rcLowPowerConfigurationValid(configuration) ||
         ![now isKindOfClass:NSDate.class] || !calendar) return nil;
-    NSCalendarOptions options = NSCalendarMatchNextTime | NSCalendarMatchFirst;
-    if (!next) options |= NSCalendarSearchBackwards;
-    NSDate *searchFrom = next ? now : [now dateByAddingTimeInterval:0.001];
     NSDate *dates[2] = {nil, nil};
     NSString *keys[2] = {@"StartMinute", @"EndMinute"};
     for (NSUInteger index = 0; index < 2; index++) {
         NSInteger minute = [configuration[keys[index]] integerValue];
-        NSDateComponents *components = [NSDateComponents new];
-        components.hour = minute / 60;
-        components.minute = minute % 60;
-        components.second = 0;
-        dates[index] = [calendar nextDateAfterDate:searchFrom
-                             matchingComponents:components options:options];
+        dates[index] = rcLowPowerDateForMinute(minute, now, calendar, next);
     }
     if (!dates[0] || !dates[1]) return nil;
     NSComparisonResult order = [dates[0] compare:dates[1]];
