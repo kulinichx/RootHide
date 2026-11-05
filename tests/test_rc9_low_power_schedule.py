@@ -126,6 +126,15 @@ class LowPowerScheduleContracts(unittest.TestCase):
         self.assertIn("python3 tests/test_rc9_low_power_schedule.py --native",
                       source(".github/workflows/roothide.yml"))
 
+    def test_reboot_and_respring_have_distinct_recovery_and_frameworks_are_lazy(self):
+        runtime = source(RUNTIME)
+        refresh = extract(runtime, "- (void)refresh\n")
+        self.assertIn('saved[@"BootSession"] isEqual:bootSession', refresh)
+        self.assertIn('sysctlbyname("kern.boottime"', runtime)
+        self.assertLess(refresh.index('if (![configuration[@"Enabled"] boolValue])'),
+                        refresh.index("dlopen("))
+        self.assertNotIn("dlopen(", extract(runtime, "void rcLowPowerScheduleStart"))
+
 
 NATIVE = r'''
 #import <Foundation/Foundation.h>
@@ -134,13 +143,14 @@ NATIVE = r'''
 #include <stdbool.h>
 #include <stdio.h>
 
-static NSString *testRoot, *missingClass;
+static NSString *testRoot, *missingClass, *bootSession = @"boot-one";
 static NSDate *testNow;
 static NSUInteger powerCalls;
 static long long powerMode;
 static BOOL acceptsPower = YES, throwsPower, timerFails;
 static const char *jbclient_get_jbroot(void) { return testRoot.UTF8String; }
 static NSDate *rcLowPowerTestNow(void) { return testNow; }
+static NSString *rcLowPowerTestBootSession(void) { return bootSession; }
 static Class testClass(NSString *name) {
     return [missingClass isEqual:name] ? Nil : NSClassFromString(name);
 }
@@ -333,13 +343,29 @@ int main(void) { @autoreleasepool {
     testRoot = [temporary stringByAppendingPathComponent:@".jbroot-87654321"];
     save(configuration(YES, 1380, 360)); testNow = date(@"2026-11-05T23:00:00Z");
     [scheduler refresh]; statusIs(@"scheduled"); assert(powerMode == 1);
+    NSUInteger callsBeforeReboot = powerCalls;
+    [scheduler.timer invalidate]; scheduler.timer = nil;
+    scheduler = [RCLowPowerScheduler new];
+    powerMode = 0;
+    [scheduler refresh]; assert(powerCalls == callsBeforeReboot && powerMode == 0);
+    [scheduler.timer invalidate]; scheduler.timer = nil;
+    scheduler = [RCLowPowerScheduler new];
+    bootSession = @"boot-two";
+    [scheduler refresh];
+    assert(powerCalls == callsBeforeReboot + 1 && powerMode == 1);
+    [scheduler.timer invalidate]; scheduler.timer = nil;
+    scheduler = [RCLowPowerScheduler new];
+    bootSession = nil; powerMode = 0;
+    [scheduler refresh];
+    assert(powerCalls == callsBeforeReboot + 2 && powerMode == 1);
+    [scheduler refresh]; assert(powerCalls == callsBeforeReboot + 2);
     [scheduler.timer invalidate]; scheduler.timer = nil;
     NSString *blocker = [temporary stringByAppendingPathComponent:@"blocker"];
     assert([@"x" writeToFile:blocker atomically:YES encoding:NSUTF8StringEncoding error:nil]);
     assert(!rcLowPowerWriteDictionary(plan, [blocker stringByAppendingPathComponent:@"plan"], nil));
     assert(!rcLowPowerWriteDictionary(plan, nil, nil));
     assert([fm removeItemAtPath:temporary error:nil]);
-    puts("PASS: actual daily schedule, all local minutes, DST, validation, atomic storage, ABI guards, mocked wake timers/power, manual override, respring, disable, retry bounds and failure containment");
+    puts("PASS: actual daily schedule, all local minutes, DST, validation, atomic storage, ABI guards, mocked wake timers/power, manual override, respring versus full reboot, disable, retry bounds and failure containment");
 } return 0; }
 '''
 

@@ -3,11 +3,14 @@
 #include <dlfcn.h>
 #include <notify.h>
 #include <string.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
 #ifndef RC_LOW_POWER_TEST
 #include <libjailbreak/jbclient_xpc.h>
 #else
 extern const char *jbclient_get_jbroot(void);
 extern NSDate *rcLowPowerTestNow(void);
+extern NSString *rcLowPowerTestBootSession(void);
 #endif
 
 @protocol RCLowPowerModeAPI <NSObject>
@@ -73,6 +76,25 @@ static NSDate *rcLowPowerNow(void)
 #endif
 }
 
+static NSString *rcLowPowerBootSession(void)
+{
+#ifdef RC_LOW_POWER_TEST
+    return rcLowPowerTestBootSession();
+#else
+    static NSString *session;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        struct timeval bootTime = {0};
+        size_t length = sizeof(bootTime);
+        if (sysctlbyname("kern.boottime", &bootTime, &length, NULL, 0) == 0 &&
+            length == sizeof(bootTime) && bootTime.tv_sec > 0)
+            session = [NSString stringWithFormat:@"%lld.%d",
+                (long long)bootTime.tv_sec, (int)bootTime.tv_usec];
+    });
+    return session;
+#endif
+}
+
 @interface RCLowPowerScheduler : NSObject
 @property(nonatomic, strong) id<RCPersistentTimerAPI> timer;
 @property(nonatomic, copy) NSDictionary *lastHandled;
@@ -92,6 +114,8 @@ static NSDate *rcLowPowerNow(void)
     if (configuration[@"Revision"]) status[@"Revision"] = configuration[@"Revision"];
     if (next) status[@"Next"] = next;
     if (self.lastHandled) status[@"LastHandled"] = self.lastHandled;
+    NSString *bootSession = rcLowPowerBootSession();
+    if (bootSession) status[@"BootSession"] = bootSession;
     if (rcLowPowerWriteDictionary(status, rcLowPowerStatusPath(root), nil))
         notify_post(RC_LOW_POWER_STATUS_CHANGED);
 }
@@ -148,6 +172,13 @@ static NSDate *rcLowPowerNow(void)
         return;
     }
     @try {
+        static dispatch_once_t frameworksOnce;
+        dispatch_once(&frameworksOnce, ^{
+            // Disabled plans never load either optional system framework.
+            // Keep handles alive while cached Objective-C classes are in use.
+            dlopen("/System/Library/PrivateFrameworks/LowPowerMode.framework/LowPowerMode", RTLD_LAZY | RTLD_LOCAL);
+            dlopen("/System/Library/PrivateFrameworks/PersistentConnection.framework/PersistentConnection", RTLD_LAZY | RTLD_LOCAL);
+        });
         if (!rcLowPowerAPIsAvailable()) {
             [self publishStatus:@"unsupported" configuration:configuration root:root next:nil];
             return;
@@ -169,7 +200,11 @@ static NSDate *rcLowPowerNow(void)
         }
         if (!self.lastHandled) {
             NSDictionary *saved = rcLowPowerReadDictionary(rcLowPowerStatusPath(root));
-            if ([saved[@"LastHandled"] isKindOfClass:NSDictionary.class])
+            // Preserve manual overrides across a respring, but catch up after
+            // a full reboot that may have reset the system's power-mode state.
+            NSString *bootSession = rcLowPowerBootSession();
+            if (bootSession && [saved[@"BootSession"] isEqual:bootSession] &&
+                [saved[@"LastHandled"] isKindOfClass:NSDictionary.class])
                 self.lastHandled = saved[@"LastHandled"];
         }
         BOOL applied = YES;
@@ -217,9 +252,6 @@ void rcLowPowerScheduleStart(void)
 {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        // Keep handles alive while cached Objective-C classes are in use.
-        dlopen("/System/Library/PrivateFrameworks/LowPowerMode.framework/LowPowerMode", RTLD_LAZY | RTLD_LOCAL);
-        dlopen("/System/Library/PrivateFrameworks/PersistentConnection.framework/PersistentConnection", RTLD_LAZY | RTLD_LOCAL);
         static RCLowPowerScheduler *scheduler;
         scheduler = [RCLowPowerScheduler new];
         int changeToken, queryToken;
