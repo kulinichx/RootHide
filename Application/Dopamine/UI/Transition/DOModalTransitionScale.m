@@ -31,6 +31,10 @@
     UIViewController *toViewController = [transitionContext viewControllerForKey:UITransitionContextToViewControllerKey];
     UIViewController *fromViewController = [transitionContext viewControllerForKey:UITransitionContextFromViewControllerKey];
 
+    CGRect finalFrame = [transitionContext finalFrameForViewController:toViewController];
+    if (!CGRectIsNull(finalFrame) && !CGRectIsEmpty(finalFrame))
+        toViewController.view.frame = finalFrame;
+
     [[transitionContext containerView] addSubview:toViewController.view];
 
     float scaleIn = _forwards ? 0.7 : 0.9;
