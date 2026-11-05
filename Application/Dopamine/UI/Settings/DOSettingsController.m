@@ -394,6 +394,8 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
 
+- (void)customGlassRefreshSettingsScrollInsets;
+
 @end
 
 @implementation DOSettingsController
@@ -780,8 +782,25 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
+    [self customGlassRefreshSettingsScrollInsets];
     [self customGlassRefreshSectionBackdrops];
     [self customGlassCleanupTableHairlines];
+}
+
+- (void)customGlassRefreshSettingsScrollInsets
+{
+    UITableView *tableView = _table;
+    if (!tableView) return;
+
+    UIEdgeInsets insets = tableView.contentInset;
+    insets.bottom = self.view.safeAreaInsets.bottom + 24.0;
+    if (!UIEdgeInsetsEqualToEdgeInsets(tableView.contentInset, insets))
+        tableView.contentInset = insets;
+
+    UIEdgeInsets indicatorInsets = tableView.scrollIndicatorInsets;
+    indicatorInsets.bottom = insets.bottom;
+    if (!UIEdgeInsetsEqualToEdgeInsets(tableView.scrollIndicatorInsets, indicatorInsets))
+        tableView.scrollIndicatorInsets = indicatorInsets;
 }
 
 - (void)viewDidLoad

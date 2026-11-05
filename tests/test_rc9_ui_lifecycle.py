@@ -215,6 +215,15 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
                         "self.tableView.alwaysBounceVertical = YES;"):
             self.assertIn(setting, load)
 
+    def test_settings_keep_header_inset_and_add_safe_area_bottom_scroll_room(self):
+        settings = self.settings_method("- (void)customGlassRefreshSettingsScrollInsets")
+        self.assertIn("UIEdgeInsets insets = tableView.contentInset;", settings)
+        self.assertIn("insets.bottom = self.view.safeAreaInsets.bottom + 24.0;", settings)
+        self.assertNotIn("insets.top =", settings)
+        self.assertIn("indicatorInsets.bottom = insets.bottom;", settings)
+        layout = self.settings_method("- (void)viewDidLayoutSubviews")
+        self.assertIn("[self customGlassRefreshSettingsScrollInsets];", layout)
+
     def test_preferences_heights_are_resolved_before_scrolling_and_bounce_is_not_disabled(self):
         load = self.settings_method("- (void)viewDidLoad")
         for setting in ("_table.estimatedRowHeight = 0;",
