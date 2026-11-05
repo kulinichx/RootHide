@@ -170,14 +170,17 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         text = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
         return extract(text.split("@implementation DOSettingsController\n", 1)[1], selector)
 
-    def test_schedule_extends_modal_bottom_without_moving_header_or_other_pages(self):
+    def test_settings_and_schedule_extend_modal_bottom_without_moving_header(self):
         navigation = source("Application/Dopamine/UI/DONavigationController.m")
         frame = extract(navigation.split("@implementation DONavigationController\n", 1)[1],
                         "-(CGRect)_frameForViewController:")
-        guard = "if ([viewController isKindOfClass:[DOLowPowerScheduleController class]])"
+        guard = "BOOL extendsToBottom ="
         self.assertIn('#import "Settings/DOLowPowerScheduleController.h"', navigation)
+        self.assertIn('#import "Settings/DOSettingsController.h"', navigation)
         self.assertLess(frame.index("orig.origin.y ="), frame.index(guard))
         extension = frame.split(guard, 1)[1]
+        self.assertIn("[viewController isKindOfClass:[DOLowPowerScheduleController class]]", extension)
+        self.assertIn("[viewController isKindOfClass:[DOSettingsController class]]", extension)
         self.assertIn("orig.size.height = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(orig);",
                       extension)
         self.assertNotIn("orig.origin.y =", extension)
@@ -212,7 +215,7 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
                         "_table.alwaysBounceVertical = YES;"):
             self.assertIn(setting, load)
         appearance = self.settings_method("- (void)customGlassInstallPageAppearance")
-        self.assertIn("tableView.layer.masksToBounds = NO;", appearance)
+        self.assertIn("tableView.clipsToBounds = YES;", appearance)
 
     def test_scroll_layout_preserves_glass_geometry_without_rebuilding_material(self):
         backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
