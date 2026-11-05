@@ -208,6 +208,11 @@ static void statusIs(NSString *state) {
 static void checkEvent(NSDictionary *plan, NSString *instant, BOOL next,
                        NSString *expected, BOOL mode, NSCalendar *calendar) {
     NSDictionary *event = rcLowPowerEvent(plan, date(instant), calendar, next);
+    if (![event[@"Date"] isEqual:date(expected)] ||
+        [event[@"PowerMode"] boolValue] != mode)
+        fprintf(stderr, "event mismatch instant=%s next=%d actual=%s expected=%s mode=%d/%d\n",
+            instant.UTF8String, next, [[NSISO8601DateFormatter new] stringFromDate:event[@"Date"]].UTF8String,
+            expected.UTF8String, [event[@"PowerMode"] boolValue], mode);
     assert([event[@"Date"] isEqual:date(expected)]);
     assert([event[@"PowerMode"] boolValue] == mode);
 }
