@@ -103,6 +103,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.backgroundView = nil;
     self.tableView.opaque = NO;
+    self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
@@ -217,7 +218,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)refreshScheduleScrollInsets
 {
     if (!self.tableView) return;
-    CGFloat bottom = MAX(88.0, self.view.safeAreaInsets.bottom + 64.0);
+    CGFloat bottom = MAX(160.0, self.view.safeAreaInsets.bottom + 112.0);
     UIEdgeInsets insets = self.tableView.contentInset;
     insets.bottom = bottom;
     if (!UIEdgeInsetsEqualToEdgeInsets(self.tableView.contentInset, insets))
@@ -382,8 +383,9 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         NSInteger minute = [self isStartRow:indexPath] ? self.lastStartMinute : self.lastEndMinute;
         cell.detailTextLabel.text =
             [NSString stringWithFormat:@"%02ld:%02ld", (long)(minute / 60), (long)(minute % 60)];
-        BOOL selected = (self.editingTime == 0 && [self isStartRow:indexPath]) ||
-            (self.editingTime == 1 && ![self isStartRow:indexPath]);
+        BOOL selected = self.timePickerExpanded &&
+            ((self.editingTime == 0 && [self isStartRow:indexPath]) ||
+             (self.editingTime == 1 && ![self isStartRow:indexPath]));
         cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         cell.tintColor = UIColor.systemBlueColor;
     }

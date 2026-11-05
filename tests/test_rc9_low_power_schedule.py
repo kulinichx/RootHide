@@ -136,6 +136,7 @@ class LowPowerScheduleContracts(unittest.TestCase):
         self.assertIn("[self.timePicker removeFromSuperview]", ui)
         self.assertIn("- (void)refreshScheduleScrollInsets", ui)
         self.assertIn("self.tableView.scrollIndicatorInsets", ui)
+        self.assertIn("self.timePickerExpanded &&", extract(ui, "- (void)updateTimeLabels"))
         glass = extract(ui, "- (void)refreshScheduleGlassFrames")
         self.assertIn("if (CGRectIsEmpty(frame) || CGRectGetHeight(frame) < 2) continue;", glass)
         time_row = extract(ui, "- (UITableViewCell *)tableView:")
