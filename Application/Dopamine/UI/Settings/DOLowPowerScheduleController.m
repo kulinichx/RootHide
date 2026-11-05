@@ -108,6 +108,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     self.tableView.delegate = self;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 60;
+    [self refreshScheduleScrollInsets];
     [self.view addSubview:self.tableView];
 
     UIButton *back = [self chromeButton:@"chevron.left" action:@selector(backPressed)
@@ -176,6 +177,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
+    [self refreshScheduleScrollInsets];
     [self refreshScheduleGlassFrames];
 }
 
@@ -210,6 +212,18 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
     cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     cell.textLabel.adjustsFontForContentSizeCategory = YES;
     cell.textLabel.numberOfLines = 0;
+}
+
+- (void)refreshScheduleScrollInsets
+{
+    if (!self.tableView) return;
+    CGFloat bottom = MAX(88.0, self.view.safeAreaInsets.bottom + 64.0);
+    UIEdgeInsets insets = self.tableView.contentInset;
+    insets.bottom = bottom;
+    if (!UIEdgeInsetsEqualToEdgeInsets(self.tableView.contentInset, insets))
+        self.tableView.contentInset = insets;
+    if (!UIEdgeInsetsEqualToEdgeInsets(self.tableView.scrollIndicatorInsets, insets))
+        self.tableView.scrollIndicatorInsets = insets;
 }
 
 - (void)refreshScheduleGlassFrames
@@ -335,6 +349,7 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
         self.timePicker.hidden = YES;
     }
     self.timePickerExpanded = expanded;
+    [self updateTimeLabels];
     void (^updates)(void) = ^{
         [self.tableView beginUpdates];
         [self.tableView endUpdates];
@@ -481,7 +496,8 @@ static NSString * const DOScheduleThemeDidChangeNotification = @"DOCustomGlassTh
             scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightRegular]];
         cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
         cell.detailTextLabel.textColor = UIColor.systemBlueColor;
-        BOOL isEditingTime = (self.editingTime == 0 && start) || (self.editingTime == 1 && !start);
+        BOOL isEditingTime = self.timePickerExpanded &&
+            ((self.editingTime == 0 && start) || (self.editingTime == 1 && !start));
         cell.accessoryType = isEditingTime ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         cell.tintColor = UIColor.systemBlueColor;
         cell.accessibilityTraits |= UIAccessibilityTraitButton;
