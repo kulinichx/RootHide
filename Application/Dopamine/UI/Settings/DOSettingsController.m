@@ -26,33 +26,6 @@
 
 static NSString * const DOCustomGlassSettingsDidChangeNotification = @"DOCustomGlassTheme.DidChange";
 static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
-static NSInteger const DOCustomGlassSettingsBackgroundTag = 0xC652;
-
-static UIView *DOCustomGlassSettingsBackground(UITableView *tableView)
-{
-    UIView *background = tableView.backgroundView;
-    if (background.tag != DOCustomGlassSettingsBackgroundTag) {
-        background = [[UIView alloc] initWithFrame:tableView.bounds];
-        background.tag = DOCustomGlassSettingsBackgroundTag;
-        background.backgroundColor = UIColor.clearColor;
-        background.opaque = NO;
-        background.userInteractionEnabled = NO;
-        tableView.backgroundView = background;
-    }
-    return background;
-}
-
-static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *glass, CGRect sectionRect)
-{
-    UIView *background = DOCustomGlassSettingsBackground(tableView);
-    if (glass.superview != background)
-        [background addSubview:glass];
-
-    CGRect glassRect = CGRectInset(sectionRect, 1.0, 0.5);
-    CGRect backgroundRect = [tableView convertRect:glassRect toView:background];
-    if (!CGRectEqualToRect(glass.frame, backgroundRect))
-        glass.frame = backgroundRect;
-}
 
 // Implemented in DOMainViewController.m. Keeping the declaration local avoids
 // adding a new project file while letting Settings consume the same renderer.
@@ -160,8 +133,7 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
             kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
             kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
         self.sectionGlassView = glass;
-        UIView *background = DOCustomGlassSettingsBackground(tableView);
-        [background addSubview:glass];
+        [tableView insertSubview:glass atIndex:0];
     }
 
     UIScreenEdgePanGestureRecognizer *edgeGesture =
@@ -251,8 +223,9 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
     }
 
     self.sectionGlassView.hidden = NO;
-    DOPlaceCustomGlassSettingsSection(self.tableView, self.sectionGlassView, sectionRect);
+    self.sectionGlassView.frame = CGRectInset(sectionRect, 1.0, 0.5);
     [self.sectionGlassView reloadMaterial];
+    [self.tableView sendSubviewToBack:self.sectionGlassView];
 }
 
 - (void)refreshHealth
@@ -639,15 +612,16 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
                 kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
                 kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             self.customGlassSectionBackdropViews[key] = glass;
-            UIView *background = DOCustomGlassSettingsBackground(tableView);
-            [background addSubview:glass];
+            [tableView insertSubview:glass atIndex:0];
             created = YES;
         }
 
         if (glass.hidden) glass.hidden = NO;
-        DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);
+        CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);
+        if (!CGRectEqualToRect(glass.frame, glassFrame)) glass.frame = glassFrame;
         if (created) {
             [glass reloadMaterial];
+            [tableView sendSubviewToBack:glass];
         }
     }
 
@@ -791,18 +765,6 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
-
-    __weak typeof(self) weakSelf = self;
-    __weak UITableViewCell *weakCell = cell;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UITableViewCell *strongCell = weakCell;
-        if (strongCell && strongCell.window) {
-            NSIndexPath *currentIndexPath = [tableView indexPathForCell:strongCell];
-            if (currentIndexPath)
-                [weakSelf customGlassStyleVisibleCell:strongCell atIndexPath:currentIndexPath];
-        }
-        [weakSelf customGlassRefreshSectionBackdrops];
-    });
 }
 
 - (void)viewDidLayoutSubviews
@@ -810,7 +772,6 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
     [super viewDidLayoutSubviews];
     [self customGlassRefreshSettingsScrollInsets];
     [self customGlassRefreshSectionBackdrops];
-    [self customGlassCleanupTableHairlines];
 }
 
 - (void)customGlassRefreshSettingsScrollInsets

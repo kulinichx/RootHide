@@ -237,12 +237,12 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
 
     def test_scroll_layout_preserves_glass_geometry_without_rebuilding_material(self):
         backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
-        self.assertIn("DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);", backdrops)
+        self.assertIn("CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);", backdrops)
         self.assertLess(backdrops.index("[activeKeys addObject:key]"),
                         backdrops.index("if (CGRectIsEmpty(sectionRect)"))
         created = extract(backdrops, "if (created)")
         self.assertIn("[glass reloadMaterial];", created)
-        self.assertNotIn("sendSubviewToBack", backdrops)
+        self.assertIn("[tableView sendSubviewToBack:glass];", created)
         self.assertEqual(backdrops.count("[glass reloadMaterial];"),
                          created.count("[glass reloadMaterial];"))
         refresh = self.settings_method("- (void)customGlassRefreshPageAppearance")
@@ -252,17 +252,24 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertNotIn("reloadData", layout)
         self.assertNotIn("contentOffset", layout)
 
-    def test_settings_glass_stays_in_table_background_behind_reused_cells(self):
+    def test_settings_glass_and_cell_reuse_match_the_working_schedule_page(self):
         settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
-        background = extract(settings, "static UIView *DOCustomGlassSettingsBackground")
-        place = extract(settings, "static void DOPlaceCustomGlassSettingsSection")
-        self.assertIn("tableView.backgroundView = background;", background)
-        self.assertIn("[tableView convertRect:glassRect toView:background]", place)
-        self.assertIn("[background addSubview:glass];", place)
-        self.assertNotIn("[tableView insertSubview:glass", settings)
-        health = extract(settings, "- (void)refreshGlassAppearance")
-        self.assertIn("DOPlaceCustomGlassSettingsSection(self.tableView, self.sectionGlassView, sectionRect);",
-                      health)
+        schedule = source("Application/Dopamine/UI/Settings/DOLowPowerScheduleController.m")
+        settings_backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
+        schedule_backdrops = extract(schedule, "- (void)refreshScheduleGlassFrames")
+        self.assertIn("[tableView insertSubview:glass atIndex:0];", settings_backdrops)
+        self.assertIn("[self.tableView insertSubview:glass atIndex:0];", schedule_backdrops)
+        self.assertIn("[tableView sendSubviewToBack:glass];", settings_backdrops)
+
+        settings_display = self.settings_method(
+            "- (void)tableView:(UITableView *)tableView willDisplayCell:")
+        schedule_display = extract(schedule, "- (void)tableView:(UITableView *)tableView willDisplayCell:")
+        self.assertIn("[self customGlassStyleVisibleCell:cell atIndexPath:indexPath];", settings_display)
+        self.assertNotIn("dispatch_async", settings_display)
+        self.assertIn("[self styleScheduleCell:cell];", schedule_display)
+
+        layout = self.settings_method("- (void)viewDidLayoutSubviews")
+        self.assertNotIn("customGlassCleanupTableHairlines", layout)
 
     def test_base_list_does_not_reassign_an_unchanged_table_frame(self):
         base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
