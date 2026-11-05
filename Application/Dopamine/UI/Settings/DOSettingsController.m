@@ -18,6 +18,7 @@
 #import "DOPSExploitListItemsController.h"
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
+#import "DOLowPowerScheduleController.h"
 #import "DOButtonCell.h"
 #import "../DOSupporterLicense.h"
 
@@ -1047,6 +1048,14 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
                 [specifiers addObject:actionsGroupSpecifier];
                 
                 if (envManager.isJailbroken) {
+                    PSSpecifier *lowPowerSchedule = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSStaticTextCell edit:nil];
+                    [lowPowerSchedule setProperty:@"LowPowerSchedule_Title" forKey:@"title"];
+                    [lowPowerSchedule setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [lowPowerSchedule setProperty:buttonHeight forKey:@"height"];
+                    [lowPowerSchedule setProperty:@"battery.25" forKey:@"image"];
+                    [lowPowerSchedule setProperty:@"lowPowerSchedulePressed" forKey:@"action"];
+                    [specifiers addObject:lowPowerSchedule];
+
                     PSSpecifier *rootHideHealthSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [rootHideHealthSpecifier setProperty:@"RootHide Health" forKey:@"title"];
                     [rootHideHealthSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
@@ -1720,6 +1729,11 @@ static NSInteger const DOCustomGlassSettingsSeparatorTag = 0xC651;
 - (void)rootHideHealthPressed
 {
     [self.navigationController pushViewController:[[DORootHideHealthViewController alloc] init] animated:YES];
+}
+
+- (void)lowPowerSchedulePressed
+{
+    [self.navigationController pushViewController:[DOLowPowerScheduleController new] animated:YES];
 }
 
 - (void)refreshJailbreakAppsPressed

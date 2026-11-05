@@ -101,6 +101,10 @@ typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
 - (BOOL)saveFakeMountPaths:(NSArray<NSString *> *)paths;
 - (int)setFakeMountPath:(NSString *)path mounted:(BOOL)mounted deleteMirror:(BOOL)deleteMirror;
 - (void)restoreFakeMounts;
+- (NSDictionary *)lowPowerScheduleConfiguration;
+- (NSDictionary *)lowPowerScheduleStatus;
+- (BOOL)saveLowPowerScheduleEnabled:(BOOL)enabled startMinute:(NSInteger)startMinute
+                         endMinute:(NSInteger)endMinute error:(NSError **)error;
 @end
 
 NS_ASSUME_NONNULL_END

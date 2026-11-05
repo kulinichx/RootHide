@@ -197,3 +197,23 @@
 "Supporter_Invalid_License_Fallback" = "Unable to verify supporter license";
 "Supporter_Removed" = "Supporter Removed";
 "Supporter_Removed_Message" = "Your supporter license has been removed. Restore the standard interface now.";
+
+"LowPowerSchedule_Title" = "Low Power Schedule";
+"LowPowerSchedule_Enable" = "Enable Schedule";
+"LowPowerSchedule_OnTime" = "Turn On";
+"LowPowerSchedule_OffTime" = "Turn Off";
+"LowPowerSchedule_Daily" = "Every Day";
+"LowPowerSchedule_Status" = "Runtime Status";
+"LowPowerSchedule_Save" = "Save";
+"LowPowerSchedule_Footer" = "Uses local time every day, including across midnight. Saving an enabled plan immediately applies the state for the current time. Pausing the plan leaves Low Power Mode unchanged. Manual changes remain until the next scheduled event.";
+"LowPowerSchedule_RuntimeFooter" = "Runs in the jailbroken SpringBoard, not the Dopamine app. If the runtime is unavailable after an update, reload the jailbreak environment. Lock-screen timing still needs device validation; no events run while powered off or not jailbroken.";
+"LowPowerSchedule_Waiting" = "Waiting for SpringBoard to confirm the saved plan…";
+"LowPowerSchedule_Disabled" = "Schedule paused; current Low Power Mode is unchanged.";
+"LowPowerSchedule_Unsupported" = "Required system interfaces are unavailable. No schedule is running.";
+"LowPowerSchedule_ApplyFailed" = "The system rejected the last power-mode request. Retries are bounded; check again after the next event.";
+"LowPowerSchedule_RuntimeFailed" = "The schedule could not be started. Check the jailbreak environment.";
+"LowPowerSchedule_Next" = "Next: %@ — %@";
+"LowPowerSchedule_SameTime" = "Choose different on and off times.";
+"LowPowerSchedule_SaveFailed" = "Could not save the plan: %@";
+"LowPowerSchedule_Discard" = "Discard unsaved changes?";
+"LowPowerSchedule_DiscardButton" = "Discard";

@@ -258,4 +258,6 @@ void sbInit(void)
 	if (springboardSnapshotWriteAPIAvailable()) {
 		%init(SnapshotWriteHooks);
 	}
+	extern void rcLowPowerScheduleStart(void);
+	rcLowPowerScheduleStart();
 }
