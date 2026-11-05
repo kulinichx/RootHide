@@ -424,6 +424,7 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
 @property(nonatomic, assign) CGFloat customGlassLastContentOffsetY;
 @property(nonatomic, assign) BOOL customGlassHasContentOffset;
+@property(nonatomic, assign) BOOL customGlassInsetsConfigured;
 
 - (void)customGlassRefreshSettingsScrollInsets;
 
@@ -834,14 +835,20 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
     if (!tableView) return;
 
     UIEdgeInsets insets = tableView.contentInset;
+    if (!self.customGlassInsetsConfigured) {
+        insets = tableView.adjustedContentInset;
+        tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        if (@available(iOS 13.0, *))
+            tableView.automaticallyAdjustsScrollIndicatorInsets = NO;
+        self.customGlassInsetsConfigured = YES;
+    }
+
     insets.bottom = self.view.safeAreaInsets.bottom + 24.0;
     if (!UIEdgeInsetsEqualToEdgeInsets(tableView.contentInset, insets))
         tableView.contentInset = insets;
 
-    UIEdgeInsets indicatorInsets = tableView.scrollIndicatorInsets;
-    indicatorInsets.bottom = insets.bottom;
-    if (!UIEdgeInsetsEqualToEdgeInsets(tableView.scrollIndicatorInsets, indicatorInsets))
-        tableView.scrollIndicatorInsets = indicatorInsets;
+    if (!UIEdgeInsetsEqualToEdgeInsets(tableView.scrollIndicatorInsets, insets))
+        tableView.scrollIndicatorInsets = insets;
 }
 
 - (void)viewDidLoad

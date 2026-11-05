@@ -217,10 +217,14 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
 
     def test_settings_keep_header_inset_and_add_safe_area_bottom_scroll_room(self):
         settings = self.settings_method("- (void)customGlassRefreshSettingsScrollInsets")
-        self.assertIn("UIEdgeInsets insets = tableView.contentInset;", settings)
+        self.assertIn("if (!self.customGlassInsetsConfigured)", settings)
+        self.assertIn("insets = tableView.adjustedContentInset;", settings)
+        self.assertIn("tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;",
+                      settings)
         self.assertIn("insets.bottom = self.view.safeAreaInsets.bottom + 24.0;", settings)
         self.assertNotIn("insets.top =", settings)
-        self.assertIn("indicatorInsets.bottom = insets.bottom;", settings)
+        self.assertIn("tableView.automaticallyAdjustsScrollIndicatorInsets = NO;", settings)
+        self.assertIn("tableView.scrollIndicatorInsets = insets;", settings)
         layout = self.settings_method("- (void)viewDidLayoutSubviews")
         self.assertIn("[self customGlassRefreshSettingsScrollInsets];", layout)
 
