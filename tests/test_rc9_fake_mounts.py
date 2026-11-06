@@ -73,9 +73,9 @@ int main(void) { @autoreleasepool {
     DOEnvironmentManager *manager = [DOEnvironmentManager new];
     assert([[manager fakeMountPaths] isEqual:@[]]);
     NSUInteger initialRoot = rootCalls, initialSandbox = sandboxCalls;
-    assert([manager saveFakeMountPaths:@[@"/System/Library/Test", @"/private/var/test"]]);
+    assert(([manager saveFakeMountPaths:@[@"/System/Library/Test", @"/private/var/test"]]));
     assert(rootCalls == initialRoot + 1 && sandboxCalls == initialSandbox + 1);
-    assert([[manager fakeMountPaths] isEqual:@[@"/System/Library/Test", @"/private/var/test"]]);
+    assert(([[manager fakeMountPaths] isEqual:@[@"/System/Library/Test", @"/private/var/test"]]));
 
     NSUInteger before = commandCalls;
     assert([manager setFakeMountPath:@"/System/../private" mounted:YES deleteMirror:NO] == EINVAL);
@@ -154,6 +154,23 @@ class FakeMountContracts(unittest.TestCase):
     def test_native_regression_is_required_by_ci(self):
         workflow = source(".github/workflows/roothide.yml")
         self.assertIn("python3 tests/test_rc9_fake_mounts.py --native", workflow)
+
+    def test_ios16_is_a_hard_upstream_porting_gate(self):
+        manifest = json.loads(source("docs/rc9-upstream-alignment-20261106.json"))
+        gate = manifest["compatibility_gate"]
+        self.assertEqual(gate["primary_family"], "iOS 16")
+        self.assertEqual(gate["minimum_ios"], "16.0")
+        self.assertTrue(any("iOS 17 or later" in rule for rule in gate["rules"]))
+        project = source("Application/Dopamine.xcodeproj/project.pbxproj")
+        for configuration in (
+            "8C71982F2ABF0E84003C6658",
+            "8C7198302ABF0E84003C6658",
+        ):
+            block = extract(project, configuration)
+            self.assertIn("IPHONEOS_DEPLOYMENT_TARGET = 16.0;", block)
+            self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = com.opa334.Dopamine-roothide;", block)
+        package_tests = source("tests/test_rc9_release_package.py")
+        self.assertIn('"expected_minimum_os": "16.0"', package_tests)
 
 
 def native_tests():

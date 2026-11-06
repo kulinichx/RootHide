@@ -8,6 +8,21 @@
     "minimum_ios": "16.0",
     "device_acceptance": "pending"
   },
+  "compatibility_gate": {
+    "primary_family": "iOS 16",
+    "minimum_ios": "16.0",
+    "rules": [
+      "Do not raise RC9's minimum iOS version above 16.0.",
+      "Only port upstream behavior that is available and correct on iOS 16.",
+      "Exclude behavior requiring iOS 17 or later; when a newer API is optional, require an iOS 16 fallback and an explicit availability guard.",
+      "Review every upstream API and ABI change against iOS 16 before implementation."
+    ],
+    "validation": [
+      "Both app Debug and Release deployment targets remain 16.0.",
+      "The packaged TIPA MinimumOSVersion remains 16.0.",
+      "Device acceptance is recorded on the user's iOS 16 hardware separately from CI."
+    ]
+  },
   "references": [
     {
       "role": "primary_roothide_baseline",
