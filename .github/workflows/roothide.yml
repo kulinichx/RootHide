@@ -105,6 +105,8 @@ jobs:
           python3 tests/test_rc9_fake_mounts.py --native
           python3 tests/test_rc9_upstream_313.py --native
           python3 tests/test_rc9_ipc_dispatch.py --native
+          python3 tests/test_rc9_forkfix.py --native
+          python3 tests/test_rc9_signature_collection.py --native
 
       - name: Cache Theos
         id: cache-theos
@@ -197,6 +199,7 @@ jobs:
           make -C BaseBin launchdhook
           make -C BaseBin jailbreakd
           make -C BaseBin roothidehooks
+          make -C BaseBin forkfix
           # Build dyldhook directly so focused mode does not pull the full basebin/trustcache graph.
           make -C BaseBin/dyldhook
 
@@ -205,10 +208,11 @@ jobs:
           cp BaseBin/launchdhook/launchdhook.dylib artifacts/launchdhook.dylib
           cp BaseBin/jailbreakd/jailbreakd artifacts/jailbreakd
           cp BaseBin/.build/roothidehooks.dylib artifacts/roothidehooks.dylib
+          cp BaseBin/forkfix/forkfix.dylib artifacts/forkfix.dylib
           cp BaseBin/dyldhook/dyldhook_merge.arm64.dylib artifacts/dyldhook_merge.arm64.dylib
           cp BaseBin/dyldhook/dyldhook_merge.arm64e.dylib artifacts/dyldhook_merge.arm64e.dylib
 
-          file artifacts/systemhook.dylib artifacts/launchdhook.dylib artifacts/jailbreakd artifacts/roothidehooks.dylib \
+          file artifacts/systemhook.dylib artifacts/launchdhook.dylib artifacts/jailbreakd artifacts/roothidehooks.dylib artifacts/forkfix.dylib \
             artifacts/dyldhook_merge.arm64.dylib artifacts/dyldhook_merge.arm64e.dylib
           if strings artifacts/systemhook.dylib | grep -E "APTTRUST-|TRUSTFLOW-"; then
             echo "unexpected experimental trust diagnostics in systemhook" >&2
@@ -246,6 +250,7 @@ jobs:
             artifacts/launchdhook.dylib
             artifacts/jailbreakd
             artifacts/roothidehooks.dylib
+            artifacts/forkfix.dylib
             artifacts/dyldhook_merge.arm64.dylib
             artifacts/dyldhook_merge.arm64e.dylib
             artifacts/source-provenance.txt

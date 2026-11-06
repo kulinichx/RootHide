@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-06",
-  "scope": "Phase one: isolate the RC9 app-side low-power storage bridge without changing behavior.",
+  "scope": "Incremental iOS 16 alignment: RC9 module isolation, UI integration, fork handshake and signature collection backports.",
   "rc9": {
     "commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
     "product_version": "3.0.7",
@@ -11,8 +11,16 @@
   "compatibility_gate": {
     "primary_family": "iOS 16",
     "minimum_ios": "16.0",
+    "supported_matrix": {
+      "scope": "All iOS 16.x firmware and device combinations actually supported by RC9 3.0.7 RootHide jailbreak paths.",
+      "status": "pending_inventory_and_device_validation",
+      "clarification": "This does not mean every device can jailbreak every iOS 16.x release. MinimumOSVersion 16.0 is not proof that the full jailbreak matrix has been validated."
+    },
     "rules": [
       "Do not raise RC9's minimum iOS version above 16.0.",
+      "Preserve all iOS 16.x firmware/device combinations supported by RC9's existing 3.0.7 RootHide jailbreak paths, not only the user's iPadOS 16.5 device.",
+      "Maintain an explicit iOS 16.x firmware, device/chip, exploit, and offset matrix; distinguish source-derived support from device-validated combinations.",
+      "Do not infer jailbreak support for every iOS 16.x release or device from the app's MinimumOSVersion of 16.0.",
       "Only port upstream behavior that is available and correct on iOS 16.",
       "Exclude behavior requiring iOS 17 or later; when a newer API is optional, require an iOS 16 fallback and an explicit availability guard.",
       "Review every upstream API and ABI change against iOS 16 before implementation."
@@ -20,6 +28,7 @@
     "validation": [
       "Both app Debug and Release deployment targets remain 16.0.",
       "The packaged TIPA MinimumOSVersion remains 16.0.",
+      "The full RC9 iOS 16.x version/device/exploit/offset support matrix is inventoried and validation evidence is tracked per combination.",
       "Device acceptance is recorded on the user's iOS 16 hardware separately from CI."
     ]
   },
@@ -75,6 +84,20 @@
   },
   "phase_two": {
     "module": "Application/Dopamine/Jailbreak/DOEnvironmentManager+RCFakeMounts",
+    "ci": {
+      "run_id": "42157306193",
+      "result": "success",
+      "checks": [
+        "source regression tests",
+        "Runtime policy regression tests including macOS native fake-mount mock",
+        "full TIPA build",
+        "package identity verification"
+      ],
+      "limitations": [
+        "Not an iOS device acceptance test.",
+        "Workflow reported a cache-save warning although the run completed successfully."
+      ]
+    },
     "reference_comparison": {
       "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
       "zqbb_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77",
@@ -86,6 +109,40 @@
       "- (BOOL)saveFakeMountPaths:": "ab6cbefee8ad9f554297fb424228955cee5e947f018e47e1f502b8bcdfdce439",
       "- (int)setFakeMountPath:": "a07fa14ccc7dd0114b6fc9a58105df655caa1d805ff334271a91645277c17dee",
       "- (void)restoreFakeMounts": "1b3de3fb39ec55e14e20516121563ac136c7a88b3c25515f30d5c94cb7ce53c7"
+    }
+  },
+  "phase_three": {
+    "status": "source_regressions_passed_native_and_full_build_pending",
+    "ui_integration": {
+      "source_commit": "f2129c8f383c9998cc52f04aad9f1b65887fe6dc",
+      "cherry_pick_commit_prefix": "6c18c06d",
+      "device_acceptance": "pending"
+    },
+    "backports": [
+      {
+        "id": "fork_handshake",
+        "source_commit": "c15b99798c64ee0c9004b5a7473d0adae0fe995c",
+        "scope": "Per-call pipe ownership, checked raw I/O, EINTR retry, EOF rejection, SIGPIPE suppression, failed-child exit and parent cleanup/reaping.",
+        "preserved": "Existing RootHide systemhook hook installation and Mach fork-fix protocol.",
+        "limits": "No proof of all inherited-descriptor lifetimes, post-fork configuration locks, or iOS device behavior.",
+        "native_test": "tests/test_rc9_forkfix.py --native"
+      },
+      {
+        "id": "signature_collection",
+        "source_commit": "15a075427c758eadd366260360c529a7762af4db",
+        "scope": "Tri-state adhoc collection, parse/hash failure propagation, checked growth and partial-output cleanup.",
+        "preserved": "RC9 Cryptex/TrollStore filtering, per-file randomized hashes, errno-style statuses and existing consumer checks.",
+        "limits": "Not the full upstream trustcache_fs walker, signature attachment, randomization rollback, parser-submodule, or kernel trustcache lifecycle audit.",
+        "native_test": "tests/test_rc9_signature_collection.py --native"
+      }
+    ],
+    "local_validation": {
+      "project_tests": 125,
+      "manager_package_tool_tests": 7,
+      "diff_check": "passed",
+      "native_execution": "pending_macOS_CI",
+      "full_tipa_build": "pending",
+      "device_acceptance": "pending"
     }
   },
   "ledger": [
@@ -140,7 +197,14 @@
     {
       "id": "forkfix_and_post_fork_locks",
       "classification": "pending_module_comparison",
-      "status": "open"
+      "status": "handshake_backported_post_fork_locks_and_remaining_lifetimes_open",
+      "evidence": "phase_three; tests/test_rc9_forkfix.py. Native execution and iOS validation pending."
+    },
+    {
+      "id": "signature_collection_remaining_differences",
+      "classification": "partially_backported",
+      "status": "collection_error_handling_backported_other_signature_and_directory_paths_open",
+      "evidence": "phase_three; tests/test_rc9_signature_collection.py. Does not close trustcache lifetime or all parser/attachment paths."
     }
   ]
 }

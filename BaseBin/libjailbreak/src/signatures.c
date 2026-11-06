@@ -89,38 +89,83 @@ bool code_signature_calculate_adhoc_cdhash(CS_SuperBlob *superblob, cdhash_t cdh
 	return isAdhocSigned;
 }
 
-bool macho_parse_code_signature(MachO *macho, cdhash_t cdhashOut)
+// 1: adhoc hash collected; 0: no trust needed; -1: malformed/unreadable signature.
+static int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut)
 {
-	bool isAdhocSigned = false;
+	if (!macho || !cdhashOut) return -1;
+	__block bool hasSignature = false;
+	int status = macho_enumerate_load_commands(macho, ^(struct load_command command, uint64_t offset, void *data, bool *stop) {
+		if (command.cmd == LC_CODE_SIGNATURE) {
+			hasSignature = true;
+			*stop = true;
+		}
+	});
+	if (status != 0) return -1;
+	if (!hasSignature) return 0;
 
 	CS_SuperBlob *superblob = macho_read_code_signature(macho);
-	if (superblob) {
-		isAdhocSigned = code_signature_calculate_adhoc_cdhash(superblob, cdhashOut);
-		free(superblob);
-	}
+	if (!superblob) return -1;
+	CS_DecodedSuperBlob *decodedSuperblob = csd_superblob_decode(superblob);
+	free(superblob);
+	if (!decodedSuperblob) return -1;
 
-	return isAdhocSigned;
+	int result = 0;
+	if (csd_superblob_is_adhoc_signed(decodedSuperblob)) {
+		result = csd_superblob_calculate_best_cdhash(decodedSuperblob, cdhashOut, NULL) == 0 ? 1 : -1;
+	}
+	csd_superblob_free(decodedSuperblob);
+	return result;
 }
 
-void fat_collect_untrusted_cdhashes(Fat *fat, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+bool macho_parse_code_signature(MachO *macho, cdhash_t cdhashOut)
 {
+	return macho_collect_adhoc_cdhash(macho, cdhashOut) == 1;
+}
+
+int fat_collect_untrusted_cdhashes(Fat *fat, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
+{
+	if (!cdhashesOut || !cdhashCountOut) return EINVAL;
+	*cdhashesOut = NULL;
+	*cdhashCountOut = 0;
+	if (!fat) return EINVAL;
+
 	__block cdhash_t *cdhashes = NULL;
 	__block uint32_t cdhashCount = 0;
+	__block int status = 0;
 	fat_enumerate_slices(fat, ^(MachO *macho, bool *stop) {
 		if (macho_is_mappable(macho)) {
 			cdhash_t cdhash;
-			if (macho_parse_code_signature(macho, cdhash)) {
-				if (!is_cdhash_trustcached(cdhash)) {
-					cdhashCount++;
-					cdhashes = realloc(cdhashes, cdhashCount * sizeof(cdhash_t));
-					memcpy(cdhashes[cdhashCount-1], cdhash, sizeof(cdhash));
+			int signatureResult = macho_collect_adhoc_cdhash(macho, cdhash);
+			if (signatureResult < 0) {
+				status = ENOEXEC;
+				*stop = true;
+				return;
+			}
+			if (signatureResult > 0 && !is_cdhash_trustcached(cdhash)) {
+				if (cdhashCount == UINT32_MAX) {
+					status = EOVERFLOW;
+					*stop = true;
+					return;
 				}
+				cdhash_t *newCdhashes = realloc(cdhashes, ((size_t)cdhashCount + 1) * sizeof(cdhash_t));
+				if (!newCdhashes) {
+					status = ENOMEM;
+					*stop = true;
+					return;
+				}
+				cdhashes = newCdhashes;
+				memcpy(cdhashes[cdhashCount++], cdhash, sizeof(cdhash));
 			}
 		}
 	});
 
+	if (status != 0) {
+		free(cdhashes);
+		return status;
+	}
 	*cdhashesOut = cdhashes;
 	*cdhashCountOut = cdhashCount;
+	return 0;
 }
 
 int file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut)
@@ -163,14 +208,25 @@ int file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *cd
 		}
 		if (macho_is_mappable(macho)) {
 			cdhash_t cdhash;
-			if (macho_parse_code_signature(macho, cdhash) && !is_cdhash_trustcached(cdhash)) {
+			int signatureResult = macho_collect_adhoc_cdhash(macho, cdhash);
+			if (signatureResult < 0) {
+				status = ENOEXEC;
+				*stop = true;
+				return;
+			}
+			if (signatureResult > 0 && !is_cdhash_trustcached(cdhash)) {
+				if (cdhashCount == UINT32_MAX) {
+					status = EOVERFLOW;
+					*stop = true;
+					return;
+				}
 				status = ensure_randomized_cdhash_for_slice(filepath, macho->archDescriptor.offset, cdhash);
 				if (status != 0) {
 					JBLogError("Failed to ensure randomized cdhash for %s (status=%d)", filepath, status);
 					*stop = true;
 					return;
 				}
-				cdhash_t *newCdhashes = realloc(cdhashes, (cdhashCount + 1) * sizeof(cdhash_t));
+				cdhash_t *newCdhashes = realloc(cdhashes, ((size_t)cdhashCount + 1) * sizeof(cdhash_t));
 				if (!newCdhashes) {
 					status = ENOMEM;
 					*stop = true;

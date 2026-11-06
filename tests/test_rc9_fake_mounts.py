@@ -160,6 +160,14 @@ class FakeMountContracts(unittest.TestCase):
         gate = manifest["compatibility_gate"]
         self.assertEqual(gate["primary_family"], "iOS 16")
         self.assertEqual(gate["minimum_ios"], "16.0")
+        matrix = gate["supported_matrix"]
+        self.assertEqual(
+            matrix["status"],
+            "pending_inventory_and_device_validation",
+        )
+        self.assertIn("All iOS 16.x", matrix["scope"])
+        self.assertTrue(any("not only the user's iPadOS 16.5 device" in rule for rule in gate["rules"]))
+        self.assertIn("full jailbreak matrix", matrix["clarification"].lower())
         self.assertTrue(any("iOS 17 or later" in rule for rule in gate["rules"]))
         project = source("Application/Dopamine.xcodeproj/project.pbxproj")
         for configuration in (
