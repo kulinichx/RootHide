@@ -422,9 +422,6 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 @interface DOSettingsController ()
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
-@property(nonatomic, assign) BOOL customGlassInsetsConfigured;
-
-- (void)customGlassRefreshSettingsScrollInsets;
 
 @end
 
@@ -652,8 +649,8 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
             glass.frame = glassFrame;
         if (created) {
             [glass reloadMaterial];
+            [tableView sendSubviewToBack:glass];
         }
-        [tableView sendSubviewToBack:glass];
     }
 
     [self.customGlassSectionBackdropViews enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, DOCustomLiquidGlassView *glass, BOOL *stop) {
@@ -805,43 +802,12 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    [self customGlassRefreshSettingsScrollInsets];
     [self customGlassRefreshSectionBackdrops];
-}
-
-- (void)customGlassRefreshSettingsScrollInsets
-{
-    UITableView *tableView = _table;
-    if (!tableView) return;
-
-    UIEdgeInsets insets = tableView.contentInset;
-    if (!self.customGlassInsetsConfigured) {
-        insets = tableView.adjustedContentInset;
-        tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-        if (@available(iOS 13.0, *))
-            tableView.automaticallyAdjustsScrollIndicatorInsets = NO;
-        self.customGlassInsetsConfigured = YES;
-    }
-
-    insets.bottom = self.view.safeAreaInsets.bottom + 24.0;
-    if (!UIEdgeInsetsEqualToEdgeInsets(tableView.contentInset, insets))
-        tableView.contentInset = insets;
-
-    if (!UIEdgeInsetsEqualToEdgeInsets(tableView.scrollIndicatorInsets, insets))
-        tableView.scrollIndicatorInsets = insets;
 }
 
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-
-    // Preferences supplies actual row/header/footer heights. Estimates can
-    // revise the content origin while the first sections are bouncing.
-    _table.estimatedRowHeight = 0;
-    _table.estimatedSectionHeaderHeight = 0;
-    _table.estimatedSectionFooterHeight = 0;
-    _table.bounces = YES;
-    _table.alwaysBounceVertical = YES;
 
     // Back navigation is functional UI and must not depend on supporter state.
     [self customGlassInstallBackNavigation];

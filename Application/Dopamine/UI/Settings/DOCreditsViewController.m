@@ -218,12 +218,13 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
         CGRect firstRect = [tableView rectForRowAtIndexPath:firstIndexPath];
         CGRect lastRect = [tableView rectForRowAtIndexPath:lastIndexPath];
         CGRect sectionRect = CGRectUnion(firstRect, lastRect);
+        NSNumber *key = @(section);
+        [activeKeys addObject:key];
         if (CGRectIsEmpty(sectionRect) || CGRectGetHeight(sectionRect) < 2.0)
             continue;
 
-        NSNumber *key = @(section);
-        [activeKeys addObject:key];
         DOCustomLiquidGlassView *glass = self.customGlassSectionBackdropViews[key];
+        BOOL created = NO;
         if (!glass) {
             BOOL isTallSection = CGRectGetHeight(sectionRect) > 220.0;
             glass = [[DOCustomLiquidGlassView alloc] initWithCornerRadius:(isTallSection ? 24.0 : 18.0)
@@ -232,20 +233,26 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
             glass.materialScale = isTallSection ? 0.94 : 0.88;
             self.customGlassSectionBackdropViews[key] = glass;
             [tableView insertSubview:glass atIndex:0];
+            created = YES;
         }
 
         BOOL isTallSection = CGRectGetHeight(sectionRect) > 220.0;
         CGFloat radius = isTallSection ? 24.0 : 18.0;
-        glass.hidden = NO;
-        glass.frame = CGRectInset(sectionRect, 1.0, 0.5);
+        BOOL materialChanged = created || glass.preferredCornerRadius != radius;
+        if (glass.hidden) glass.hidden = NO;
+        CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);
+        if (!CGRectEqualToRect(glass.frame, glassFrame))
+            glass.frame = glassFrame;
         glass.preferredCornerRadius = radius;
         glass.layer.cornerRadius = radius;
         glass.layer.maskedCorners =
             kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
             kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
         glass.materialScale = isTallSection ? 0.94 : 0.88;
-        [glass reloadMaterial];
-        [tableView sendSubviewToBack:glass];
+        if (materialChanged)
+            [glass reloadMaterial];
+        if (created)
+            [tableView sendSubviewToBack:glass];
     }
 
     [self.customGlassSectionBackdropViews enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, DOCustomLiquidGlassView *glass, BOOL *stop) {
@@ -273,6 +280,8 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     [tableView setNeedsLayout];
     [tableView layoutIfNeeded];
     [self customGlassRefreshSectionBackdrops];
+    for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
+        [glass reloadMaterial];
 
     UIView *backButton = [self.view viewWithTag:0xC654];
     if ([backButton isKindOfClass:[UIButton class]]) {
@@ -361,7 +370,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     tableView.backgroundView = nil;
     tableView.layer.cornerRadius = 0.0;
     tableView.layer.borderWidth = 0.0;
-    tableView.layer.masksToBounds = NO;
+    tableView.clipsToBounds = YES;
 
     self.customGlassSectionBackdropViews = [NSMutableDictionary dictionary];
     [self customGlassInstallBackNavigation];
@@ -377,25 +386,16 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
-
-    __weak typeof(self) weakSelf = self;
-    __weak UITableViewCell *weakCell = cell;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UITableViewCell *strongCell = weakCell;
-        if (strongCell && strongCell.window) {
-            NSIndexPath *currentIndexPath = [tableView indexPathForCell:strongCell];
-            if (currentIndexPath)
-                [weakSelf customGlassStyleVisibleCell:strongCell atIndexPath:currentIndexPath];
-        }
-        [weakSelf customGlassRefreshSectionBackdrops];
-    });
+    if (DORHSupporterIsVerified()) {
+        for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
+            [tableView sendSubviewToBack:glass];
+    }
 }
 
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
     [self customGlassRefreshSectionBackdrops];
-    [self customGlassCleanupTableHairlines];
 }
 
 - (void)viewDidLoad

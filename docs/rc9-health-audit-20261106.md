@@ -128,4 +128,51 @@ RC9 原先只在 iOS 16 的 tweak 禁用表中列出 `logd`、`notifyd`、
 - 两个原生脚本均使用 ASan/UBSan，并接入既有 macOS CI。
 - 本机 Windows 没有可用 clang / Xcode；源码契约通过不替代原生执行、
   Apple 编译、候选包身份校验和 iOS 16 真机验收。
-- 新候选构建结果与包身份待 CI 完成后记录；不拿旧包充当本轮候选。
+- 第一批提交 `8081ab0eaa300220721ea8e5f14a7a2c1c74667b`：
+  公共 CI `42145618671` 的原生回归、完整 TIPA 编译、包身份检查及上传均通过。
+  包为 `Dopamine_3.0.7-8081ab0e_roothide.tipa`，SHA-256 为
+  `8138f56b9eb948d90e45fcbea244e3810a42570faeaf3f0ead2aa3f45382f845`。
+  此包只包含底层第一批，不包含下述 UI 第二阶段。
+
+## 第二阶段：设置与关于页顶部回弹
+
+用户在底层第一批提交后追加此 UI 要求；本阶段单独修改，不改变低电量计划页、
+越狱流程、产品版本、菜单内容或授权边界。
+
+### 对照结果与修复范围
+
+- 再次读取上述固定 SHA 的官方及 ZQBB `DOPSListController`、
+  `DOSettingsController`、`DOCreditsViewController`。两套上游均保留
+  Preferences 列表、原有 modal frame 与标题 section，不含 RC9 玻璃布局逻辑。
+- 正常低电量页在首次显示前使用 `contentInsetAdjustmentBehavior = Never`，
+  不捕获过渡期间的 `adjustedContentInset`，普通布局只更新实际改变的几何，
+  不逐帧重排所有玻璃视图。
+- 设置页原先在首次 layout 把 `adjustedContentInset` 存为永久 raw inset；
+  关于页却仍自动调整。现在将 Never、原生 bounce、非估算行高策略集中在
+  二者共同的 `DOPSListController.viewDidLoad`，保留 raw top inset 与原有标题，
+  仅在值改变时设置 `safeAreaInsets.bottom + 24`。不写滚动位置、
+  不禁用回弹、不添加新的滚动回调。
+- 设置页与关于页之前在每次 backdrop geometry pass 对所有 section 执行
+  `sendSubviewToBack`；多个 section 会相互改写顺序。这些操作现在仅发生在
+  玻璃创建及 cell 显示时，不在稳态布局中重复。
+- 关于页不再在每次 layout 无条件重建玻璃滤镜、重设相同 frame、
+  递归扫描 hairline；`willDisplayCell` 不再排队执行 section 刷新。
+  主题及页面显示仍可更新材质，临时空几何保留上一帧，与正常低电量页一致。
+- 两页表格统一裁剪；保留玻璃在文字后方的已验证策略，不改为覆盖文字的
+  前景玻璃，不改导航过渡和 viewport 高度。
+
+上述是可从源码确认的布局干扰风险及其最小修正，不是已经复现并证明
+全部真机症状的结论。Windows 无 UIKit，不能把源码断言或编译通过写成
+“顶部回弹已真机验证”。
+
+### 回归与真机验收
+
+- `tests/test_rc9_ui_lifecycle.py` 增加共同 inset 初始化、无稳态玻璃重排、
+  关于页无异步刷新/逐次材质重建、相同 frame 不重复赋值的源码约束。
+- UI 修改后本机 `unittest discover -s tests` 共 106 项通过，
+  管理器包测试 7 项通过，`git diff --check` 通过；
+  这些结果不替代此 UI 提交的 Apple 编译或设备运行。
+- 真机需分别检查设置和关于：初次进入，连续上拉到顶再下拉释放，
+  快速反向拖动，滑到底再回顶，进入子页返回，前后台切换。
+- 验收应确认顶部自然回弹、文字不糊、底部不截断、返回按钮正常，
+  低电量页行为不退化；iPad Pro 第四代 iOS 16.5 为重点复测设备。

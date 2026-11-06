@@ -214,21 +214,39 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
                         "self.tableView.alwaysBounceVertical = YES;"):
             self.assertIn(setting, load)
 
-    def test_settings_keep_header_inset_and_add_safe_area_bottom_scroll_room(self):
-        settings = self.settings_method("- (void)customGlassRefreshSettingsScrollInsets")
-        self.assertIn("if (!self.customGlassInsetsConfigured)", settings)
-        self.assertIn("insets = tableView.adjustedContentInset;", settings)
-        self.assertIn("tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;",
-                      settings)
-        self.assertIn("insets.bottom = self.view.safeAreaInsets.bottom + 24.0;", settings)
-        self.assertNotIn("insets.top =", settings)
-        self.assertIn("tableView.automaticallyAdjustsScrollIndicatorInsets = NO;", settings)
-        self.assertIn("tableView.scrollIndicatorInsets = insets;", settings)
-        layout = self.settings_method("- (void)viewDidLayoutSubviews")
-        self.assertIn("[self customGlassRefreshSettingsScrollInsets];", layout)
+    def test_both_preferences_pages_share_early_manual_inset_policy(self):
+        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
+        load = extract(base, "- (void)viewDidLoad")
+        self.assertIn(
+            "_table.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;",
+            load)
+        self.assertIn("_table.automaticallyAdjustsScrollIndicatorInsets = NO;", load)
+        self.assertNotIn("= _table.adjustedContentInset", load)
+        layout = extract(base, "- (void)viewDidLayoutSubviews")
+        self.assertIn("UIEdgeInsets insets = _table.contentInset;", layout)
+        self.assertIn("insets.bottom = self.view.safeAreaInsets.bottom + 24.0;", layout)
+        self.assertNotIn("insets.top =", layout)
+        self.assertNotIn("adjustedContentInset", layout)
+        for assignment, guard in (
+            ("_table.contentInset = insets;",
+             "if (!UIEdgeInsetsEqualToEdgeInsets(_table.contentInset, insets))"),
+            ("_table.scrollIndicatorInsets = insets;",
+             "if (!UIEdgeInsetsEqualToEdgeInsets(_table.scrollIndicatorInsets, insets))"),
+        ):
+            self.assertIn(assignment, layout)
+            self.assertIn(guard, layout)
+            self.assertLess(layout.index(guard), layout.index(assignment))
+        for name in ("DOSettingsController", "DOCreditsViewController"):
+            header = source(f"Application/Dopamine/UI/Settings/{name}.h")
+            self.assertIn(f"@interface {name} : DOPSListController", header)
+            page = source(f"Application/Dopamine/UI/Settings/{name}.m")
+            self.assertNotIn("customGlassInsetsConfigured", page)
+            self.assertNotIn("adjustedContentInset", page)
+            self.assertNotIn("contentInsetAdjustmentBehavior", page)
 
     def test_preferences_heights_are_resolved_before_scrolling_and_bounce_is_not_disabled(self):
-        load = self.settings_method("- (void)viewDidLoad")
+        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
+        load = extract(base, "- (void)viewDidLoad")
         for setting in ("_table.estimatedRowHeight = 0;",
                         "_table.estimatedSectionHeaderHeight = 0;",
                         "_table.estimatedSectionFooterHeight = 0;",
@@ -247,6 +265,9 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertIn("if (!CGRectEqualToRect(glass.frame, glassFrame))", backdrops)
         self.assertIn("[glass reloadMaterial];", backdrops)
         self.assertIn("[tableView sendSubviewToBack:glass];", backdrops)
+        created = extract(backdrops, "if (created)")
+        self.assertIn("[tableView sendSubviewToBack:glass];", created)
+        self.assertEqual(backdrops.count("[tableView sendSubviewToBack:glass];"), 1)
         self.assertEqual(backdrops.count("[glass reloadMaterial];"), 1)
         refresh = self.settings_method("- (void)customGlassRefreshPageAppearance")
         self.assertIn("[glass reloadMaterial];", refresh)
@@ -285,6 +306,42 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertIn("if (!CGRectEqualToRect(_table.frame, tableFrame))", layout)
         self.assertIn("_table.frame = tableFrame;", layout)
         self.assertNotIn("contentOffset", layout)
+
+    def test_about_scroll_layout_does_not_queue_material_or_hairline_work(self):
+        text = source("Application/Dopamine/UI/Settings/DOCreditsViewController.m")
+        layout = extract(text, "- (void)viewDidLayoutSubviews")
+        self.assertIn("[super viewDidLayoutSubviews];", layout)
+        self.assertIn("[self customGlassRefreshSectionBackdrops];", layout)
+        for operation in ("customGlassCleanupTableHairlines", "reloadMaterial",
+                          "reloadData", "layoutIfNeeded", "contentOffset"):
+            self.assertNotIn(operation, layout)
+        display = extract(
+            text, "- (void)tableView:(UITableView *)tableView willDisplayCell:")
+        self.assertIn("[self customGlassStyleVisibleCell:cell atIndexPath:indexPath];",
+                      display)
+        self.assertIn("[tableView sendSubviewToBack:glass];", display)
+        self.assertNotIn("dispatch_async", display)
+        self.assertNotIn("customGlassRefreshSectionBackdrops", display)
+        self.assertNotIn("scrollViewDidScroll:", text)
+
+    def test_about_glass_keeps_geometry_and_only_reloads_when_material_changes(self):
+        text = source("Application/Dopamine/UI/Settings/DOCreditsViewController.m")
+        backdrops = extract(text, "- (void)customGlassRefreshSectionBackdrops")
+        self.assertLess(backdrops.index("[activeKeys addObject:key]"),
+                        backdrops.index("if (CGRectIsEmpty(sectionRect)"))
+        self.assertIn("if (!CGRectEqualToRect(glass.frame, glassFrame))", backdrops)
+        self.assertIn("[tableView insertSubview:glass atIndex:0];", backdrops)
+        self.assertIn("BOOL materialChanged = created || glass.preferredCornerRadius != radius;",
+                      backdrops)
+        self.assertIn("if (materialChanged)\n            [glass reloadMaterial];", backdrops)
+        self.assertIn("if (created)\n            [tableView sendSubviewToBack:glass];",
+                      backdrops)
+        self.assertEqual(backdrops.count("[glass reloadMaterial];"), 1)
+        self.assertEqual(backdrops.count("[tableView sendSubviewToBack:glass];"), 1)
+        refresh = extract(text, "- (void)customGlassRefreshPageAppearance")
+        self.assertIn("[glass reloadMaterial];", refresh)
+        appearance = extract(text, "- (void)customGlassInstallPageAppearance")
+        self.assertIn("tableView.clipsToBounds = YES;", appearance)
 
 
 if __name__ == "__main__":
