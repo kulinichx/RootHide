@@ -422,8 +422,6 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 @interface DOSettingsController ()
 
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, DOCustomLiquidGlassView *> *customGlassSectionBackdropViews;
-@property(nonatomic, assign) CGFloat customGlassLastContentOffsetY;
-@property(nonatomic, assign) BOOL customGlassHasContentOffset;
 @property(nonatomic, assign) BOOL customGlassInsetsConfigured;
 
 - (void)customGlassRefreshSettingsScrollInsets;
@@ -644,13 +642,17 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
                 kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
                 kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
             self.customGlassSectionBackdropViews[key] = glass;
+            [tableView insertSubview:glass atIndex:0];
             created = YES;
         }
 
         if (glass.hidden) glass.hidden = NO;
-        DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);
+        CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);
+        if (!CGRectEqualToRect(glass.frame, glassFrame))
+            glass.frame = glassFrame;
         if (created) {
             [glass reloadMaterial];
+            [tableView sendSubviewToBack:glass];
         }
     }
 
@@ -658,9 +660,6 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
         if (![activeKeys containsObject:key])
             glass.hidden = YES;
     }];
-
-    self.customGlassLastContentOffsetY = tableView.contentOffset.y;
-    self.customGlassHasContentOffset = YES;
 }
 
 - (void)customGlassApplyPageAppearance
@@ -797,29 +796,6 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
-}
-
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView
-{
-    if (scrollView != _table || !DORHSupporterIsVerified())
-        return;
-
-    CGFloat offsetY = scrollView.contentOffset.y;
-    if (!self.customGlassHasContentOffset) {
-        [self customGlassRefreshSectionBackdrops];
-        return;
-    }
-
-    CGFloat offsetDelta = offsetY - self.customGlassLastContentOffsetY;
-    if (offsetDelta == 0.0)
-        return;
-
-    for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues) {
-        CGRect frame = glass.frame;
-        frame.origin.y -= offsetDelta;
-        glass.frame = frame;
-    }
-    self.customGlassLastContentOffsetY = offsetY;
 }
 
 - (void)viewDidLayoutSubviews

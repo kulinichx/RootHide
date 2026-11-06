@@ -242,7 +242,9 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
         self.assertLess(backdrops.index("[activeKeys addObject:key]"),
                         backdrops.index("if (CGRectIsEmpty(sectionRect)"))
-        self.assertIn("DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);", backdrops)
+        self.assertIn("[tableView insertSubview:glass atIndex:0];", backdrops)
+        self.assertIn("CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);", backdrops)
+        self.assertIn("if (!CGRectEqualToRect(glass.frame, glassFrame))", backdrops)
         created = extract(backdrops, "if (created)")
         self.assertIn("[glass reloadMaterial];", created)
         self.assertEqual(backdrops.count("[glass reloadMaterial];"),
@@ -254,26 +256,20 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertNotIn("reloadData", layout)
         self.assertNotIn("contentOffset", layout)
 
-    def test_settings_glass_stays_behind_reused_cells_and_tracks_scroll_geometry(self):
+    def test_settings_glass_uses_native_table_scrolling_like_schedule_page(self):
         settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
-        background = extract(settings, "static UIView *DOCustomGlassSettingsBackground")
-        place = extract(settings, "static void DOPlaceCustomGlassSettingsSection")
+        schedule = source("Application/Dopamine/UI/Settings/DOLowPowerScheduleController.m")
         settings_backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
-        scroll = self.settings_method("- (void)scrollViewDidScroll:")
-        self.assertIn("tableView.backgroundView = background;", background)
-        self.assertIn("background.clipsToBounds = YES;", background)
-        self.assertIn("[background addSubview:glass];", place)
-        self.assertIn("[tableView convertRect:glassRect toView:background]", place)
-        self.assertIn("DOPlaceCustomGlassSettingsSection(tableView, glass, sectionRect);",
+        schedule_backdrops = extract(schedule, "- (void)refreshScheduleGlassFrames")
+        self.assertIn("[tableView insertSubview:glass atIndex:0];", settings_backdrops)
+        self.assertIn("[tableView sendSubviewToBack:glass];", settings_backdrops)
+        self.assertIn("CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);",
                       settings_backdrops)
-        self.assertNotIn("[tableView insertSubview:glass", settings_backdrops)
-        self.assertIn("if (scrollView != _table || !DORHSupporterIsVerified())", scroll)
-        self.assertIn("if (!self.customGlassHasContentOffset)", scroll)
-        self.assertIn("CGFloat offsetDelta = offsetY - self.customGlassLastContentOffsetY;", scroll)
-        self.assertIn("frame.origin.y -= offsetDelta;", scroll)
-        self.assertNotIn("rectForRowAtIndexPath", scroll)
-        self.assertNotIn("reloadMaterial", scroll)
-        self.assertNotIn("scrollView.contentOffset =", scroll)
+        self.assertIn("[self.tableView insertSubview:glass atIndex:0];", schedule_backdrops)
+        self.assertNotIn("DOPlaceCustomGlassSettingsSection", settings_backdrops)
+        self.assertNotIn("scrollViewDidScroll:", settings)
+        self.assertNotIn("customGlassLastContentOffsetY", settings)
+        self.assertNotIn("customGlassHasContentOffset", settings)
 
         settings_display = self.settings_method(
             "- (void)tableView:(UITableView *)tableView willDisplayCell:")
