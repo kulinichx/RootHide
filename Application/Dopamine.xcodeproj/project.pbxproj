@@ -17,6 +17,7 @@
 		042479A32B66916B0082581B /* DOSettingsController.m in Sources */ = {isa = PBXBuildFile; fileRef = 0424796C2B66916B0082581B /* DOSettingsController.m */; };
 		9C9000012026110500000001 /* DOLowPowerScheduleController.m in Sources */ = {isa = PBXBuildFile; fileRef = 9C9000012026110500000002 /* DOLowPowerScheduleController.m */; };
 		9C9000022026110600000001 /* DOEnvironmentManager+RCLowPowerSchedule.m in Sources */ = {isa = PBXBuildFile; fileRef = 9C9000022026110600000002 /* DOEnvironmentManager+RCLowPowerSchedule.m */; };
+		9C9000032026110600000001 /* DOEnvironmentManager+RCFakeMounts.m in Sources */ = {isa = PBXBuildFile; fileRef = 9C9000032026110600000002 /* DOEnvironmentManager+RCFakeMounts.m */; };
 		042479A42B66916B0082581B /* Credits.plist in Resources */ = {isa = PBXBuildFile; fileRef = 0424796F2B66916B0082581B /* Credits.plist */; };
 		042479A52B66916B0082581B /* DOCreditsCell.m in Sources */ = {isa = PBXBuildFile; fileRef = 042479732B66916B0082581B /* DOCreditsCell.m */; };
 		042479A62B66916B0082581B /* DOHeaderCell.m in Sources */ = {isa = PBXBuildFile; fileRef = 042479752B66916B0082581B /* DOHeaderCell.m */; };
@@ -266,6 +267,8 @@
 		9C9000012026110500000003 /* DOLowPowerScheduleController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DOLowPowerScheduleController.h; sourceTree = "<group>"; };
 		9C9000022026110600000002 /* DOEnvironmentManager+RCLowPowerSchedule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "DOEnvironmentManager+RCLowPowerSchedule.m"; sourceTree = "<group>"; };
 		9C9000022026110600000003 /* DOEnvironmentManager+RCLowPowerSchedule.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "DOEnvironmentManager+RCLowPowerSchedule.h"; sourceTree = "<group>"; };
+		9C9000032026110600000002 /* DOEnvironmentManager+RCFakeMounts.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "DOEnvironmentManager+RCFakeMounts.m"; sourceTree = "<group>"; };
+		9C9000032026110600000003 /* DOEnvironmentManager+RCFakeMounts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "DOEnvironmentManager+RCFakeMounts.h"; sourceTree = "<group>"; };
 		0424796D2B66916B0082581B /* DOPSListController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DOPSListController.h; sourceTree = "<group>"; };
 		0424796E2B66916B0082581B /* DOCreditsViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DOCreditsViewController.h; sourceTree = "<group>"; };
 		0424796F2B66916B0082581B /* Credits.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Credits.plist; sourceTree = "<group>"; };
@@ -789,6 +792,8 @@
 				8C029F5F2B4E25350071DE58 /* DOEnvironmentManager.m */,
 				9C9000022026110600000003 /* DOEnvironmentManager+RCLowPowerSchedule.h */,
 				9C9000022026110600000002 /* DOEnvironmentManager+RCLowPowerSchedule.m */,
+				9C9000032026110600000003 /* DOEnvironmentManager+RCFakeMounts.h */,
+				9C9000032026110600000002 /* DOEnvironmentManager+RCFakeMounts.m */,
 				8C4ABEBC2B52274300B43C9B /* DOPreferenceManager.h */,
 				8C4ABEBD2B52274300B43C9B /* DOPreferenceManager.m */,
 			);
@@ -1706,6 +1711,7 @@
 				04DD0B3D2B7C88210055DE4F /* DOLogCrashViewController.m in Sources */,
 				8C029F602B4E25350071DE58 /* DOEnvironmentManager.m in Sources */,
 				9C9000022026110600000001 /* DOEnvironmentManager+RCLowPowerSchedule.m in Sources */,
+				9C9000032026110600000001 /* DOEnvironmentManager+RCFakeMounts.m in Sources */,
 				04C246A12B73225800E17924 /* DODownloadViewController.m in Sources */,
 				042479B52B66916B0082581B /* DOLyricsLogItemView.m in Sources */,
 				8C029F4E2B4E1FF30071DE58 /* DOExploit.m in Sources */,

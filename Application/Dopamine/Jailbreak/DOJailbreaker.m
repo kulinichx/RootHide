@@ -7,6 +7,7 @@
 
 #import "DOJailbreaker.h"
 #import "DOEnvironmentManager.h"
+#import "DOEnvironmentManager+RCFakeMounts.h"
 #import "DOExploitManager.h"
 #import "DOUIManager.h"
 #import <sys/stat.h>

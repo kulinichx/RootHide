@@ -97,10 +97,6 @@ typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
 - (NSError * _Nullable)repairPackageManagers;
 - (NSError * _Nullable)repairPackageManagerWithBundleIdentifier:(NSString *)bundleIdentifier;
 - (NSError *)updateBootLogo;
-- (NSArray<NSString *> *)fakeMountPaths;
-- (BOOL)saveFakeMountPaths:(NSArray<NSString *> *)paths;
-- (int)setFakeMountPath:(NSString *)path mounted:(BOOL)mounted deleteMirror:(BOOL)deleteMirror;
-- (void)restoreFakeMounts;
 @end
 
 NS_ASSUME_NONNULL_END

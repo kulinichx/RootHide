@@ -13,6 +13,7 @@
 #import "DOPkgManagerPickerViewController.h"
 #import "DOHeaderCell.h"
 #import "DOEnvironmentManager.h"
+#import "DOEnvironmentManager+RCFakeMounts.h"
 #import "DOExploitManager.h"
 #import "DOPSListItemsController.h"
 #import "DOPSExploitListItemsController.h"

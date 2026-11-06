@@ -12,9 +12,17 @@
     {
       "role": "primary_roothide_baseline",
       "repository": "roothide/Dopamine-roothide",
-      "branch": "3.x",
-      "commit": "185a8514e76270e46fb94603f2cc8b0618e38ad6",
-      "source_version": "3.0.13"
+      "ref": "tag 30 / release 3.0.13-30",
+      "commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "source_version": "3.0.13",
+      "roothide_marker": "30",
+      "release_delta_from_previous_pinned_baseline": {
+        "previous_commit": "185a8514e76270e46fb94603f2cc8b0618e38ad6",
+        "changed_files": [
+          "BaseBin/_external/basebin/.version-roothide"
+        ],
+        "classification": "release_marker_only_no_runtime_source_delta"
+      }
     },
     {
       "role": "secondary_roothide_feature_reference",
@@ -50,6 +58,21 @@
       "Application/Dopamine/UI/Settings/DOCreditsViewController.m"
     ]
   },
+  "phase_two": {
+    "module": "Application/Dopamine/Jailbreak/DOEnvironmentManager+RCFakeMounts",
+    "reference_comparison": {
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77",
+      "finding": "Neither reference contains RC9's user-managed fake-mount path list or settings API. zqbb's internal fakelib mount is a separate boot and userspace-reboot mechanism."
+    },
+    "method_body_sha256": {
+      "- (NSString *)fakeMountConfigurationPath": "19a6c3e8f0fd9fc72edd5348043ab15cdc7514294fff64ff70c1791bad7a9b48",
+      "- (NSArray<NSString *> *)fakeMountPaths": "1659803566266721101acd5c753e14667be91c2c8022fcc2f6c33a7cd914897f",
+      "- (BOOL)saveFakeMountPaths:": "ab6cbefee8ad9f554297fb424228955cee5e947f018e47e1f502b8bcdfdce439",
+      "- (int)setFakeMountPath:": "a07fa14ccc7dd0114b6fc9a58105df655caa1d805ff334271a91645277c17dee",
+      "- (void)restoreFakeMounts": "1b3de3fb39ec55e14e20516121563ac136c7a88b3c25515f30d5c94cb7ce53c7"
+    }
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -75,6 +98,13 @@
       "classification": "rc9_and_zqbb_feature_overlap",
       "status": "pending_module_comparison",
       "evidence": "Existing behavior is preserved; no equivalence or extraction is claimed in phase one."
+    },
+    {
+      "id": "custom_fake_mounts",
+      "classification": "rc9_specific",
+      "status": "isolated_as_rc9_only",
+      "evidence": "The official and zqbb reference commits contain no user-managed path list or settings API; method bodies remain identical to the RC9 baseline.",
+      "distinction": "zqbb's internal fakelib mount is a boot and userspace-reboot mechanism, not the RC9 user-configured mount feature."
     },
     {
       "id": "custom_glass_and_ui",
