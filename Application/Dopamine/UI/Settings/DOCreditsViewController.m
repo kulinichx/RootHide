@@ -55,10 +55,10 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *label = (UILabel *)view;
-        CGFloat alpha = isHeader ? 0.74 : (label.font.pointSize >= 15.0 ? 0.96 : 0.84);
-        label.textColor = [self customGlassForegroundWithAlpha:alpha];
-        label.shadowColor = [UIColor colorWithWhite:0.0 alpha:(isHeader ? 0.10 : 0.14)];
-        label.shadowOffset = CGSizeMake(0.0, 0.35);
+        label.textColor = (isHeader || label.font.pointSize < 15.0) ?
+            UIColor.secondaryLabelColor : UIColor.labelColor;
+        label.shadowColor = nil;
+        label.shadowOffset = CGSizeZero;
     }
     else if ([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;
