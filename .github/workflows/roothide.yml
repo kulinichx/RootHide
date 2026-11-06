@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/health-audit-20261027
+      - codex/rc9-upstream-alignment-20261106
   workflow_dispatch:
     inputs:
       build_mode:

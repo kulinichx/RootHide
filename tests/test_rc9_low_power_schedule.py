@@ -3,6 +3,8 @@
 --native compiles the actual scheduler. It is not iOS device validation.
 """
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import re
 import shutil
@@ -18,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HEADER = "BaseBin/roothidehooks/RCLowPowerSchedule.h"
 RUNTIME = "BaseBin/roothidehooks/lowpowerschedule.m"
 CONTROLLER = "Application/Dopamine/UI/Settings/DOLowPowerScheduleController.m"
+APP_BRIDGE = "Application/Dopamine/Jailbreak/DOEnvironmentManager+RCLowPowerSchedule"
 
 
 class LowPowerScheduleContracts(unittest.TestCase):
@@ -92,13 +95,56 @@ class LowPowerScheduleContracts(unittest.TestCase):
         self.assertIn("NSFilePosixPermissions: @0600", header)
         self.assertIn("> 16384", header)
         self.assertNotIn("CFPreferencesSet", header)
-        environment = source("Application/Dopamine/Jailbreak/DOEnvironmentManager.m")
+        environment = source(APP_BRIDGE + ".m")
         save = extract(environment, "- (BOOL)saveLowPowerScheduleEnabled:")
         self.assertIn("!self.isJailbroken", save)
         self.assertIn("rcLowPowerConfigurationValid(configuration)", save)
         self.assertIn("runUnsandboxed:", save)
         self.assertIn("if (success) notify_post(RC_LOW_POWER_CHANGED)", save)
         self.assertNotIn("runAsRoot:", save)
+
+    def test_rc9_storage_bridge_is_separate_from_upstream_environment_manager(self):
+        for extension in (".h", ".m"):
+            environment = source("Application/Dopamine/Jailbreak/DOEnvironmentManager" + extension)
+            self.assertNotIn("lowPowerSchedule", environment)
+            self.assertNotIn("saveLowPowerSchedule", environment)
+            self.assertNotIn("RCLowPowerSchedule.h", environment)
+            bridge = source(APP_BRIDGE + extension)
+            self.assertIn("DOEnvironmentManager (RCLowPowerSchedule)", bridge)
+            for method in ("lowPowerScheduleConfiguration", "lowPowerScheduleStatus",
+                           "saveLowPowerScheduleEnabled:"):
+                self.assertEqual(bridge.count(method), 1)
+        bridge = source(APP_BRIDGE + ".m")
+        self.assertIn("#import <libjailbreak/jbroot.h>", bridge)
+        self.assertNotIn("setPowerMode:", bridge)
+        self.assertNotIn("NSTimer", bridge)
+        self.assertIn('#import "DOEnvironmentManager+RCLowPowerSchedule.h"', source(CONTROLLER))
+
+    def test_rc9_storage_bridge_has_one_app_target_source_entry(self):
+        project = source("Application/Dopamine.xcodeproj/project.pbxproj")
+        self.assertEqual(project.count("DOEnvironmentManager+RCLowPowerSchedule.m in Sources"), 2)
+        build_file = re.search(
+            r"(\w+) /\* DOEnvironmentManager\+RCLowPowerSchedule\.m in Sources \*/"
+            r" = \{isa = PBXBuildFile; fileRef = (\w+)", project)
+        self.assertIsNotNone(build_file)
+        build_id, file_id = build_file.groups()
+        self.assertEqual(project.count(build_id), 2)
+        self.assertEqual(project.count(file_id), 3)
+        source_phase = re.search(
+            r"/\* Begin PBXSourcesBuildPhase section \*/.*?"
+            r"8C029F602B4E25350071DE58 /\* DOEnvironmentManager\.m in Sources \*/"
+            r"(.*?)runOnlyForDeploymentPostprocessing", project, re.S)
+        self.assertIsNotNone(source_phase)
+        self.assertIn(build_id, source_phase.group(1))
+
+    def test_extracted_app_methods_match_pinned_pre_alignment_bodies(self):
+        manifest = json.loads(source("docs/rc9-upstream-alignment-20261106.json"))
+        bridge = source(APP_BRIDGE + ".m")
+        self.assertEqual(manifest["rc9"]["commit"],
+                         "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182")
+        for anchor, expected in manifest["phase_one"]["method_body_sha256"].items():
+            actual = hashlib.sha256(extract(bridge, anchor).encode("utf-8")).hexdigest()
+            self.assertEqual(actual, expected, anchor)
 
     def test_settings_page_is_wired_and_waits_for_runtime_ack(self):
         settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
@@ -400,6 +446,90 @@ int main(void) { @autoreleasepool {
 } return 0; }
 '''
 
+APP_BRIDGE_NATIVE = r'''
+#import <Foundation/Foundation.h>
+#include <assert.h>
+#include <notify.h>
+#include <stdio.h>
+#include <string.h>
+#import "DOEnvironmentManager+RCLowPowerSchedule.h"
+
+static NSString *testRoot;
+static BOOL testJailbroken;
+static NSUInteger sandboxCalls, notifications;
+
+char * _Nullable get_jbroot(void) {
+    return (char *)testRoot.fileSystemRepresentation;
+}
+static uint32_t testNotifyPost(const char *name) {
+    assert(strcmp(name, RC_LOW_POWER_CHANGED) == 0);
+    notifications++;
+    return NOTIFY_STATUS_OK;
+}
+
+// Only the existing environment boundary is mocked; compile the real category.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wincomplete-implementation"
+@implementation DOEnvironmentManager
+- (BOOL)isJailbroken { return testJailbroken; }
+- (void)runUnsandboxed:(void (^)(void))block { sandboxCalls++; block(); }
+@end
+#pragma clang diagnostic pop
+
+#define notify_post testNotifyPost
+#include "DOEnvironmentManager+RCLowPowerSchedule.m"
+#undef notify_post
+
+int main(void) { @autoreleasepool {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *temporary = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    testRoot = [temporary stringByAppendingPathComponent:@".jbroot-test"];
+    DOEnvironmentManager *environment = [DOEnvironmentManager new];
+    assert([[environment lowPowerScheduleConfiguration] isEqual:rcLowPowerDefaultConfiguration()]);
+    assert([[environment lowPowerScheduleStatus] isEqual:@{}]);
+
+    NSError *error = nil;
+    NSUInteger before = sandboxCalls;
+    assert(![environment saveLowPowerScheduleEnabled:YES startMinute:0 endMinute:360 error:&error]);
+    assert(error.code == EPERM && sandboxCalls == before && notifications == 0);
+    testJailbroken = YES;
+    for (NSArray *pair in @[@[@(-1), @360], @[@0, @1440], @[@360, @360]]) {
+        error = nil;
+        assert(![environment saveLowPowerScheduleEnabled:YES startMinute:[pair[0] integerValue]
+                                             endMinute:[pair[1] integerValue] error:&error]);
+        assert(error.code == EINVAL && sandboxCalls == before && notifications == 0);
+    }
+    assert(![environment saveLowPowerScheduleEnabled:YES startMinute:1 endMinute:1 error:NULL]);
+    error = nil;
+    assert([environment saveLowPowerScheduleEnabled:YES startMinute:1380 endMinute:360 error:&error]);
+    assert(!error && notifications == 1);
+    NSDictionary *saved = [environment lowPowerScheduleConfiguration];
+    assert(rcLowPowerConfigurationValid(saved));
+    assert([saved[@"Enabled"] boolValue] && [saved[@"StartMinute"] integerValue] == 1380);
+    assert([saved[@"EndMinute"] integerValue] == 360);
+    assert([environment saveLowPowerScheduleEnabled:NO startMinute:1380 endMinute:360 error:NULL]);
+    NSDictionary *disabled = [environment lowPowerScheduleConfiguration];
+    assert(![disabled[@"Enabled"] boolValue] && notifications == 2);
+    assert(![disabled[@"Revision"] isEqual:saved[@"Revision"]]);
+    NSDictionary *status = @{@"State": @"scheduled", @"Revision": disabled[@"Revision"]};
+    assert(rcLowPowerWriteDictionary(status, rcLowPowerStatusPath(testRoot), nil));
+    assert([[environment lowPowerScheduleStatus] isEqual:status]);
+    NSDictionary *attributes = [fm attributesOfItemAtPath:rcLowPowerConfigurationPath(testRoot) error:nil];
+    assert([attributes[NSFilePosixPermissions] unsignedIntegerValue] == 0600);
+
+    NSString *blocker = [temporary stringByAppendingPathComponent:@"blocker"];
+    assert([@"x" writeToFile:blocker atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+    testRoot = blocker;
+    error = nil;
+    assert(![environment saveLowPowerScheduleEnabled:YES startMinute:0 endMinute:360 error:&error]);
+    assert(error && notifications == 2);
+    assert(![environment saveLowPowerScheduleEnabled:YES startMinute:0 endMinute:360 error:NULL]);
+    assert(notifications == 2);
+    assert([fm removeItemAtPath:temporary error:nil]);
+    puts("PASS: actual RC9 app category, defaults, jailbreak gate, invalid inputs, atomic save, fresh revision, status read, permissions and notification-on-success only");
+} return 0; }
+'''
+
 
 def native_tests():
     clang = shutil.which("clang")
@@ -416,6 +546,21 @@ def native_tests():
             "-I", str(ROOT / "BaseBin/roothidehooks"), str(path), "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
+        includes = Path(directory) / "libjailbreak"
+        includes.mkdir()
+        shutil.copyfile(ROOT / "BaseBin/libjailbreak/src/jbroot.h", includes / "jbroot.h")
+        bridge = Path(directory) / "app-bridge.m"
+        bridge.write_text(
+            '#import "' + str(ROOT / HEADER) + '"\n' + APP_BRIDGE_NATIVE, encoding="utf-8")
+        bridge_binary = Path(directory) / "app-bridge"
+        subprocess.run([
+            clang, "-fobjc-arc", "-fblocks", "-framework", "Foundation",
+            "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter",
+            "-O1", "-g", "-fsanitize=address,undefined",
+            "-I", directory, "-I", str(ROOT / "Application/Dopamine/Jailbreak"),
+            str(bridge), "-o", str(bridge_binary),
+        ], check=True)
+        subprocess.run([str(bridge_binary)], check=True)
 
 
 if __name__ == "__main__":

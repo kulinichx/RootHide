@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-06",
+  "scope": "Phase one: isolate the RC9 app-side low-power storage bridge without changing behavior.",
+  "rc9": {
+    "commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
+    "product_version": "3.0.7",
+    "minimum_ios": "16.0",
+    "device_acceptance": "pending"
+  },
+  "references": [
+    {
+      "role": "primary_roothide_baseline",
+      "repository": "roothide/Dopamine-roothide",
+      "branch": "3.x",
+      "commit": "185a8514e76270e46fb94603f2cc8b0618e38ad6",
+      "source_version": "3.0.13"
+    },
+    {
+      "role": "secondary_roothide_feature_reference",
+      "repository": "w2599/Dopamine",
+      "branch": "3.x_roothide_AI_review_fix",
+      "commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77",
+      "source_version": "3.0.13"
+    }
+  ],
+  "excluded_whole_tree_baselines": [
+    {
+      "repository": "w2599/Dopamine",
+      "ref": "3.0.13",
+      "commit": "6522285754fd9c4574e9afc352dc31fe548567fc",
+      "reason": "Not the RootHide comparison branch; do not replace the RootHide runtime tree with it."
+    }
+  ],
+  "phase_one": {
+    "module": "Application/Dopamine/Jailbreak/DOEnvironmentManager+RCLowPowerSchedule",
+    "method_body_sha256": {
+      "- (NSDictionary *)lowPowerScheduleConfiguration": "c3ef1312d88ff8ed975772b7ee908222f45513e759fd961d102f71694f78876e",
+      "- (NSDictionary *)lowPowerScheduleStatus": "18ac169781b21aa651c89b2014a76abcaeaa3b958f906008e00286172f5cdd5d",
+      "- (BOOL)saveLowPowerScheduleEnabled:": "c4f4eb6a656d849d42e4ed50b557f7efa054945e35c0394f91c25e6590afbbfe"
+    },
+    "unchanged_runtime_files": [
+      "BaseBin/roothidehooks/RCLowPowerSchedule.h",
+      "BaseBin/roothidehooks/lowpowerschedule.m",
+      "BaseBin/roothidehooks/springboard.x",
+      "BaseBin/roothidehooks/main.x"
+    ],
+    "unchanged_ui_files": [
+      "Application/Dopamine/UI/Settings/DOSettingsController.m",
+      "Application/Dopamine/UI/Settings/DOCreditsViewController.m"
+    ]
+  },
+  "ledger": [
+    {
+      "id": "low_power_app_bridge",
+      "classification": "rc9_specific",
+      "status": "isolated_in_phase_one",
+      "evidence": "The three app storage methods have unchanged bodies; only their compilation unit and UI import changed."
+    },
+    {
+      "id": "upstream_313_five_scoped_fixes",
+      "classification": "already_integrated",
+      "status": "preserved",
+      "evidence": "8081ab0eaa300220721ea8e5f14a7a2c1c74667b; docs/rc9-health-audit-20261106.md",
+      "scope": [
+        "logd_helper tweak exclusion",
+        "proc_vwritebuf recursion",
+        "killall buffer sizing",
+        "old arm64e executable type check",
+        "JBServer argument, DATA and FD bounds"
+      ]
+    },
+    {
+      "id": "mount_and_trust_preferences",
+      "classification": "rc9_and_zqbb_feature_overlap",
+      "status": "pending_module_comparison",
+      "evidence": "Existing behavior is preserved; no equivalence or extraction is claimed in phase one."
+    },
+    {
+      "id": "custom_glass_and_ui",
+      "classification": "rc9_specific",
+      "status": "preserved_not_refactored",
+      "evidence": "Keep the existing candidate layout pending device acceptance; no new bounce or rendering changes."
+    },
+    {
+      "id": "trustcache_kernel_reader_lifetime",
+      "classification": "pending_evidence",
+      "status": "open"
+    },
+    {
+      "id": "generated_dyld_and_live_basebin_recovery",
+      "classification": "pending_evidence",
+      "status": "open"
+    },
+    {
+      "id": "forkfix_and_post_fork_locks",
+      "classification": "pending_module_comparison",
+      "status": "open"
+    }
+  ]
+}

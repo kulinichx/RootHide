@@ -1,5 +1,5 @@
 #import "DOLowPowerScheduleController.h"
-#import "DOEnvironmentManager.h"
+#import "DOEnvironmentManager+RCLowPowerSchedule.h"
 #import "DOUIManager.h"
 #import "../DOSupporterLicense.h"
 #import "../../../../BaseBin/roothidehooks/RCLowPowerSchedule.h"
