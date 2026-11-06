@@ -652,8 +652,8 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
             glass.frame = glassFrame;
         if (created) {
             [glass reloadMaterial];
-            [tableView sendSubviewToBack:glass];
         }
+        [tableView sendSubviewToBack:glass];
     }
 
     [self.customGlassSectionBackdropViews enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, DOCustomLiquidGlassView *glass, BOOL *stop) {
@@ -796,6 +796,10 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
+    if (DORHSupporterIsVerified()) {
+        for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
+            [tableView sendSubviewToBack:glass];
+    }
 }
 
 - (void)viewDidLayoutSubviews

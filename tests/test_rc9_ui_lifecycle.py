@@ -245,10 +245,9 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         self.assertIn("[tableView insertSubview:glass atIndex:0];", backdrops)
         self.assertIn("CGRect glassFrame = CGRectInset(sectionRect, 1.0, 0.5);", backdrops)
         self.assertIn("if (!CGRectEqualToRect(glass.frame, glassFrame))", backdrops)
-        created = extract(backdrops, "if (created)")
-        self.assertIn("[glass reloadMaterial];", created)
-        self.assertEqual(backdrops.count("[glass reloadMaterial];"),
-                         created.count("[glass reloadMaterial];"))
+        self.assertIn("[glass reloadMaterial];", backdrops)
+        self.assertIn("[tableView sendSubviewToBack:glass];", backdrops)
+        self.assertEqual(backdrops.count("[glass reloadMaterial];"), 1)
         refresh = self.settings_method("- (void)customGlassRefreshPageAppearance")
         self.assertIn("[glass reloadMaterial];", refresh)
         layout = self.settings_method("- (void)viewDidLayoutSubviews")
@@ -274,6 +273,7 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         settings_display = self.settings_method(
             "- (void)tableView:(UITableView *)tableView willDisplayCell:")
         self.assertIn("[self customGlassStyleVisibleCell:cell atIndexPath:indexPath];", settings_display)
+        self.assertIn("[tableView sendSubviewToBack:glass];", settings_display)
         self.assertNotIn("dispatch_async", settings_display)
 
         layout = self.settings_method("- (void)viewDidLayoutSubviews")
