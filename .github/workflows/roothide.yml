@@ -101,6 +101,8 @@ jobs:
           python3 tests/test_rc9_update.py --native
           python3 tests/test_rc9_snapshots.py --native
           python3 tests/test_rc9_low_power_schedule.py --native
+          python3 tests/test_rc9_upstream_313.py --native
+          python3 tests/test_rc9_ipc_dispatch.py --native
 
       - name: Cache Theos
         id: cache-theos

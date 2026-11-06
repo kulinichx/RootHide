@@ -8,6 +8,8 @@
 #include "signatures.h"
 #include "jbserver_domains.h"
 
+#define JBSERVER_MAX_ARGS 8
+
 typedef enum {
     JBS_TYPE_BOOL,
 	JBS_TYPE_UINT64,

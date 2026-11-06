@@ -40,7 +40,7 @@ bool macho_is_mappable(MachO *macho)
 
 	cpu_type_t cputype = header->cputype;
 	cpu_subtype_t cpusubtype = header->cpusubtype;
-	bool isLibrary = (header->filetype == MH_EXECUTE);
+	bool isLibrary = (header->filetype != MH_EXECUTE);
 
 	if (cputype != CPU_TYPE_ARM64) return false;
 

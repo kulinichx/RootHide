@@ -201,7 +201,7 @@ int proc_vwritebuf(uint64_t proc, const void *addr, const void *indata, size_t d
 	if (!pmap) return -1;
 	uint64_t ttep = kread_ptr(pmap + koffsetof(pmap, ttep));
 	if (!ttep) return -1;
-	return proc_vwritebuf(ttep, addr, indata, datalen);
+	return vwritebuf(ttep, addr, indata, datalen);
 }
 
 // Convenience Wrappers
