@@ -19,17 +19,6 @@
     
     [_table setSeparatorColor:[UIColor clearColor]];
     [_table setBackgroundColor:[UIColor clearColor]];
-    // Configure before the first modal layout, like the schedule editor.
-    // Capturing adjustedContentInset during a transition freezes temporary
-    // navigation/safe-area compensation into the list's resting position.
-    _table.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-    if (@available(iOS 13.0, *))
-        _table.automaticallyAdjustsScrollIndicatorInsets = NO;
-    _table.bounces = YES;
-    _table.alwaysBounceVertical = YES;
-    _table.estimatedRowHeight = 0;
-    _table.estimatedSectionHeaderHeight = 0;
-    _table.estimatedSectionFooterHeight = 0;
     [DOPSListController setupViewControllerStyle:self];
 }
 
@@ -63,14 +52,12 @@
     if (!CGRectEqualToRect(_table.frame, tableFrame))
         _table.frame = tableFrame;
 
-    // Leave Preferences' raw top inset and header geometry intact. Only the
-    // bottom padding belongs to RC9; never move the scroll position in a bounce.
+    // Keep UIKit's automatic top safe-area adjustment for Preferences lists.
+    // The raw 24pt bottom inset adds scroll room; UIKit adds the device safe area.
     UIEdgeInsets insets = _table.contentInset;
-    insets.bottom = self.view.safeAreaInsets.bottom + 24.0;
+    insets.bottom = 24.0;
     if (!UIEdgeInsetsEqualToEdgeInsets(_table.contentInset, insets))
         _table.contentInset = insets;
-    if (!UIEdgeInsetsEqualToEdgeInsets(_table.scrollIndicatorInsets, insets))
-        _table.scrollIndicatorInsets = insets;
 }
 
 #pragma mark - Status Bar

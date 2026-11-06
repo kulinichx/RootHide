@@ -214,28 +214,21 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
                         "self.tableView.alwaysBounceVertical = YES;"):
             self.assertIn(setting, load)
 
-    def test_both_preferences_pages_share_early_manual_inset_policy(self):
+    def test_preferences_pages_keep_native_top_insets_and_bottom_scroll_room(self):
         base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
         load = extract(base, "- (void)viewDidLoad")
-        self.assertIn(
-            "_table.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;",
-            load)
-        self.assertIn("_table.automaticallyAdjustsScrollIndicatorInsets = NO;", load)
-        self.assertNotIn("= _table.adjustedContentInset", load)
+        self.assertNotIn("contentInsetAdjustmentBehavior", load)
+        self.assertNotIn("automaticallyAdjustsScrollIndicatorInsets", load)
         layout = extract(base, "- (void)viewDidLayoutSubviews")
         self.assertIn("UIEdgeInsets insets = _table.contentInset;", layout)
-        self.assertIn("insets.bottom = self.view.safeAreaInsets.bottom + 24.0;", layout)
+        self.assertIn("insets.bottom = 24.0;", layout)
         self.assertNotIn("insets.top =", layout)
-        self.assertNotIn("adjustedContentInset", layout)
-        for assignment, guard in (
-            ("_table.contentInset = insets;",
-             "if (!UIEdgeInsetsEqualToEdgeInsets(_table.contentInset, insets))"),
-            ("_table.scrollIndicatorInsets = insets;",
-             "if (!UIEdgeInsetsEqualToEdgeInsets(_table.scrollIndicatorInsets, insets))"),
-        ):
-            self.assertIn(assignment, layout)
-            self.assertIn(guard, layout)
-            self.assertLess(layout.index(guard), layout.index(assignment))
+        self.assertNotIn("safeAreaInsets", layout)
+        self.assertNotIn("scrollIndicatorInsets", layout)
+        self.assertIn("_table.contentInset = insets;", layout)
+        self.assertIn(
+            "if (!UIEdgeInsetsEqualToEdgeInsets(_table.contentInset, insets))",
+            layout)
         for name in ("DOSettingsController", "DOCreditsViewController"):
             header = source(f"Application/Dopamine/UI/Settings/{name}.h")
             self.assertIn(f"@interface {name} : DOPSListController", header)
@@ -244,15 +237,15 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
             self.assertNotIn("adjustedContentInset", page)
             self.assertNotIn("contentInsetAdjustmentBehavior", page)
 
-    def test_preferences_heights_are_resolved_before_scrolling_and_bounce_is_not_disabled(self):
+    def test_preferences_keeps_native_height_estimation_and_bounce_policy(self):
         base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
         load = extract(base, "- (void)viewDidLoad")
-        for setting in ("_table.estimatedRowHeight = 0;",
-                        "_table.estimatedSectionHeaderHeight = 0;",
-                        "_table.estimatedSectionFooterHeight = 0;",
-                        "_table.bounces = YES;",
-                        "_table.alwaysBounceVertical = YES;"):
-            self.assertIn(setting, load)
+        for override in ("_table.estimatedRowHeight =",
+                         "_table.estimatedSectionHeaderHeight =",
+                         "_table.estimatedSectionFooterHeight =",
+                         "_table.bounces =",
+                         "_table.alwaysBounceVertical ="):
+            self.assertNotIn(override, load)
         appearance = self.settings_method("- (void)customGlassInstallPageAppearance")
         self.assertIn("tableView.clipsToBounds = YES;", appearance)
 
@@ -279,6 +272,14 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
     def test_settings_glass_uses_native_table_scrolling_like_schedule_page(self):
         settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
         schedule = source("Application/Dopamine/UI/Settings/DOLowPowerScheduleController.m")
+        for name in ("DOSettingsController", "DOCreditsViewController"):
+            page = source(f"Application/Dopamine/UI/Settings/{name}.m")
+            readability = extract(page, "- (void)customGlassImproveReadabilityInView:")
+            self.assertIn("UIColor.secondaryLabelColor", readability)
+            self.assertIn("UIColor.labelColor", readability)
+            self.assertIn("label.shadowColor = nil;", readability)
+            self.assertIn("label.shadowOffset = CGSizeZero;", readability)
+            self.assertNotIn("CGSizeMake(0.0, 0.35)", readability)
         settings_backdrops = self.settings_method("- (void)customGlassRefreshSectionBackdrops")
         schedule_backdrops = extract(schedule, "- (void)refreshScheduleGlassFrames")
         self.assertIn("[tableView insertSubview:glass atIndex:0];", settings_backdrops)
