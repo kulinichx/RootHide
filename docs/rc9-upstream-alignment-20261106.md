@@ -399,8 +399,8 @@ RC9 对更新前校验和同步错误处理已有加固；固定官方/ZQBB 参�
 
 首次公开 CI Run `42336690235` 在汇总的原生回归步骤失败，后续 TIPA 构建被跳过；
 上一提交 Run `42334592531` 成功。现已将签名附加原生测试拆成单独步骤，并在失败时
-写出公开错误注释。Run `42337444155` 确认失败来自测试桩把
-`csd_code_directory_calculate_hash` 的测试桩把输出参数写成 `cdhash_t`/`uint8_t *`，
+写出公开错误注释。Run `42337444155` 确认原生测试桩存在接口类型错误：
+`csd_code_directory_calculate_hash` 的输出参数写成 `cdhash_t`/`uint8_t *`，
 与生产调用传入的 `&cdhash` 不兼容。对照 ZQBB 3.0.13 所带 ChOma 的
 `CodeDirectory.h`，真实声明为 `int csd_code_directory_calculate_hash(CS_DecodedBlob *, void *)`；
 测试桩已按该返回值及参数类型修正。失败发生在原生测试桩编译，不是生产签名修复的编译错误。
