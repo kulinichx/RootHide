@@ -10,6 +10,51 @@ from test_rc9_services import extract, source
 FILE='BaseBin/libjailbreak/src/trustcache.c'
 
 class TrustcacheContracts(unittest.TestCase):
+    def test_list_walk_reports_root_and_next_pointer_read_failures(self):
+        text=source(FILE)
+        body=extract(text,'static int _trustcache_list_enumerate')
+        self.assertIn('_trustcache_list_get_start(&curTC)',body)
+        self.assertIn('kreadbuf(curTC + koffsetof(trustcache, nextptr)',body)
+        self.assertIn('if (result != 0) return result',body)
+        root=extract(text,'static int _trustcache_list_get_start_address')
+        self.assertIn('kreadbuf(runtime + 0x20',root)
+        self.assertIn('if (!*addressOut) return EFAULT',root)
+
+    def test_list_mutations_check_io_and_conditionally_roll_back(self):
+        text=source(FILE)
+        restore=extract(text,'static int _trustcache_restore_pointer')
+        self.assertIn('currentValue != writtenValue',restore)
+        self.assertIn('return kwrite64(address, originalValue)',restore)
+        insert=extract(text,'int trustcache_list_insert')
+        remove=extract(text,'int trustcache_list_remove')
+        self.assertIn('_trustcache_restore_pointer',insert)
+        self.assertIn('_trustcache_restore_pointer',remove)
+        self.assertIn('if (result != 0)',insert)
+        self.assertIn('if (result != 0)',remove)
+
+    def test_dynamic_cache_append_checks_length_and_page_io(self):
+        text=source(FILE)
+        grow=extract(text,'static int _jb_trustcache_grow')
+        append=extract(text,'int jb_trustcache_add_entries')
+        self.assertIn('trustcache_list_insert(jbTcKern)',grow)
+        self.assertIn('if (result != 0) return result',grow)
+        self.assertIn('length > JB_TRUSTCACHE_ENTRY_COUNT',append)
+        self.assertIn('kreadbuf(freeJbTcKaddr, page, JB_TRUSTCACHE_SIZE)',append)
+        self.assertIn('kwritebuf(freeJbTcKaddr, page, JB_TRUSTCACHE_SIZE)',append)
+        self.assertIn('filtered[consumed + i]',append)
+
+    def test_uploaded_cache_propagates_failures_and_retains_uncertain_link(self):
+        text=source(FILE)
+        body=extract(text,'int trustcache_file_upload')
+        self.assertIn('if (!tc) return EINVAL',body)
+        self.assertIn('int result = _trustcache_list_enumerate',body)
+        self.assertIn('trustcache_list_remove(existingTcKaddr)',body)
+        self.assertIn('return kwritebuf(prevTcFile, tc, tcSize - ksizeof(trustcache))',body)
+        self.assertIn('return trustcache_list_insert(tcKaddr)',body)
+        self.assertIn('Insertion may have partially published',body)
+        wrapper=extract(text,'int trustcache_file_upload_with_uuid')
+        self.assertIn('if (!tc || !uuid) return EINVAL',wrapper)
+
     def test_hash_batch_uses_checked_heap_allocation(self):
         body=extract(source(FILE),'int jb_trustcache_add_cdhashes')
         self.assertNotIn('entries[hashCount]',body)
