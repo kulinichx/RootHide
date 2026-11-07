@@ -49,6 +49,7 @@ jobs:
           set -euo pipefail
           git -C BaseBin/XPF apply --allow-empty "$GITHUB_WORKSPACE/.github/patches/XPF-roothide.patch"
           git -C BaseBin/opainject apply "$GITHUB_WORKSPACE/.github/patches/opainject-build.patch"
+          git -C BaseBin/ChOma apply "$GITHUB_WORKSPACE/.github/patches/ChOma-signature-boundaries.patch"
 
       - name: Capture source provenance
         run: |
@@ -68,6 +69,8 @@ jobs:
             git submodule status --recursive
             echo "roothide_patch_inputs:"
             shasum -a 256 .github/patches/XPF-roothide.patch .github/patches/opainject-build.patch
+            shasum -a 256 .github/patches/ChOma-signature-boundaries.patch
+            shasum -a 256 BaseBin/ChOma/src/CSBlob.c BaseBin/ChOma/src/CSBlob.h BaseBin/ChOma/src/BufferedStream.c
           } > artifacts/source-provenance.txt
           cat artifacts/source-provenance.txt
 
@@ -116,6 +119,9 @@ jobs:
 
       - name: Signature source positional-read regression
         run: python3 tests/test_rc9_signature_source.py --native
+
+      - name: Fixed ChOma signature boundary regression
+        run: python3 tests/test_rc9_choma_boundaries.py --native
 
       - name: Companion tool Sileo scheme regression
         run: python3 tests/test_rc9_companion_tools.py --native

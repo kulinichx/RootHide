@@ -1,0 +1,2 @@
+# A blank diff context line contains one required space.
+.github/patches/*.patch whitespace=-blank-at-eol

@@ -1,0 +1,217 @@
+diff --git a/src/BufferedStream.c b/src/BufferedStream.c
+index 86f705a..2305dae 100644
+--- a/src/BufferedStream.c
++++ b/src/BufferedStream.c
+@@ -162,6 +162,10 @@ MemoryStream *buffered_stream_init_from_buffer_nocopy(void *buffer, size_t buffe
+     memset(stream, 0, sizeof(MemoryStream));
+ 
+     BufferedStreamContext *context = malloc(sizeof(BufferedStreamContext));
++    if (!context) {
++        free(stream);
++        return NULL;
++    }
+     context->buffer = buffer;
+     context->bufferSize = bufferSize;
+     context->subBufferStart = 0;
+@@ -178,6 +182,7 @@ MemoryStream *buffered_stream_init_from_buffer_nocopy(void *buffer, size_t buffe
+ 
+ fail:
+     buffered_stream_free(stream);
++    free(stream);
+     return NULL;
+ }
+ 
+@@ -190,5 +195,8 @@ MemoryStream *buffered_stream_init_from_buffer(void *buffer, size_t bufferSize,
+     if (stream) {
+         stream->flags |= MEMORY_STREAM_FLAG_OWNS_DATA;
+     }
++    else {
++        free(copy);
++    }
+     return stream;
+-}
+\ No newline at end of file
++}
+diff --git a/src/CSBlob.c b/src/CSBlob.c
+index 4c298b9..8603c9c 100644
+--- a/src/CSBlob.c
++++ b/src/CSBlob.c
+@@ -117,8 +117,11 @@ CS_SuperBlob *macho_read_code_signature(MachO *macho)
+ {
+     uint32_t offset = 0, size = 0;
+     if (macho_find_code_signature_bounds(macho, &offset, &size) == 0) {
++        if (size < sizeof(CS_SuperBlob)) return NULL;
+         CS_SuperBlob *dataOut = malloc(size);
+-        if (macho_read_at_offset(macho, offset, size, dataOut) == 0) {
++        if (!dataOut) return NULL;
++        if (macho_read_at_offset(macho, offset, size, dataOut) == 0 &&
++            cs_superblob_validate(dataOut, size)) {
+             return dataOut;
+         }
+         else {
+@@ -170,12 +173,19 @@ int macho_extract_cs_to_file(MachO *macho, CS_SuperBlob *superblob)
+ 
+ CS_DecodedBlob *csd_blob_init(uint32_t type, CS_GenericBlob *blobData)
+ {
++    if (!blobData) return NULL;
++    CS_GenericBlob header;
++    memcpy(&header, blobData, sizeof(header));
+     CS_DecodedBlob *blob = malloc(sizeof(CS_DecodedBlob));
+     if (!blob) return NULL;
+     memset(blob, 0, sizeof(CS_DecodedBlob));
+ 
+     blob->type = type;
+-    blob->stream = buffered_stream_init_from_buffer(blobData, BIG_TO_HOST(blobData->length), BUFFERED_STREAM_FLAG_AUTO_EXPAND);
++    blob->stream = buffered_stream_init_from_buffer(blobData, BIG_TO_HOST(header.length), BUFFERED_STREAM_FLAG_AUTO_EXPAND);
++    if (!blob->stream) {
++        free(blob);
++        return NULL;
++    }
+ 
+     return blob;
+ }
+@@ -255,44 +265,90 @@ CS_DecodedSuperBlob *csd_superblob_init(void)
+     return decodedSuperblob;
+ }
+ 
+-CS_DecodedSuperBlob *csd_superblob_decode(CS_SuperBlob *superblob)
++bool cs_superblob_validate(const CS_SuperBlob *superblob, size_t availableSize)
++{
++    if (!superblob || availableSize < sizeof(CS_SuperBlob)) return false;
++    CS_SuperBlob header;
++    memcpy(&header, superblob, sizeof(header));
++    uint32_t magic = BIG_TO_HOST(header.magic);
++    if (magic != CSMAGIC_EMBEDDED_SIGNATURE && magic != CSMAGIC_DETACHED_SIGNATURE) return false;
++    size_t length = BIG_TO_HOST(header.length);
++    uint32_t count = BIG_TO_HOST(header.count);
++    if (length < sizeof(header) || length > availableSize) return false;
++    if (count > (length - sizeof(header)) / sizeof(CS_BlobIndex)) return false;
++    size_t tableEnd = sizeof(header) + (size_t)count * sizeof(CS_BlobIndex);
++    for (uint32_t i = 0; i < count; i++) {
++        CS_BlobIndex index;
++        memcpy(&index, (const uint8_t *)superblob + sizeof(header) + (size_t)i * sizeof(index), sizeof(index));
++        size_t offset = BIG_TO_HOST(index.offset);
++        if (offset < tableEnd || offset > length || length - offset < sizeof(CS_GenericBlob)) return false;
++        CS_GenericBlob child;
++        memcpy(&child, (const uint8_t *)superblob + offset, sizeof(child));
++        size_t childLength = BIG_TO_HOST(child.length);
++        if (childLength < sizeof(child) || childLength > length - offset) return false;
++    }
++    return true;
++}
++
++CS_DecodedSuperBlob *csd_superblob_decode_with_size(CS_SuperBlob *superblob, size_t availableSize)
+ {
+-    uint32_t magic = BIG_TO_HOST(superblob->magic);
+-    if (magic != CSMAGIC_EMBEDDED_SIGNATURE && magic != CSMAGIC_DETACHED_SIGNATURE) return NULL;
++    if (!cs_superblob_validate(superblob, availableSize)) return NULL;
++    CS_SuperBlob header;
++    memcpy(&header, superblob, sizeof(header));
+ 
+     CS_DecodedSuperBlob *decodedSuperblob = csd_superblob_init();
+     if (!decodedSuperblob) return NULL;
+ 
+     CS_DecodedBlob **nextBlob = &decodedSuperblob->firstBlob;
+-    decodedSuperblob->magic = magic;
++    decodedSuperblob->magic = BIG_TO_HOST(header.magic);
+ 
+-    for (uint32_t i = 0; i < BIG_TO_HOST(superblob->count); i++) {
+-        CS_BlobIndex curIndex = superblob->index[i];
++    for (uint32_t i = 0; i < BIG_TO_HOST(header.count); i++) {
++        CS_BlobIndex curIndex;
++        memcpy(&curIndex, (uint8_t *)superblob + sizeof(header) + (size_t)i * sizeof(curIndex), sizeof(curIndex));
+         BLOB_INDEX_APPLY_BYTE_ORDER(&curIndex, BIG_TO_HOST_APPLIER);
+         //printf("decoding %u (type: %x, offset: 0x%x)\n", i, curIndex.type, curIndex.offset);
+ 
+         CS_GenericBlob *curBlobData = (CS_GenericBlob *)(((uint8_t*)superblob) + curIndex.offset);
+ 
+         *nextBlob = csd_blob_init(curIndex.type, curBlobData);
++        if (!*nextBlob) {
++            csd_superblob_free(decodedSuperblob);
++            return NULL;
++        }
+         nextBlob = &(*nextBlob)->next;
+     }
+     return decodedSuperblob;
+ }
+ 
++CS_DecodedSuperBlob *csd_superblob_decode(CS_SuperBlob *superblob)
++{
++    // Legacy callers must supply a complete buffer; sized callers verify capacity.
++    if (!superblob) return NULL;
++    CS_SuperBlob header;
++    memcpy(&header, superblob, sizeof(header));
++    return csd_superblob_decode_with_size(superblob, BIG_TO_HOST(header.length));
++}
++
+ CS_SuperBlob *csd_superblob_encode(CS_DecodedSuperBlob *decodedSuperblob)
+ {
++    if (!decodedSuperblob) return NULL;
+     uint32_t blobCount = 0, blobSize = 0;
+ 
+     // Determine amount and size of contained blobs
+     CS_DecodedBlob *nextBlob = decodedSuperblob->firstBlob;
+     while (nextBlob) {
++        size_t size = csd_blob_get_size(nextBlob);
++        uint64_t total = (uint64_t)sizeof(CS_SuperBlob) +
++            ((uint64_t)blobCount + 1) * sizeof(CS_BlobIndex) + blobSize;
++        if (size < sizeof(CS_GenericBlob) || total > UINT32_MAX || size > UINT32_MAX - total) return NULL;
+         blobCount++;
+-        blobSize += csd_blob_get_size(nextBlob);
++        blobSize += (uint32_t)size;
+         nextBlob = nextBlob->next;
+     }
+ 
+     uint32_t superblobLength = sizeof(CS_SuperBlob) + (sizeof(CS_BlobIndex) * blobCount) + blobSize;
+     CS_SuperBlob *superblob = malloc(superblobLength);
++    if (!superblob) return NULL;
+ 
+     // Populate superblob fields
+     superblob->count = blobCount;
+@@ -308,8 +364,13 @@ CS_SuperBlob *csd_superblob_encode(CS_DecodedSuperBlob *decodedSuperblob)
+     nextBlob = decodedSuperblob->firstBlob;
+     while (nextBlob) {
+         // Populate blob data
+-        uint32_t curSize = csd_blob_get_size(nextBlob);
+-        csd_blob_read(nextBlob, 0, curSize, superblobDataCur);
++        size_t curSize = csd_blob_get_size(nextBlob);
++        size_t remaining = superblobLength - (size_t)(superblobDataCur - (uint8_t *)superblob);
++        if (idx >= blobCount || curSize > remaining ||
++            csd_blob_read(nextBlob, 0, curSize, superblobDataCur) != 0) {
++            free(superblob);
++            return NULL;
++        }
+ 
+         // Populate index
+         CS_BlobIndex *curIndex = &superblob->index[idx];
+@@ -472,8 +533,9 @@ CS_DecodedBlob *csd_superblob_find_best_code_directory(CS_DecodedSuperBlob *deco
+ 
+ int csd_superblob_calculate_best_cdhash(CS_DecodedSuperBlob *decodedSuperblob, void *cdhashOut, int *cdhashTypeOut)
+ {
+-    if (!cdhashOut) return -1;
++    if (!decodedSuperblob || !cdhashOut) return -1;
+     CS_DecodedBlob *bestCDBlob = csd_superblob_find_best_code_directory(decodedSuperblob);
++    if (!bestCDBlob) return -1;
+     if (cdhashTypeOut) *cdhashTypeOut = csd_code_directory_get_hash_type(bestCDBlob);
+     return csd_code_directory_calculate_hash(bestCDBlob, cdhashOut);
+ }
+diff --git a/src/CSBlob.h b/src/CSBlob.h
+index cefb200..b96b9fb 100644
+--- a/src/CSBlob.h
++++ b/src/CSBlob.h
+@@ -103,6 +103,8 @@ void csd_blob_set_type(CS_DecodedBlob *blob, uint32_t type);
+ void csd_blob_free(CS_DecodedBlob *blob);
+ 
+ CS_DecodedSuperBlob *csd_superblob_init(void);
++bool cs_superblob_validate(const CS_SuperBlob *superblob, size_t availableSize);
++CS_DecodedSuperBlob *csd_superblob_decode_with_size(CS_SuperBlob *superblob, size_t availableSize);
+ CS_DecodedSuperBlob *csd_superblob_decode(CS_SuperBlob *superblob);
+ CS_SuperBlob *csd_superblob_encode(CS_DecodedSuperBlob *decodedSuperblob);
+ CS_DecodedBlob *csd_superblob_find_blob(CS_DecodedSuperBlob *superblob, uint32_t type, uint32_t *indexOut);
+@@ -118,4 +120,4 @@ int csd_superblob_calculate_best_cdhash(CS_DecodedSuperBlob *decodedSuperblob, v
+ int csd_superblob_print_content(CS_DecodedSuperBlob *decodedSuperblob, MachO *macho, bool printAllSlots, bool verifySlots);
+ void csd_superblob_free(CS_DecodedSuperBlob *decodedSuperblob);
+ 
+-#endif // CS_BLOB_H
+\ No newline at end of file
++#endif // CS_BLOB_H

@@ -39,6 +39,12 @@ class SignatureAttachmentContracts(unittest.TestCase):
                         "free(sigInfosToAttach);", "return -1;"):
             self.assertIn(cleanup, body[failure:lookup])
 
+    def test_sized_decoder_and_invalid_input_fail_instead_of_silent_success(self):
+        body = extract(source(SIGNATURES), "int trust_signatures(")
+        self.assertIn("if (!sigInfos) return -1;", body)
+        self.assertIn("csd_superblob_decode_with_size(superblob, curSigInfo->signature.fs_blob_size)", body)
+        self.assertNotIn("csd_superblob_decode(superblob)", body)
+
 
 NATIVE_PREFIX = r'''
 #include <assert.h>
@@ -68,6 +74,7 @@ struct siginfo {
 };
 
 static int outstanding, encodeFailure, hashFailure, trustCalls, attachCalls, cacheLookups;
+static int resolveFailure, decodeFailure;
 static bool txmEnabled = true;
 static uint32_t addedHashCount;
 
@@ -88,13 +95,16 @@ static void tracked_free(void *p) {
 static CS_SuperBlob *siginfo_resolve_superblob(struct siginfo *info, int pid, int fd) {
     (void)pid;
     (void)fd;
+    if (resolveFailure) return NULL;
     if (!info || !info->signature.fs_blob_start) return NULL;
     CS_SuperBlob *copy = tracked_malloc(sizeof(*copy));
     if (copy) memcpy(copy, info->signature.fs_blob_start, sizeof(*copy));
     return copy;
 }
 
-static CS_DecodedSuperBlob *csd_superblob_decode(CS_SuperBlob *blob) {
+static CS_DecodedSuperBlob *csd_superblob_decode_with_size(CS_SuperBlob *blob, size_t size) {
+    assert(size == sizeof(*blob));
+    if (decodeFailure) return NULL;
     CS_DecodedSuperBlob *decoded = tracked_malloc(sizeof(*decoded));
     if (!decoded) return NULL;
     decoded->best.flags = blob->flags;
@@ -233,6 +243,22 @@ int main(void) {
     }
 
     assert(trust_signatures(42, 12, NULL, 0) == 0);
+    assert(trust_signatures(42, 12, NULL, 1) == -1);
+    hashFailure = 0;
+    for (int failure = 0; failure < 2; failure++) {
+        resolveFailure = failure == 0;
+        decodeFailure = failure == 1;
+        trustCalls = attachCalls = cacheLookups = 0;
+        original = tracked_malloc(sizeof(*original));
+        *original = (CS_SuperBlob){ .length = 24, .flags = 0, .adhoc = true };
+        info = (struct siginfo){ .source = SIGNATURE_SOURCE_ALLOCATION,
+            .signature = { original, sizeof(*original) } };
+        assert(trust_signatures(42, 12, &info, 1) == -1);
+        assert(trustCalls == 0 && attachCalls == 0 && cacheLookups == 0);
+        assert(info.signature.fs_blob_start == original && outstanding == 1);
+        tracked_free(original);
+        assert(outstanding == 0);
+    }
     puts("PASS: encoding failure preserves the original; hash failure stops trust and attachment");
     return 0;
 }

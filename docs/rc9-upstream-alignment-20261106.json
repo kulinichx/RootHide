@@ -448,6 +448,38 @@
       "No UI, version, iOS support scope, injection defaults, low-power schedule or mount behavior changes."
     ]
   },
+  "phase_thirteen": {
+    "date": "2026-11-07",
+    "scope": "Fixed ChOma outer-container boundaries, real codec allocation failures and known-size trust consumer.",
+    "rc9_baseline": "8e560fa34d6f91a2942aaf7fe8e1b8407d94b514",
+    "dependency_commit": "ed99ac526142e78a5bc99793cf433775040f9d67",
+    "dependency_gitlink": "unchanged",
+    "patch": ".github/patches/ChOma-signature-boundaries.patch",
+    "classification": "fixed_dependency_failure_gaps_rc9_local_hardening_not_claimed_upstream_backport",
+    "report": "docs/rc9-choma-boundaries-comparison-20261107.md",
+    "changes": [
+      "Validate outer header, declared length, index table and child ranges against actual supplied capacity.",
+      "Use sized decoding for trust_signatures and validate Mach-O reads against load-command byte count.",
+      "Guard the real encoder allocation, 32-bit length and stream read failures; clean up partial decoded objects and stream construction failures.",
+      "Reject missing CodeDirectory and propagate trust consumer input, resolve and decode failures."
+    ],
+    "prior_test_clarification": "Phase ten mocked the encoder and proves caller buffer preservation only; it did not prove internal production encoder allocation safety. This phase patches and tests the real fixed implementation.",
+    "validation": {
+      "python_test_suite": "164_passed",
+      "native_test": "tests/test_rc9_choma_boundaries.py --native",
+      "native_asan_ubsan": "pending_macOS_CI",
+      "full_tipa_build": "pending",
+      "package_identity": "pending",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "Legacy unsized decoder requires callers to supply a complete buffer and cannot establish actual capacity.",
+      "CodeDirectory internals and overlapping or duplicate indexes are not fully audited.",
+      "fat_collect_signatures still skips null signature reads; earlier adhoc checks do not close direct collector or reread race semantics.",
+      "Concurrent mutation and remaining stream write, expansion and clone allocation paths are open.",
+      "No UI, version, low-power schedule, mount or default injection changes; existing iOS 16 compatibility scope is preserved."
+    ]
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -514,8 +546,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "collection_errors_and_encode_failure_guarded_source_reads_and_hash_failures_hardened_other_paths_open",
-      "evidence": "phase_three, phase_four, phase_ten and phase_twelve. User reported normal installation/general use of 7ad14162 only. Phase twelve adds positional source reads and hash failure checks with 158 local source contracts passed; native regressions, full TIPA and identity passed in run 42369906961 at 8e560fa3. New candidate device acceptance, other parser/attachment paths and trustcache lifetime remain open."
+      "status": "fixed_choma_outer_boundaries_and_codec_allocation_guards_added_native_CI_pending_other_paths_open",
+      "evidence": "phase_three, phase_four, phase_ten, phase_twelve and phase_thirteen. Latest built code is 8e560fa3, successful run 42369906961; user feedback applies only to 7ad14162. Phase thirteen adds real fixed-dependency outer bounds, codec allocation checks and sized trust decoding with 164 local contracts passed; its native execution and full build are pending. Previous mock encoding tests prove caller preservation, not internal library allocation safety. Legacy unsized callers, CodeDirectory internals, skipped collector failures, concurrent mutation and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

@@ -401,6 +401,7 @@ CS_SuperBlob *siginfo_resolve_superblob(struct siginfo *siginfo, int pid, int fd
 int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfoCount)
 {
 	if (sigInfoCount == 0) return 0;
+	if (!sigInfos) return -1;
 
     cdhash_t *cdhashes = malloc(sizeof(cdhash_t) * sigInfoCount);
 	if (!cdhashes) return -2;
@@ -417,7 +418,7 @@ int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfo
 		struct siginfo *curSigInfo = &sigInfos[i];
 		CS_SuperBlob *superblob = siginfo_resolve_superblob(curSigInfo, pid, fd);
 		if (superblob) {
-			CS_DecodedSuperBlob *decodedSuperblob = csd_superblob_decode(superblob);
+			CS_DecodedSuperBlob *decodedSuperblob = csd_superblob_decode_with_size(superblob, curSigInfo->signature.fs_blob_size);
 			free(superblob);
 
 			if (decodedSuperblob) {
@@ -488,6 +489,16 @@ int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfo
 				}
 				csd_superblob_free(decodedSuperblob);
 			}
+			else {
+				free(sigInfosToAttach);
+				free(cdhashes);
+				return -1;
+			}
+		}
+		else {
+			free(sigInfosToAttach);
+			free(cdhashes);
+			return -1;
 		}
 	}
 
