@@ -62,6 +62,17 @@ RootHide 副作用采用测试替身。两类用例不能等同于完整端到�
 Windows 无 Apple SDK；ASan/UBSan、完整 TIPA、包身份与制品上传待本轮 CI，
 后续验收记录会明确区分，当前不冒充已经通过。
 
+### 首次 CI 与测试编译修正
+
+提交 `bb4dda5f02831e38977030ef6213e2f79e1ac721` 的 Run `42377573833`
+在新增命令枚举原生回归的编译阶段失败，完整打包未运行。
+实际错误是固定依赖既有 `memory_stream_read` 中 `int ret` 与 `size_t size`
+的比较，在本测试额外启用的 `-Wextra -Werror` 下触发 `-Wsign-compare`。
+修正仅在生成的测试翻译单元中，围绕抽取的未修改 MemoryStream helper
+局部屏蔽这一警告；生产源码和依赖补丁不变。
+新增枚举器与其余测试继续使用 `-Wall -Wextra -Werror` 和 ASan/UBSan。
+该修正仍需重新执行 macOS CI，不将编译警告处理冒充运行验证。
+
 ## 保留与剩余工作
 
 - 按用户要求移除的两个管理器安装入口保持移除，不卸载独立管理器，

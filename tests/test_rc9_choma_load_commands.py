@@ -298,9 +298,13 @@ def native_tests():
     commands = (directory / "MachOLoadCommand.c").read_text(encoding="utf-8")
     code = "\n".join((
         NATIVE_PREFIX, '#include "BufferedStream.c"',
+        # Limit the legacy int/size_t warning exception to unmodified stream helpers.
+        '#pragma clang diagnostic push',
+        '#pragma clang diagnostic ignored "-Wsign-compare"',
         *(extract(memory, anchor) for anchor in (
             "int memory_stream_read(", "size_t memory_stream_get_size(",
             "void memory_stream_free(")),
+        '#pragma clang diagnostic pop',
         extract(commands, "char *load_command_to_string("),
         *(extract(macho, anchor) for anchor in (
             "size_t macho_get_mach_header_size(",

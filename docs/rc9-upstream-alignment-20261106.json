@@ -615,6 +615,13 @@
       "patch_forward_check": "passed_against_pristine_pinned_temporary_index",
       "native_test": "tests/test_rc9_choma_load_commands.py --native",
       "native_asan_ubsan": "pending_macos_ci",
+      "first_ci_attempt": {
+        "run": 42377573833,
+        "commit": "bb4dda5f02831e38977030ef6213e2f79e1ac721",
+        "result": "failed_new_native_harness_compilation_full_build_skipped",
+        "diagnostic": "Existing MemoryStream int ret versus size_t size comparison triggers -Wsign-compare under the new harness -Wextra -Werror.",
+        "correction": "Locally suppress that warning only around extracted unmodified MemoryStream helpers; production patch and strict parser warnings and sanitizers remain unchanged."
+      },
       "recursive_native_extension": "pending_macos_ci",
       "full_tipa_build": "pending",
       "package_identity": "pending",
