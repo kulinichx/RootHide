@@ -32,7 +32,26 @@
 - Windows 本地完整源码/契约回归 158 项通过；`git diff --check` 通过。
   本机无 Clang，原生 ASan/UBSan 及完整 Apple 构建待本提交的 macOS CI。
 
+### CI 验收补记
+
+代码提交 `8e560fa34d6f91a2942aaf7fe8e1b8407d94b514` 的 GitHub Run
+`42369906961` 已成功完成，更新前述待验状态：签名来源原生回归、
+签名编码/哈希失败原生回归、原有运行时及 scheme 原生回归、源码回归、
+完整 TIPA、包身份检查和制品上传均通过。新增原生结果来自 macOS CI，
+不是 Windows 本机。新包设备验收仍待完成。
+
+制品名 `Dopamine_3.0.7-8e560fa3_roothide.tipa`，artifact ID `13573178519`。
+GitHub 返回的制品归档 digest 为
+`sha256:bb068d5b086677986c1f17c9be78e1c41d9b97330430999e3a023d8eb4c13619`；
+这是整个 GitHub artifact 归档的 digest，不冒充其中 TIPA 文件本身的散列。
+
 ## 未关闭事项
+
+当前 `systemwide_trust_file` 会重新从磁盘收集 `SIGNATURE_SOURCE_ALLOCATION`
+签名，而不是把 dyldhook 传来的 FILE/PROC 描述直接交给 `trust_signatures`。
+因此 FILE/PROC 读取测试是对保留接口的保护，不说明常规入口已实际触发这些故障。
+哈希返回值检查覆盖当前收集后调用链；其失败不会撤销调用前已存在或已追加的信任缓存，
+本轮没有引入跨函数事务或签名缓冲区回滚。
 
 这不是完整签名解析器审计。ChOma 对 blob 内部长度、索引与结构的校验，
 外部输入缓冲区实际容量、读取期间文件被同时改写的一致性，以及其他解析/附加

@@ -7,6 +7,15 @@
     "product_version": "3.0.7",
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
+    "latest_ci": {
+      "code_commit": "8e560fa34d6f91a2942aaf7fe8e1b8407d94b514",
+      "run": 42369906961,
+      "conclusion": "success",
+      "package": "Dopamine_3.0.7-8e560fa3_roothide.tipa",
+      "artifact_id": 13573178519,
+      "github_artifact_archive_digest": "sha256:bb068d5b086677986c1f17c9be78e1c41d9b97330430999e3a023d8eb4c13619",
+      "device_acceptance": "pending_for_this_candidate"
+    },
     "latest_device_feedback": {
       "date": "2026-11-07",
       "build_commit": "7ad14162d356f56a6bd585bdb503bfcbd3d9cdc2",
@@ -27,6 +36,8 @@
     "supported_matrix": {
       "scope": "All iOS 16.x firmware and device combinations actually supported by RC9 3.0.7 RootHide jailbreak paths.",
       "status": "pending_inventory_and_device_validation",
+      "inventory_progress": "selector_and_metadata_started_full_hardware_offsets_and_device_validation_pending",
+      "initial_inventory": "docs/rc9-ios16-support-inventory-20261107.md",
       "clarification": "This does not mean every device can jailbreak every iOS 16.x release. MinimumOSVersion 16.0 is not proof that the full jailbreak matrix has been validated."
     },
     "rules": [
@@ -424,9 +435,11 @@
     "validation": {
       "python_test_suite": "158_passed",
       "git_diff_check": "passed",
-      "native_source_read_regression": "pending_macos_ci",
-      "native_hash_failure_regression": "pending_macos_ci",
-      "full_tipa_build": "pending",
+      "native_source_read_regression": "passed_GitHub_run_42369906961",
+      "native_hash_failure_regression": "passed_GitHub_run_42369906961",
+      "full_tipa_build": "passed_GitHub_run_42369906961",
+      "package_identity": "passed_GitHub_run_42369906961",
+      "ci_commit": "8e560fa34d6f91a2942aaf7fe8e1b8407d94b514",
       "device_acceptance": "pending"
     },
     "limits": [
@@ -502,7 +515,7 @@
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
       "status": "collection_errors_and_encode_failure_guarded_source_reads_and_hash_failures_hardened_other_paths_open",
-      "evidence": "phase_three, phase_four, phase_ten and phase_twelve. Attachment fault injection/build/identity passed in run 42339703952 at 7ad14162; user reported normal installation and general use of that candidate. Phase twelve adds positional source reads and hash failure checks with 158 local source contracts passed; new native/build validation pending. Other parser/attachment paths, full device acceptance and trustcache lifetime remain open."
+      "evidence": "phase_three, phase_four, phase_ten and phase_twelve. User reported normal installation/general use of 7ad14162 only. Phase twelve adds positional source reads and hash failure checks with 158 local source contracts passed; native regressions, full TIPA and identity passed in run 42369906961 at 8e560fa3. New candidate device acceptance, other parser/attachment paths and trustcache lifetime remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",
