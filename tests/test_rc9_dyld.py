@@ -15,9 +15,22 @@ class DyldContracts(unittest.TestCase):
         self.assertNotIn('removeItemAtPath:patched',body)
         for code in (5,6,7,8):self.assertIn(f'return {code}',body)
     def test_copy_errors_stop_generation(self):
-        body=extract(source(FILE),'int basebin_generate')
+        body=extract(source(FILE),'int basebin_generate_internal')
         self.assertEqual(body.count('if (carbonCopy('),3)
         self.assertIn('return install_generated_dyld(',body)
+    def test_legacy_standalone_entry_uses_rc9_checked_generator(self):
+        header=source('BaseBin/libjailbreak/src/basebin_gen.h')
+        implementation=source(FILE)
+        standalone=source('BaseBin/dopamine/src/main.m')
+        self.assertIn('int basebin_generate_internal(NSString *originUsrLibPath, NSString *basebinPath, NSString *targetBasebinPath, bool comingFromJBUpdate);',header)
+        self.assertIn('int basebin_generate_internal(NSString *originUsrLibPath, NSString *basebinPath, NSString *targetBasebinPath, bool comingFromJBUpdate)',implementation)
+        self.assertIn('basebin_generate_internal(usrLibPath, existingBasebin, targetBasebin, false)',standalone)
+        body=extract(implementation,'int basebin_generate_internal')
+        self.assertIn('carbonCopy(originUsrLibPath, fakelibPath)',body)
+        self.assertIn('stringByAppendingPathComponent:@"gen/dyld"',body)
+        self.assertIn('stringByAppendingPathComponent:@"systemhook.dylib"',body)
+        wrapper=extract(implementation,'int basebin_generate(bool comingFromJBUpdate)')
+        self.assertIn('basebin_generate_internal(@"/usr/lib", basebinPath, basebinPath, comingFromJBUpdate)',wrapper)
     def test_failed_symbol_lookup_releases_macho(self):
         body=extract(source(FILE),'int apply_dyld_patch')
         failure=body.split('if (getAMFIAddr == 0)',1)[1].split('}',1)[0]

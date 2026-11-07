@@ -263,3 +263,96 @@ inode、类型、大小、mtime 与 ctime 后解析；短读、错误和读取�
 新增回归约束默认行为与详细日志入口；本地共 137 项通过。
 新增 Foundation 原生执行在本记录写入时待 CI，用户设备上文件的实际
 写入来源仍待现场证据。不能把旧配置假设认定为确定根因。
+
+### 第六阶段后续验收记录
+
+候选 `5f1564787d87c7012258d8e0c06b83359a0951f8` 的公开 GitHub Run
+`42325986754` 已完成原生配置缓存回归、完整 TIPA 构建、包身份检查及制品上传。
+本地 141 项源码/契约回归通过；Windows 未运行 Clang 原生测试，由 macOS CI 执行。
+构建产物为 `Dopamine_3.0.7-5f156478_roothide.tipa`。
+设备越狱、重启及长期运行验收仍待完成，详情见
+`artifacts/11-7/rc9-5f156478/validation-20261107.md`。
+
+## 第七阶段：信任缓存与更新中断恢复核查
+
+日期：2026-11-07。检查基线为 RC9 `5f156478`、官方 RootHide `9617d75f`
+和 ZQBB RootHide `7e14aa61`。本阶段是代码路径与测试边界核查，没有修改运行时代码。
+
+### Trustcache 内核读者生命周期
+
+- `jb_trustcache_add_entries` 与 `jb_trustcache_clear` 使用
+  `gJbTrustcacheLock` 串行化 RC9 自有缓存的追加/清空。
+- `trustcache_file_upload` 更新 UUID trustcache 时不持有该锁；
+  `is_cdhash_trustcached` 等遍历也不持有该锁。因此该锁不构成内核读者的
+  quiescence 或回收屏障。
+- 同尺寸替换直接改写已发布 trustcache 的内容；尺寸变化则摘链后等待
+  10 毫秒再释放旧分配。代码注释本身也将等待描述为对在途读取的希望，
+  不是可证明的生命周期协议。
+- 该更新方式在固定官方与 ZQBB 参考中也存在。它是共享的高风险设计边界，
+  不是已证实的 RC9 单独回归；不能靠给用户态 mutex 扩大保护范围或任意延长
+  sleep 就宣称修复。需要先证明内核读者同步/分配回收语义，才能安全设计变更。
+
+### Generated dyld
+
+- RC9 将生成结果先写入 `gen/dyld.inflight`；普通 move 返回失败时会尝试把
+  `gen/dyld.old` 移回 `gen/dyld`。这比固定上游中不检查 move 结果更完整，
+  但只覆盖函数仍在运行并收到失败返回的场景。
+- 若进程在旧 `dyld` 已移到 `dyld.old`、新文件尚未移到 `dyld` 的窗口内终止，
+  当前代码没有启动时 journal/recovery 路径直接从 `dyld.old` 恢复它。安装清理逻辑
+  会在需要时隔离损坏的 `dyld.old`，不是 live dyld 恢复器。
+- 另有一个较晚、依赖用户操作的兜底：下一次用户手动重新越狱时，
+  `prepareBootstrapWithCompletion` 会在 `loadBasebinTrustcache` 前调用
+  `replaceBasebinFromBundledArchive`，重新发布 App 内置整份 basebin，然后后续流程
+  再生成 patched dyld。它能丢弃旧的半成品状态，但不是 launchd 更新事务的回滚/journal，
+  也可能把设备上的 live 更新退回到当前 App 内置版本。
+- 现有 `tests/test_rc9_dyld.py` 覆盖同步 remove/move 故障和即时回滚，
+  不模拟每个文件操作完成后突然终止并重新启动的恢复过程。
+
+### Live basebin 更新
+
+- `jbupdate_basebin` 先将归档解到临时目录、检查版本和 daemon plist，并在替换前
+  准备 trustcache；随后逐个删除 live `/basebin/<item>` 再复制新项目。
+- `JBUPDATE_PREV_VERSION` 与 `JBUPDATE_NEW_VERSION` 是进程环境标记；
+  正常返回失败时 `@finally` 会清理标记和临时解包目录，但没有每项目备份或
+  持久事务 journal。因此在多个 live 项目已替换后发生失败/进程终止，
+  现有代码不能证明整批更新会回滚。
+- `DOBootstrapper` 的 stage/ready/backup 保护的是应用引导时的整目录发布，
+  并非 `jbupdate_basebin` 的 live 更新事务，不能计作自动 journal/回滚覆盖；
+  但下一次显式越狱时重新发布 App 内置 basebin，可作为人工触发的整包重建兜底。
+- 现有 `tests/test_rc9_update.py` 注入 remove/copy 的同步失败，但不验证前序
+  已替换项目的回滚，也不模拟进程在替换序列中途终止。
+
+### 阶段结论与关闭条件
+
+RC9 对更新前校验和同步错误处理已有加固；固定官方/ZQBB 参考没有可直接移植的
+持久中断恢复协议。live 更新在当前会话中没有持久回滚；后续手动重新越狱时存在
+从 App 内置归档整包重建的兜底，但有回退版本的代价。上述窗口仍暂列未关闭的
+更新路径风险，不把它们当作已证实的设备重启根因，也不以真机 CI 或源码测试替代恢复证明。
+
+若要求中断后自动继续或回滚，而不是等待用户手动重新越狱并接受归档版本重建，
+必须先定义可持久化、幂等的恢复状态；对每个 rename/remove/copy 阶段做终止注入，
+验证恢复在 launchd 更新 finalizer 消费不完整状态前发生，同时保留旧 vnode、
+`.fakelib` 挂载和 RootHide 路径语义。
+
+## 第八阶段：dyld 生成器 API 与 standalone 调用链
+
+日期：2026-11-07。继续使用 RC9 `5f156478`、官方 RootHide
+`9617d75f` 与 ZQBB RootHide `7e14aa61` 对照；另核对 ZQBB 3.0.13 源码对象
+`6522285754fd9c4574e9afc352dc31fe548567fc`。该提交与 ZQBB RootHide 基线中
+本模块相同，且两者 `.version` 均为 3.0.13。
+
+- 官方和 ZQBB 的 `basebin_gen.h/.m` 保留参数化的
+  `basebin_generate_internal(originUsrLibPath, basebinPath, targetBasebinPath, ...)`。
+  RC9 曾把其主体收进 `basebin_generate()`，但 `BaseBin/dopamine/src/main.m`
+  的 Corellium standalone 入口仍调用内部 API，形成头文件声明和实现同时缺失的
+  源码不一致。
+- 标准 TIPA 越狱入口走 `DOJailbreaker` 的 `basebin_generate(false)`；
+  launchd 更新入口走 `basebin_generate(YES)`。本次恢复内部 API 并让原公开函数
+  转发到同一实现，保留 RC9 的复制错误检查、symlink/move 错误检查与同步 move
+  失败回滚；普通两条入口仍使用 `/usr/lib` 与当前 jbroot 的 `/basebin` 路径。
+- 完整 TIPA 工作流不构建 `BaseBin/dopamine` standalone 目标，因此之前的 TIPA
+  成功不能证明该 Corellium 路径可编译。新增源码契约检查确认头文件、实现、旧调用点
+  和公开包装函数一致；仍需 macOS 上单独构建 `make -C BaseBin/dopamine`。
+- 本地 Windows 没有可运行的 Python、Apple SDK 或 Foundation 编译器。本阶段未运行
+  Python suite、Apple 编译或 TIPA 构建；dyld/更新中断后的持久恢复缺口仍开放，
+  不将 API 对齐当成崩溃恢复已修复。

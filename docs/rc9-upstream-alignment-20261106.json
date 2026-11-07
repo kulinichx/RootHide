@@ -209,14 +209,96 @@
         "concurrent readers",
         "fork child reads while inherited parent cache lock is held"
       ],
-      "host_native_execution": "pending_macOS_CI",
-      "windows_source_suite": "141_passed"
+      "host_native_execution": "passed_GitHub_run_42325986754",
+      "windows_source_suite": "141_passed",
+      "full_tipa_build_and_identity": "passed_GitHub_run_42325986754",
+      "device_acceptance": "pending"
     },
     "limitations": [
       "Host XPC parser and unfair lock are test doubles.",
       "No iOS arm64/arm64e device acceptance yet.",
       "vfork semantics, all post-fork lock lifetimes and repeated-fork child memory lifetime remain under review.",
       "A persistently invalid config keeps the last valid policy until a valid update or path removal."
+    ]
+  },
+  "phase_seven": {
+    "date": "2026-11-07",
+    "status": "source_audit_recorded_runtime_recovery_unresolved",
+    "scope": [
+      "Trustcache kernel-reader lifetime",
+      "Generated dyld interruption recovery",
+      "Live basebin update transaction recovery"
+    ],
+    "references": {
+      "rc9_commit": "5f1564787d87c7012258d8e0c06b83359a0951f8",
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77"
+    },
+    "findings": [
+      {
+        "id": "trustcache_kernel_readers",
+        "classification": "shared_upstream_lifecycle_risk",
+        "status": "open",
+        "evidence": "RC9's gJbTrustcacheLock serializes its append/clear operations but not trustcache_file_upload or kernel readers. Same-size updates write in place; size changes unlink and free after a fixed 10ms delay. The fixed official and ZQBB references share this pattern.",
+        "required_before_fix": "Prove kernel reader synchronization and allocation reclamation semantics; a user-space mutex or longer sleep is not sufficient."
+      },
+      {
+        "id": "generated_dyld_recovery",
+        "classification": "partially_hardened_rc9_crash_window_open",
+        "status": "open",
+        "evidence": "RC9 rolls back synchronous move failures, but no startup journal restores dyld if execution stops after patched dyld moves to dyld.old and before inflight dyld publishes at dyld.",
+        "fallback": "On the next explicit app jailbreak, prepareBootstrap republishes the app-bundled basebin before loadBasebinTrustcache; later jailbreak steps regenerate patched dyld. This is a user-triggered whole-bundle reset, not automatic journal recovery, and can roll back a live update to the bundled version.",
+        "test_gap": "Current dyld tests inject returned filesystem errors, not process termination and restart between each publish operation."
+      },
+      {
+        "id": "live_basebin_update_recovery",
+        "classification": "prevalidation_without_durable_transaction",
+        "status": "open",
+        "evidence": "jbupdate_basebin validates a staged payload but replaces live top-level entries by remove-then-copy. Version markers are process environment only; no durable per-item backup/journal restores a partial batch.",
+        "distinct_from": "DOBootstrapper stage/ready/backup is not the live updater's automatic journal or rollback. On the next explicit app jailbreak, it republishes the app-bundled basebin before trustcache load, providing a user-triggered whole-bundle reset that may roll back a live update.",
+        "test_gap": "Current updater tests inject synchronous remove/copy errors but do not assert rollback of earlier items or model termination mid-transaction."
+      }
+    ],
+    "local_validation": {
+      "source_changes": "none",
+      "tests_rerun": "not_run_python_unavailable",
+      "new_build": "none"
+    },
+    "required_closure": [
+      "If automatic interruption recovery is required, design a durable, idempotent journal before changing runtime publication behavior; otherwise document the manual bundled-basebin reset and its rollback consequence.",
+      "Inject termination after every update mutation and verify the selected recovery path before launchd consumes basebin or dyld.",
+      "Preserve active dyld vnode, fakelib mount and RootHide path semantics.",
+      "Complete separate iOS 16 device acceptance."
+    ]
+  },
+  "phase_eight": {
+    "date": "2026-11-07",
+    "scope": "Generated-dyld helper API parity and the legacy Corellium standalone call path.",
+    "references": {
+      "rc9_commit": "5f1564787d87c7012258d8e0c06b83359a0951f8",
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77",
+      "zqbb_313_source_commit": "6522285754fd9c4574e9afc352dc31fe548567fc"
+    },
+    "finding": {
+      "id": "standalone_basebin_generator_api",
+      "classification": "rc9_legacy_target_api_mismatch",
+      "status": "parameterized_checked_implementation_restored_build_pending",
+      "evidence": "Official and ZQBB expose basebin_generate_internal(originUsrLibPath, basebinPath, targetBasebinPath, ...); RC9's BaseBin/dopamine main retained that call while its header and implementation no longer exposed the symbol. The standard iOS app path uses basebin_generate and was not affected by this missing helper.",
+      "change": "Restore the parameterized helper and header declaration; keep RC9's checked filesystem operations and immediate move-error rollback; preserve basebin_generate as a wrapper using /usr/lib and the active jbroot basebin.",
+      "test": "tests/test_rc9_dyld.py source contract for declaration, definition, standalone caller and wrapper"
+    },
+    "validation": {
+      "git_diff_check": "passed",
+      "python_test_suite": "not_run_python_unavailable",
+      "apple_standalone_build": "pending_macos_make_C_BaseBin_dopamine",
+      "full_tipa_build": "not_run",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "The public TIPA workflow does not compile the Corellium standalone target.",
+      "This API restoration does not close generated-dyld process-interruption recovery.",
+      "No product version, minimum iOS target or device support claim changed."
     ]
   },
   "ledger": [
@@ -261,12 +343,20 @@
     {
       "id": "trustcache_kernel_reader_lifetime",
       "classification": "pending_evidence",
-      "status": "open"
+      "status": "shared_upstream_risk_requires_kernel_lifetime_proof",
+      "evidence": "phase_seven; gJbTrustcacheLock does not guard trustcache_file_upload or kernel readers; the fixed 10ms retirement delay is not a proven quiescence mechanism."
     },
     {
       "id": "generated_dyld_and_live_basebin_recovery",
-      "classification": "pending_evidence",
-      "status": "open"
+      "classification": "partially_hardened_recovery_gap",
+      "status": "synchronous_failures_checked_crash_recovery_open",
+      "evidence": "phase_seven; dyld has immediate move-error rollback, but no restart journal; live jbupdate replaces top-level entries without a durable rollback transaction."
+    },
+    {
+      "id": "standalone_basebin_generator_api",
+      "classification": "rc9_legacy_target_api_mismatch",
+      "status": "source_api_restored_macos_build_pending",
+      "evidence": "phase_eight; Corellium standalone call is declared and implemented again, with the RC9 checked generator retained."
     },
     {
       "id": "forkfix_and_post_fork_locks",
