@@ -74,6 +74,22 @@ Windows 完整源码 / 契约回归 **175 项通过**，`git diff --check` 通�
 Windows 本机没有 macOS Clang / Apple SDK；新增 ASan/UBSan、完整 TIPA、
 包身份与上传状态以本轮 CI 后续记录为准，当前仍待执行。
 
+### CI 验收补记
+
+代码提交 `ca342e467c77fa6d39b759de6a1437db2c7deba8` 的 GitHub Run
+`42375351008` 首次运行已成功完成，更新上文 CI 待验状态：
+新增递归收集 ASan/UBSan、实际 ChOma、raw / adhoc 与其他既有原生回归、
+源码回归、保留的 scheme 原生检查、完整 TIPA、包身份及上传均通过。
+它们是 macOS CI 结果，不是 Windows 本机的原生执行或设备验收。
+
+实际制品：`Dopamine_3.0.7-ca342e46_roothide.tipa`；
+artifact ID `13575647431`，GitHub artifact 归档 digest：
+`sha256:6b67b950ba6e9009de9f366e9157c4c5c99ca1cac2b4fbd6556a29f3d9986568`。
+此值不冒充归档内 TIPA 文件本身的 SHA-256。新包的 iOS 16 真机验收待完成；
+此前 `7ad14162` 的一般使用反馈不移作本候选验收。
+
+这次验收补记只修改文档，包和运行时代码身份继续对应 `ca342e46`。
+
 ## 仍开放的实际缺口
 
 - 固定 ChOma 的 `macho_enumerate_dependencies` / `macho_enumerate_rpaths`

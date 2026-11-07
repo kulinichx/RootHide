@@ -8,12 +8,12 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "d140ebbf417148e1a46522b71e2c3aa01b8635aa",
-      "run": 42373722237,
+      "code_commit": "ca342e467c77fa6d39b759de6a1437db2c7deba8",
+      "run": 42375351008,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-d140ebbf_roothide.tipa",
-      "artifact_id": 13575075586,
-      "github_artifact_archive_digest": "sha256:6474a54863ac3e2873ae0d38fbdd0ad0774869ffc697eb442e8b979cb685fc4e",
+      "package": "Dopamine_3.0.7-ca342e46_roothide.tipa",
+      "artifact_id": 13575647431,
+      "github_artifact_archive_digest": "sha256:6b67b950ba6e9009de9f366e9157c4c5c99ca1cac2b4fbd6556a29f3d9986568",
       "device_acceptance": "pending_for_this_candidate"
     },
     "latest_device_feedback": {
@@ -526,7 +526,7 @@
   },
   "phase_fifteen": {
     "date": "2026-11-07",
-    "status": "source_regressions_passed_native_CI_build_and_device_pending",
+    "status": "native_regressions_full_build_and_identity_passed_device_pending",
     "scope": "Recursive signature failure propagation and user-requested removal of optional companion install links.",
     "rc9_baseline": "d140ebbf417148e1a46522b71e2c3aa01b8635aa",
     "references": {
@@ -545,9 +545,10 @@
       "python_test_suite": "175_passed",
       "git_diff_check": "passed",
       "native_test": "tests/test_rc9_recursive_signatures.py --native",
-      "native_asan_ubsan": "pending_CI",
-      "full_tipa_build": "pending_CI",
-      "package_identity": "pending_CI",
+      "native_asan_ubsan": "passed_GitHub_run_42375351008",
+      "full_tipa_build": "passed_GitHub_run_42375351008",
+      "package_identity": "passed_GitHub_run_42375351008",
+      "ci_commit": "ca342e467c77fa6d39b759de6a1437db2c7deba8",
       "device_acceptance": "pending"
     },
     "limits": [
@@ -625,8 +626,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "recursive_reportable_failures_hardened_source_passed_native_CI_pending_parser_gaps_open",
-      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_fifteen. Previous built code d140ebbf passed run 42373722237. Phase_fifteen shares the existing tri-state helper with recursive collection, fails on reportable signature/randomization errors and cleans partial output; 175 local source tests pass, new native CI and full build pending. Fixed upstream recursive code has similar silent errors, so this is RC9 hardening rather than a claimed upstream fix. Actual ChOma enumeration status/skip gaps, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
+      "status": "recursive_reportable_failures_hardened_native_CI_and_full_build_passed_parser_gaps_open",
+      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_fifteen. Built code ca342e46 passed run 42375351008 on the first attempt, including new recursive ASan/UBSan with real headers and path resolution, previous native tests, full TIPA, identity and upload; 175 local source tests pass. The shared tri-state helper now propagates reportable signature/randomization errors and cleans partial output. Fixed upstream recursive code has similar silent errors, so this is RC9 hardening rather than a claimed upstream fix. Actual ChOma enumeration status/skip gaps, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",
