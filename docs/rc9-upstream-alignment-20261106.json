@@ -345,7 +345,7 @@
     "validation": {
       "python_test_suite": "148_passed",
       "git_diff_check": "passed",
-      "native_asan_ubsan": "first_run_42336690235_failed_in_grouped_runtime_regression_step_diagnostic_isolated_for_rerun",
+      "native_asan_ubsan": "run_42337444155_found_test_stub_pointer_type_mismatch_now_fixed_pending_rerun",
       "full_tipa_build": "skipped_after_native_step_failure_pending_rerun",
       "device_acceptance": "pending"
     },

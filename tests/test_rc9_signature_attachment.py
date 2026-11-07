@@ -129,7 +129,7 @@ static void csd_superblob_free(CS_DecodedSuperBlob *decoded) {
     tracked_free(decoded);
 }
 
-static void csd_code_directory_calculate_hash(CS_DecodedBlob *blob, cdhash_t hash) {
+static void csd_code_directory_calculate_hash(CS_DecodedBlob *blob, uint8_t *hash) {
     memset(hash, (int)blob->flags, sizeof(cdhash_t));
 }
 
