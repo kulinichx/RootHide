@@ -65,6 +65,33 @@ class IPCDispatchContracts(unittest.TestCase):
                 action_count += 1
         self.assertGreater(action_count, 20)
 
+    def test_short_descriptor_arrays_have_an_explicit_terminator(self):
+        root = Path(__file__).resolve().parents[1]
+        files = sorted((root / "BaseBin/launchdhook/src/jbserver").glob("jbdomain_*.c"))
+        files.append(root / "BaseBin/libjailbreak/src/jbserver_boomerang.c")
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            tables = re.findall(r"\.args\s*=\s*\(jbserver_arg\[\]\)\s*\{(.*?)\n\s*\}", text, re.S)
+            for table in tables:
+                types = re.findall(r"\.type\s*=\s*(JBS_TYPE_\w+)", table)
+                if len(types) < 8:
+                    self.assertRegex(table, r"\{\s*0\s*\}\s*,?\s*$",
+                                     f"{path.name}: short compound array must terminate in bounds")
+
+    def test_jetsam_failed_live_update_does_not_persist_false_success(self):
+        settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
+        setter = extract(settings, "- (void)setJetsamMultiplier:")
+        apply = setter.index('jbclient_platform_jbsettings_set_double("jetsamMultiplier"')
+        guard = setter.index("if (result != 0)")
+        persist = setter.index("[self setPreferenceValue:value specifier:specifier];")
+        self.assertLess(apply, guard)
+        self.assertLess(guard, setter.index("return;"))
+        self.assertLess(setter.index("return;"), persist)
+        self.assertIn('DOLocalizedString(@"Jetsam_Apply_Failed_Body"), result', setter)
+        self.assertIn("self.navigationController.topViewController ?: self", setter)
+        self.assertIn("[presenter presentViewController:alert", setter)
+        self.assertIn("((NSNumber *)value).doubleValue / 2", setter)
+
 
 NATIVE_PREFIX = r'''
 #include <assert.h>
@@ -75,10 +102,17 @@ NATIVE_PREFIX = r'''
 #include <string.h>
 #include <stdio.h>
 typedef struct { uint32_t pid; } audit_token_t;
-typedef struct TestXPC { int type; uint64_t domain, action; } *xpc_object_t;
-enum { XPC_TYPE_DICTIONARY = 1 };
-static struct TestXPC message = {XPC_TYPE_DICTIONARY, 1, 1}, reply = {XPC_TYPE_DICTIONARY, 0, 0};
-static struct TestXPC value = {2, 0, 0};
+typedef struct TestXPC { int type; uint64_t domain, action; double number; bool flag; } *xpc_object_t;
+enum { XPC_TYPE_DICTIONARY = 1, XPC_TYPE_DOUBLE = 2, XPC_TYPE_BOOL = 3 };
+static struct TestXPC message = {.type=XPC_TYPE_DICTIONARY, .domain=1, .action=1};
+static struct TestXPC reply = {.type=XPC_TYPE_DICTIONARY};
+static struct TestXPC value = {.type=XPC_TYPE_DOUBLE};
+static xpc_object_t serializedObject;
+static const char *requestedKey = "text";
+static struct {
+    struct { double jetsamMultiplier; bool markAppsAsDebugged; } jailbreakSettings;
+} gSystemInfo;
+#define jbsetting(key) (gSystemInfo.jailbreakSettings.key)
 static bool blocked, allowed = true, canReply = true;
 static int handlerCalls, replies, releases, fdDuplicates, closeCalls, closedFd = -1;
 static int outFd = -1;
@@ -89,6 +123,18 @@ static const char *data = "signature";
 static size_t serializedLength;
 static char serializedData[32];
 static int xpc_get_type(xpc_object_t object) { assert(object); return object->type; }
+static xpc_object_t xpc_double_create(double number) {
+    value.type = XPC_TYPE_DOUBLE; value.number = number; return &value;
+}
+static double xpc_double_get_value(xpc_object_t object) {
+    assert(object && object->type == XPC_TYPE_DOUBLE); return object->number;
+}
+static xpc_object_t xpc_bool_create(bool flag) {
+    value.type = XPC_TYPE_BOOL; value.flag = flag; return &value;
+}
+static bool xpc_bool_get_value(xpc_object_t object) {
+    assert(object && object->type == XPC_TYPE_BOOL); return object->flag;
+}
 static bool roothide_handle_xpc_msg(xpc_object_t object) { assert(object == &message); return blocked; }
 static xpc_object_t xpc_dictionary_get_value(xpc_object_t object, const char *key) {
     assert(object == &message);
@@ -113,7 +159,7 @@ static int xpc_dictionary_dup_fd(xpc_object_t object, const char *key) {
     assert(object == &message && !strcmp(key, "input")); ++fdDuplicates; return 65;
 }
 static const char *xpc_dictionary_get_string(xpc_object_t object, const char *key) {
-    assert(object == &message); (void)key; return "text";
+    assert(object == &message); (void)key; return requestedKey;
 }
 static const void *xpc_dictionary_get_data(xpc_object_t object, const char *key, size_t *length) {
     assert(object == &message && !strcmp(key, "data")); *length = strlen(data); return data;
@@ -141,7 +187,7 @@ static void xpc_dictionary_set_data(xpc_object_t object, const char *key, const 
     serializedLength = length; memcpy(serializedData, bytes, length);
 }
 static void xpc_dictionary_set_value(xpc_object_t object, const char *key, xpc_object_t other) {
-    assert(object == &reply && other); (void)key;
+    assert(object == &reply && other); (void)key; serializedObject = other;
 }
 static void xpc_dictionary_set_int64(xpc_object_t object, const char *key, int64_t result) {
     assert(object == &reply && !strcmp(key, "result")); handlerResult = result;
@@ -171,9 +217,14 @@ static int handler(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, v
         assert((intptr_t)a0 == 65);
     } else if (mode == 5) {
         assert((uintptr_t)a0 == 77 && (uintptr_t)a7 == 77);
-    } else {
+    } else if (mode == 6) {
         assert((uintptr_t)a0 == 77 && a1 == data && (uintptr_t)a2 == strlen(data));
         *(void **)a3 = (void *)(uintptr_t)123;
+    } else if (mode == 7) {
+        return jbsettings_get(a0, a1);
+    } else {
+        assert(mode == 8);
+        return jbsettings_set(a0, a1);
     }
     return -23;
 }
@@ -194,6 +245,30 @@ static void success(void) {
     assert(handlerCalls == 1 && replies == 1 && releases == 1 && handlerResult == -23);
 }
 int main(void) {
+    jbserver_arg settingsGet[] = { __PRODUCTION_SETTINGS_GET_ARGS__ };
+    jbserver_arg settingsSet[] = { __PRODUCTION_SETTINGS_SET_ARGS__ };
+    requestedKey = "jetsamMultiplier";
+    for (int option = 2; option <= 8; option++) {
+        reset(settingsSet, 8);
+        xpc_double_create((double)option / 2.0);
+        assert(jbserver_received_xpc_message(&server, &message) == 0);
+        assert(handlerCalls == 1 && replies == 1 && handlerResult == 0);
+        assert(gSystemInfo.jailbreakSettings.jetsamMultiplier == (double)option / 2.0);
+        reset(settingsGet, 7); serializedObject = NULL;
+        assert(jbserver_received_xpc_message(&server, &message) == 0);
+        assert(handlerCalls == 1 && replies == 1 && handlerResult == 0 && releases == 2);
+        assert(serializedObject && xpc_get_type(serializedObject) == XPC_TYPE_DOUBLE);
+        assert(xpc_double_get_value(serializedObject) * 2.0 == option);
+    }
+    requestedKey = "markAppsAsDebugged";
+    for (int enabled = 0; enabled <= 1; enabled++) {
+        reset(settingsSet, 8); xpc_bool_create(enabled);
+        assert(jbserver_received_xpc_message(&server, &message) == 0 && handlerResult == 0);
+        reset(settingsGet, 7); serializedObject = NULL;
+        assert(jbserver_received_xpc_message(&server, &message) == 0 && handlerResult == 0);
+        assert(serializedObject && xpc_bool_get_value(serializedObject) == (bool)enabled);
+    }
+    requestedKey = "text";
     jbserver_arg trustFile[] = {
         {"caller-token", JBS_TYPE_CALLER_TOKEN, false}, {"fd", JBS_TYPE_UINT64, false},
         {"data", JBS_TYPE_DATA, false}, {"attach", JBS_TYPE_BOOL, false}, {0}};
@@ -235,7 +310,7 @@ int main(void) {
     assert(jbserver_received_xpc_message(&server, &message) == -1 && handlerCalls == 0);
     assert(jbserver_received_xpc_message(&server, NULL) == -1);
     assert(jbserver_received_xpc_message(NULL, &message) == -1);
-    puts("PASS: real JBServer DATA/FD dispatch, permissions, bounds and no-reply failures");
+    puts("PASS: real JBServer DATA/FD dispatch, production settings tables and handlers, all seven jetsam round-trips, JIT round-trips, permissions, bounds and no-reply failures; XPC mocked, no UIKit/device execution");
     return 0;
 }
 '''
@@ -248,10 +323,26 @@ def native_tests():
     header = source(HEADER)
     types = header[header.index("#define JBSERVER_MAX_ARGS"):header.index("extern struct jbserver_impl")]
     dispatcher = extract(source(FILE), "int jbserver_received_xpc_message(")
+    settings_handlers = "\n".join(extract(
+        source("BaseBin/launchdhook/src/jbserver/jbsettings.c"), anchor
+    ) for anchor in ("int jbsettings_get(", "int jbsettings_set("))
+    native_handlers = NATIVE_HANDLERS
+    for domain, handler, placeholder in (
+        ("systemwide", "jbsettings_get", "__PRODUCTION_SETTINGS_GET_ARGS__"),
+        ("platform", "jbsettings_set", "__PRODUCTION_SETTINGS_SET_ARGS__"),
+    ):
+        text = source(f"BaseBin/launchdhook/src/jbserver/jbdomain_{domain}.c")
+        match = re.search(
+            rf"\.handler\s*=\s*{handler},\s*\.args\s*=\s*\(jbserver_arg\[\]\)\s*\{{(.*?)\n\s*\}}",
+            text, re.S)
+        if not match:
+            raise SystemExit(f"Missing production settings descriptor: {domain}/{handler}")
+        native_handlers = native_handlers.replace(placeholder, match.group(1))
     with tempfile.TemporaryDirectory(prefix="rc9-ipc-dispatch-") as tmp:
         path = Path(tmp) / "dispatcher.c"
         binary = Path(tmp) / "dispatcher-test"
-        path.write_text("\n".join((NATIVE_PREFIX, types, dispatcher, NATIVE_HANDLERS)), encoding="utf-8")
+        path.write_text("\n".join((NATIVE_PREFIX, types, dispatcher, settings_handlers,
+                                   native_handlers)), encoding="utf-8")
         subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                         "-O1", "-g", "-fsanitize=address,undefined",
                         str(path), "-o", str(binary)], check=True)

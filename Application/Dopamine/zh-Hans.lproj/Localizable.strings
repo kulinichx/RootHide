@@ -7,6 +7,8 @@
 "ScrollDiagnostics_Armed" = "已开启记录";
 "ScrollDiagnostics_Empty" = "尚未记录到滚动";
 "ScrollDiagnostics_ExportFailed" = "无法导出诊断记录";
+"Jetsam_Apply_Failed_Title" = "未能应用内存设置";
+"Jetsam_Apply_Failed_Body" = "当前越狱环境未接受这项设置（错误码：%d）。未保存本次更改，请使用更新后的应用重启并重新越狱后再试。";
 
 // Jailbreak Button
 "Button_Jailbreak_Title" = "越狱";

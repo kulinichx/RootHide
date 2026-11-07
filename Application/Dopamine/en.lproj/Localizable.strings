@@ -7,6 +7,8 @@
 "ScrollDiagnostics_Armed" = "Recording enabled";
 "ScrollDiagnostics_Empty" = "No scroll gesture recorded";
 "ScrollDiagnostics_ExportFailed" = "Could not export the diagnostic record";
+"Jetsam_Apply_Failed_Title" = "Could Not Apply Memory Setting";
+"Jetsam_Apply_Failed_Body" = "The running jailbreak environment rejected this setting (error %d). This change was not saved. Try again after rebooting and jailbreaking with the updated app.";
 
 // Jailbreak Button
 "Button_Jailbreak_Title" = "Jailbreak";

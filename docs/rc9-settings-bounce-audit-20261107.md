@@ -137,3 +137,12 @@ Windows 本地完整源码 / 契约回归 193 项通过，`git diff --check` 通
 检查空记录、容量边界、环形顺序、几何值、JSON 往返及 NaN / Inf。
 原生导出测试不执行 UIKit、弹窗生命周期或真机回弹。完整构建和设备
 记录的可用性仍须分别验证，不能把测试通过当作顶部回弹已解决。
+
+诊断代码 `2a110d35e82bf839ae9f9630c8dfa9a2288e1b17` 已在
+GitHub Run `42381506909` 通过原生导出回归、完整 TIPA 和包身份检查，
+制品 `Dopamine_3.0.7-2a110d35_roothide.tipa`，artifact ID
+`13578270151`，外层归档 digest
+`sha256:8bd0813a5722971cbfa6608610803e6ecb78d76215a378a162e0d3755a3a8799`。
+这不是内层 TIPA 的 SHA-256，也不代表真机采样、分享或回弹验收通过。
+用户随后补充群友 jetsam 选项返回 30 MB 的反馈；下一包将合并独立
+修正，见 `rc9-jetsam-preference-readback-20261107.md`。

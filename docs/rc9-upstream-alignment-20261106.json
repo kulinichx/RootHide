@@ -8,13 +8,14 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "1a7feb18edffd787a10de0524b3e27a37535d7e9",
-      "run": 42378929588,
+      "code_commit": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
+      "run": 42381506909,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-1a7feb18_roothide.tipa",
-      "artifact_id": 13575924938,
-      "github_artifact_archive_digest": "sha256:78c70a695bbc1ac51bcaf9cd5e6dae3dd662618b27ba62f67314551f7e337faa",
-      "device_acceptance": "failed_user_confirmed_settings_top_rebound_oscillation_bottom_normal"
+      "package": "Dopamine_3.0.7-2a110d35_roothide.tipa",
+      "artifact_id": 13578270151,
+      "github_artifact_archive_digest": "sha256:8bd0813a5722971cbfa6608610803e6ecb78d76215a378a162e0d3755a3a8799",
+      "scope": "diagnostic_only_no_top_bounce_fix_claimed",
+      "device_acceptance": "trace_usability_pending_top_bounce_remains_open"
     },
     "reported_device_regressions": [
       {
@@ -683,14 +684,48 @@
       "validation": {
         "source_tests": "193_passed_Windows_source_contracts_only",
         "git_diff_check": "passed",
-        "native_export": "pending_macOS_CI",
-        "full_build": "pending_macOS_CI",
+        "native_export": "passed_GitHub_run_42381506909",
+        "full_build": "passed_GitHub_run_42381506909",
+        "package_identity": "passed_GitHub_run_42381506909",
+        "ci_commit": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
         "device_trace_usability": "pending",
         "top_bounce_fix": "not_claimed_runtime_evidence_required"
       },
       "privacy": "Geometry, app build and OS/controller metadata only; no screenshots, account details, installed app lists or injection configuration.",
       "limitations": "Source contracts and native export tests do not execute UIKit physics, alert/share lifecycle, Preferences layout or display-link sampling on iOS."
     }
+  },
+  "jetsam_readback_followup": {
+    "date": "2026-11-07",
+    "status": "confirmed_short_descriptor_array_overread_fixed_native_and_build_pending",
+    "report": "docs/rc9-jetsam-preference-readback-20261107.md",
+    "baseline": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
+    "user_report": "A group member selects a jetsam option other than 30 MB, returns, and sees the default 30 MB again.",
+    "reported_device_build": "not_provided_do_not_infer_1a7feb18",
+    "source_finding": "The two-element JBS_SYSTEMWIDE_JBSETTINGS_GET compound array lacks its terminating zero descriptor; the real dispatcher reads a third descriptor out of bounds. A failed double read returns zero, which the UI maps to option 6 / 30 MB.",
+    "root_cause_limit": "A concrete source defect and matching failure path, not proof of the group member's exact runtime failure or that the live setting was reset.",
+    "fixed_reference_comparison": {
+      "official": "9617d75f476423fdfd33477299c8a1349eb6f375 has the same short compound-array omission",
+      "zqbb": "7e14aa6155ce867e9052a88a8c17c632f4c30d77 explicitly terminates the corresponding GET table and uses inline argument arrays",
+      "scope": "Add only RC9's missing terminator; do not change protocol, struct layout or dispatch limits."
+    },
+    "changes": [
+      "Terminate the existing GET descriptor array in bounds.",
+      "Check the running environment setter result before persisting the preference; show the actual error code from the visible controller on failure.",
+      "Keep all seven choices, default recommendation, existing option/multiplier conversion and runtime memory policy unchanged."
+    ],
+    "validation": {
+      "new_regression_failed_before_fix": "test_short_descriptor_arrays_have_an_explicit_terminator",
+      "source_tests": "195_passed",
+      "git_diff_check": "passed",
+      "native_test": "tests/test_rc9_ipc_dispatch.py --native",
+      "native_extension": "Extract actual GET/SET tables, dispatcher and server handlers; seven jetsam and two JIT round-trips with mocked XPC.",
+      "native_execution": "pending_macOS_CI",
+      "full_tipa_build": "pending_macOS_CI",
+      "device_acceptance": "pending"
+    },
+    "install_requirement": "Reboot and jailbreak with the new app to load the repaired launchdhook; app overwrite alone does not replace running launchd code.",
+    "preserved": "Product 3.0.7, original supported iOS 16 device/firmware combinations, low-power schedule, injection defaults, mounts and remaining menu entries."
   },
   "ledger": [
     {

@@ -1310,11 +1310,23 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 
 - (void)setJetsamMultiplier:(id)value specifier:(PSSpecifier *)specifier
 {
-    [self setPreferenceValue:value specifier:specifier];
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
     if (envManager.isJailbroken) {
-        jbclient_platform_jbsettings_set_double("jetsamMultiplier", ((NSNumber *)value).doubleValue / 2);
+        int result = jbclient_platform_jbsettings_set_double("jetsamMultiplier", ((NSNumber *)value).doubleValue / 2);
+        if (result != 0) {
+            [self reloadSpecifiers];
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:DOLocalizedString(@"Jetsam_Apply_Failed_Title")
+                message:[NSString stringWithFormat:DOLocalizedString(@"Jetsam_Apply_Failed_Body"), result]
+                preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK")
+                style:UIAlertActionStyleDefault handler:nil]];
+            UIViewController *presenter = self.navigationController.topViewController ?: self;
+            [presenter presentViewController:alert animated:YES completion:nil];
+            return;
+        }
     }
+    [self setPreferenceValue:value specifier:specifier];
 }
 
 - (void)setRemoveJailbreakEnabled:(id)value specifier:(PSSpecifier *)specifier
