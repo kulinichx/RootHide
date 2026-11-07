@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -222,10 +223,21 @@ def native_tests():
         path = Path(tmp) / "signature-attachment.c"
         binary = Path(tmp) / "signature-attachment-test"
         path.write_text(code, encoding="utf-8")
-        subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
-                        "-Wno-unused-parameter", "-O1", "-g",
-                        "-fsanitize=address,undefined", str(path), "-o", str(binary)], check=True)
-        subprocess.run([str(binary)], check=True, timeout=30)
+        try:
+            subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+                            "-Wno-unused-parameter", "-O1", "-g",
+                            "-fsanitize=address,undefined", str(path), "-o", str(binary)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([str(binary)], check=True, timeout=30,
+                           capture_output=True, text=True)
+        except subprocess.CalledProcessError as error:
+            diagnostic = (error.stdout or "") + (error.stderr or "")
+            if not diagnostic:
+                diagnostic = f"native command exited with status {error.returncode}"
+            encoded = diagnostic.strip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::error title=Signature attachment native regression::{encoded[:3000]}")
+            sys.stderr.write(diagnostic)
+            raise
 
 
 if __name__ == "__main__":

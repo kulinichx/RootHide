@@ -345,8 +345,8 @@
     "validation": {
       "python_test_suite": "148_passed",
       "git_diff_check": "passed",
-      "native_asan_ubsan": "added_to_macos_ci_not_run_locally_clang_unavailable",
-      "full_tipa_build": "pending_ci",
+      "native_asan_ubsan": "first_run_42336690235_failed_in_grouped_runtime_regression_step_diagnostic_isolated_for_rerun",
+      "full_tipa_build": "skipped_after_native_step_failure_pending_rerun",
       "device_acceptance": "pending"
     },
     "limits": [
