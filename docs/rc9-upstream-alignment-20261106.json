@@ -27,7 +27,7 @@
       "package_sha256": "a83b6efca7aeb5f2e5afc57a7a37c62d64116ea5663d9aaa23ac9ca49aef3fb5",
       "package_identity": "CI_and_local_passed",
       "scope": "preserve_original_settings_and_about_geometry_in_outer_host_with_Preferences_as_only_table_frame_owner",
-      "device_acceptance": "this_UI_candidate_pending_Settings_and_About_user_confirmed_jetsam_fixed_before_this_change"
+      "device_acceptance": "user_reported_scroll_problem_fixed_20261108_jetsam_recurrence_confirmed_on_8061130d"
     },
     "reported_device_regressions": [
       {
@@ -701,7 +701,7 @@
         "package_identity": "passed_GitHub_run_42382233488",
         "ci_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
         "device_trace_usability": "confirmed_settings_c3610a00_ios166_109_samples_no_drops",
-        "top_bounce_fix": "original_geometry_host_CI_and_package_verified_device_pending_see_settings_native_frame_followup"
+        "top_bounce_fix": "original_geometry_host_CI_and_package_verified_user_reported_fixed_20261108_see_settings_native_frame_followup"
       },
       "privacy": "Geometry, app build and OS/controller metadata only; no screenshots, account details, installed app lists or injection configuration.",
       "limitations": "Source contracts and native export tests do not execute UIKit physics, alert/share lifecycle, Preferences layout or display-link sampling on iOS."
@@ -709,7 +709,7 @@
   },
   "jetsam_readback_followup": {
     "date": "2026-11-07",
-    "status": "user_confirmed_fixed_2026_11_08_after_official_only_second_pass",
+    "status": "reopened_20261108_user_reports_non_30_MB_choice_returns_to_30_again",
     "report": "docs/rc9-jetsam-preference-readback-20261107.md",
     "baseline": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
     "user_report": "A group member selects a jetsam option other than 30 MB, returns, and sees the default 30 MB again.",
@@ -757,8 +757,39 @@
         "native": "passed_GitHub_run_42386083984_real_Darwin_XPC_objects_substituted_transport_and_actual_Foundation_storage",
         "tipa": "passed_GitHub_run_42386083984",
         "ci_commit": "a379623825bc8043775be577218f6d2c73bf5d51",
-        "device": "user_confirmed_jetsam_fixed_2026_11_08_no_full_device_matrix_claim"
+        "device": "prior_user_confirmation_superseded_by_20261108_recurrence_confirmed_8061130d"
       }
+    },
+    "recurrence_20261108": {
+      "user_report": "After confirming the scroll problem fixed, user reports that selecting a jetsam option other than 30 MB still returns to the default 30 MB.",
+      "status": "unresolved_user_confirmed_8061130d_running_values_not_supplied",
+      "installed_package": "Dopamine_3.0.7-8061130d_roothide.tipa",
+      "source_comparison": "a3796238..8061130d contains no changes to the jetsam item controller, preference manager, settings IPC client or settings server handlers. Settings gained an outer host.",
+      "investigation": "Check actual package identity and the Preferences selection callback, requested option, persisted value and running readback. The host/callback relationship is a hypothesis, not a demonstrated root cause.",
+      "test_limit": "Existing native tests substitute transport and test storage; they do not execute real Preferences item-selection callbacks.",
+      "scope": "Pause other alignment work; retain the user-confirmed scroll fix and do not change defaults or substitute local preferences for actual runtime state."
+    },
+    "hosted_navigation_followup": {
+      "date": "2026-11-08",
+      "baseline": "8061130dfaa71cf53da571917efc7b89e29507d5",
+      "status": "explicit_jetsam_values_and_preferences_owner_binding_candidate_pending_CI_and_device",
+      "report": "docs/rc9-jetsam-hosted-navigation-20261108.md",
+      "classification": "rc9_container_integration_not_a_claimed_upstream_patch_or_proven_device_root_cause",
+      "changes": [
+        "Bind the original seven values and titles directly to the source PSSpecifier without reflective parent data-source lookup.",
+        "For Jetsam only, both Preferences push selectors bind the original settings parent and existing-or-settings root before the original navigation controller pushes the native item page.",
+        "Keep all other pushes on the original superclass path and preserve existing verified runtime read/write and checked preference persistence."
+      ],
+      "validation": {
+        "source_contracts": "220_passed",
+        "git_diff_check": "passed",
+        "native_test": "tests/test_rc9_jetsam_navigation.py --native",
+        "native_scope": "Production navigation methods, option arrays and getter/setter with actual Foundation persistence. Navigation, private selection and IPC are explicit doubles, not real Preferences or UIKit.",
+        "native": "pending_CI",
+        "full_tipa": "pending",
+        "device": "pending_recurrence_remains_open"
+      },
+      "preserved": "User-confirmed Settings/About scroll implementation, low-power UI/runtime, runtime Jetsam arithmetic, IPC protocol, product 3.0.7 and existing supported iOS 16 combinations."
     },
     "preserved": "Product 3.0.7, original supported iOS 16 device/firmware combinations, low-power schedule, injection defaults, mounts and remaining menu entries."
   },
@@ -785,7 +816,7 @@
   "settings_native_frame_followup": {
     "date": "2026-11-08",
     "baseline": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
-    "status": "measured_frame_cycle_removed_with_original_geometry_host_CI_and_package_verified_device_pending",
+    "status": "measured_frame_cycle_removed_original_geometry_preserved_user_reported_fixed_20261108",
     "code_commit": "8061130dfaa71cf53da571917efc7b89e29507d5",
     "report": "docs/rc9-settings-native-frame-20261108.md",
     "runtime_evidence": {
@@ -810,7 +841,7 @@
     },
     "change": "Keep the original 12pt/5pt margins in a standard outer page host, leave Preferences as the only table frame owner, retain outer back controls and styling; all four entry points use the host. Keep super, diagnostics and guarded bottom padding.",
     "intentional_upstream_difference": "Fixed official DOPSListController also shrinks the table. Remove this customization using measured RC9 evidence, not a claimed upstream port.",
-    "visible_geometry_change": "None intended: original list rectangle, title center, outer back controls, modal frame and glass materials are preserved. Geometry, lifecycle and navigation device acceptance still pending.",
+    "visible_geometry_change": "None intended: original list rectangle, title center, outer back controls, modal frame and glass materials are preserved. User reported the scroll problem fixed; no separate exhaustive geometry, lifecycle or navigation checklist was supplied.",
     "validation": {
       "source_contracts": "215_passed",
       "fixture_comparison_to_original": "passed_all_nine_triplets_constants_and_SHA256",
@@ -823,7 +854,12 @@
       "package_sha256": "a83b6efca7aeb5f2e5afc57a7a37c62d64116ea5663d9aaa23ac9ca49aef3fb5",
       "github_artifact_archive_digest": "sha256:05d16b362e28d60bc8959118840a8059bd8d08b4116d18f33636854e64c60706",
       "ci_local_comparison": "package_size_app_basebin_bundled_deb_hashes_eight_recorded_source_fingerprints_and_commit_match_not_reproducible_build_proof",
-      "device": "pending_Settings_and_About"
+      "device": "user_reported_scroll_problem_fixed_20261108_not_exhaustive_UI_acceptance"
+    },
+    "user_feedback": {
+      "date": "2026-11-08",
+      "report": "User confirmed the reported problem is fixed and requested upstream alignment continue.",
+      "scope": "Reported Settings/About scroll issue only; no new independent About trace, device identification or full acceptance checklist supplied."
     },
     "preserved": "Product 3.0.7, existing iOS 16 supported combinations, Jetsam, low-power UI/runtime, menus, licensing, injection and jailbreak runtime."
   },
@@ -863,8 +899,8 @@
     {
       "id": "custom_glass_and_ui",
       "classification": "rc9_specific",
-      "status": "device_trace_identified_frame_cycle_original_geometry_host_CI_and_package_verified_device_pending",
-      "evidence": "settings_native_frame_followup; docs/rc9-settings-native-frame-20261108.md. Actual c3610a00 iOS16.6 settings trace records nine parent/RC9 frame cycles and six negative-offset resets inside parent layout. Commit 8061130d preserves the original list rectangle in an outer host and removes the post-parent table resize; native boundary regressions, full TIPA and CI/local package verification passed at run 42393588176. The widening candidate was withdrawn; Settings and About device acceptance remains pending."
+      "status": "frame_cycle_fix_preserves_original_geometry_user_reported_fixed_20261108",
+      "evidence": "settings_native_frame_followup; docs/rc9-settings-native-frame-20261108.md. Actual c3610a00 iOS16.6 settings trace records nine parent/RC9 frame cycles and six negative-offset resets inside parent layout. Commit 8061130d preserves the original list rectangle in an outer host and removes the post-parent table resize; native boundary regressions, full TIPA and CI/local package verification passed at run 42393588176. The widening candidate was withdrawn. User confirmed the reported scroll problem fixed on 2026-11-08; not exhaustive UI or device-matrix acceptance."
     },
     {
       "id": "trustcache_kernel_reader_lifetime",

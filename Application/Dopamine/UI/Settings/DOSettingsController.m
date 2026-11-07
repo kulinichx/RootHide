@@ -1056,8 +1056,7 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
             [jetsamSpecifier setProperty:@"jetsamMultiplier" forKey:@"key"];
             [jetsamSpecifier setProperty:@6 forKey:@"default"];
             jetsamSpecifier.detailControllerClass = [DOPSJetsamListItemsController class];
-            [jetsamSpecifier setProperty:@"jetsamOptionNumbers" forKey:@"valuesDataSource"];
-            [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
+            [jetsamSpecifier setValues:[self jetsamOptionNumbers] titles:[self jetsamOptionTitles]];
             [specifiers addObject:jetsamSpecifier];
 
             PSSpecifier *supporterLicenseSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
@@ -1220,6 +1219,34 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 }
 
 #pragma mark - Getters & Setters
+
+- (BOOL)pushJetsamController:(UIViewController *)controller animated:(BOOL)animated
+{
+    if (![controller isKindOfClass:DOPSJetsamListItemsController.class] || !self.navigationController)
+        return NO;
+
+    DOPSJetsamListItemsController *items = (DOPSJetsamListItemsController *)controller;
+    // The navigation stack contains our outer page, not this Preferences owner.
+    [items setParentController:self];
+    [items setRootController:[self rootController] ?: self];
+    NSLog(@"[RC9 Jetsam] open parent=%@ target=%@",
+        NSStringFromClass([[items parentController] class]),
+        NSStringFromClass([((PSSpecifier *)items.specifier).target class]));
+    [self.navigationController pushViewController:items animated:animated];
+    return YES;
+}
+
+- (void)pushController:(id)controller
+{
+    if (![self pushJetsamController:controller animated:YES])
+        [super pushController:controller];
+}
+
+- (void)pushController:(id)controller animate:(BOOL)animated
+{
+    if (![self pushJetsamController:controller animated:animated])
+        [super pushController:controller animate:animated];
+}
 
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier
 {
