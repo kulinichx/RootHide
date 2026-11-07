@@ -329,7 +329,7 @@ def native_tests():
             codes, handlers, functions, NATIVE_MAIN)), encoding="utf-8")
         subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                         "-O1", "-g", "-fsanitize=address,undefined", str(path),
-                        "-lxpc", "-o", str(binary)], check=True)
+                        "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
         preference_main = Path(directory) / "preferences.m"
         preference_binary = Path(directory) / "preferences-test"
