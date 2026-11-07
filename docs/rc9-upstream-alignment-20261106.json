@@ -18,14 +18,14 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "a379623825bc8043775be577218f6d2c73bf5d51",
-      "run": 42386083984,
+      "code_commit": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
+      "run": 42389863977,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-a3796238_roothide.tipa",
-      "artifact_id": 13579916221,
-      "github_artifact_archive_digest": "sha256:45162737d8c90c83017c43949e2b2fb2a233f2264175c3536428c2e74722bb0d",
-      "scope": "verified_jetsam_write_readback_and_checked_preference_storage_plus_existing_opt_in_scroll_diagnostics",
-      "device_acceptance": "user_confirmed_jetsam_fixed_2026_11_08_top_bounce_remains_open"
+      "package": "Dopamine_3.0.7-c3610a00_roothide.tipa",
+      "artifact_id": 13580254660,
+      "github_artifact_archive_digest": "sha256:8a6c2236bbe8f84a1d7ad0694c4a84de841039537b6689e552eae65edf0cd5a1",
+      "scope": "skip_unchanged_supporter_self_healing_writes_preserve_jetsam_verification_and_existing_opt_in_scroll_diagnostics",
+      "device_acceptance": "this_UI_candidate_pending_user_confirmed_jetsam_fixed_before_this_change_top_bounce_remains_open"
     },
     "reported_device_regressions": [
       {
@@ -764,7 +764,7 @@
     "date": "2026-11-08",
     "baseline": "a379623825bc8043775be577218f6d2c73bf5d51",
     "classification": "rc9_specific_performance_fix_not_an_upstream_port",
-    "status": "source_regressions_passed_native_full_build_and_device_pending",
+    "status": "source_native_regressions_full_build_and_package_identity_passed_device_pending",
     "report": "docs/rc9-settings-scroll-self-healing-20261108.md",
     "source_finding": "Settings and About layout and cell display callbacks reach supporter verification, whose self-healing previously rewrote an unchanged external license and synchronized unchanged defaults.",
     "changes": "Skip equal nonempty persistent string writes and equal verified-license defaults synchronization. Keep real verification, removal priority, migration, explicit clears and failed-write retries.",
@@ -772,8 +772,11 @@
     "validation": {
       "source_contracts": "207_passed",
       "new_source_checks_reject_unfixed_baseline": "2_of_2",
-      "native": "pending_macOS_Foundation_counted_persistence_and_verifier_boundaries_not_Security_or_UIKit",
-      "tipa": "pending",
+      "native": "passed_GitHub_run_42389863977_Foundation_counted_persistence_and_verifier_boundaries_not_Security_or_UIKit",
+      "tipa": "passed_GitHub_run_42389863977",
+      "package_identity": "CI_and_local_passed",
+      "ci_commit": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
+      "package_sha256": "deff0eeb2bc3af574308d8f2b2ec1980f85c81a7a638bc0910fdadb3a56a84d0",
       "device": "pending"
     }
   },
