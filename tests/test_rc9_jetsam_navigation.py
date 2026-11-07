@@ -75,7 +75,7 @@ NATIVE_PREFIX = r'''
 #include <stdio.h>
 #include <string.h>
 
-#define DOLocalizedString(key) (key)
+static NSString *DOLocalizedString(NSString *key) { return key; }
 enum { JBCLIENT_SETTINGS_ERROR_READBACK_MISMATCH = -4 };
 
 @interface DOPreferenceManager (NavigationTest)
@@ -255,7 +255,7 @@ int main(void) { @autoreleasepool {
         specifier.properties[@"default"] = @6;
         // Use the same production specifier binding statement as the settings page.
         BIND_JETSAM_VALUES
-        assert([specifier.values isEqual:@[@2, @3, @4, @5, @6, @7, @8]]);
+        assert(([specifier.values isEqual:@[@2, @3, @4, @5, @6, @7, @8]]));
         assert(specifier.titles.count == specifier.values.count);
 
         for (NSUInteger running = 0; running < 2; running++) {
