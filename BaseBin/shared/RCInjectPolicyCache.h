@@ -2,29 +2,30 @@
 #define RC_INJECT_POLICY_CACHE_H
 
 #include <stdbool.h>
+#include <stdatomic.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <xpc/xpc.h>
 #include <os/lock.h>
 
 typedef struct {
+    pid_t owner;
     os_unfair_lock lock;
     bool metadataValid;
     dev_t device;
     ino_t inode;
+    mode_t mode;
     off_t fileSize;
     struct timespec fileMtime;
+    struct timespec fileCtime;
     xpc_object_t dictionary;
+} RCInjectPolicyCacheState;
+
+typedef struct {
+    _Atomic(RCInjectPolicyCacheState *) state;
 } RCInjectPolicyCache;
 
-#define RC_INJECT_POLICY_CACHE_INIT { \
-    .lock = OS_UNFAIR_LOCK_INIT, \
-    .metadataValid = false, \
-    .device = 0, \
-    .inode = 0, \
-    .fileSize = 0, \
-    .fileMtime = { .tv_sec = 0, .tv_nsec = 0 }, \
-    .dictionary = NULL \
-}
+#define RC_INJECT_POLICY_CACHE_INIT { .state = NULL }
 
 // Returns a retained XPC dictionary snapshot. Non-ARC callers must xpc_release()
 // the returned object. ARC callers use the retained-return annotation below.
