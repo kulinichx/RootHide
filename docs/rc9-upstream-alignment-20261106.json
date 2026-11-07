@@ -524,6 +524,41 @@
       "UI, version, iOS 16 supported combinations, low-power schedule, mount and injection defaults are unchanged."
     ]
   },
+  "phase_fifteen": {
+    "date": "2026-11-07",
+    "status": "source_regressions_passed_native_CI_build_and_device_pending",
+    "scope": "Recursive signature failure propagation and user-requested removal of optional companion install links.",
+    "rc9_baseline": "d140ebbf417148e1a46522b71e2c3aa01b8635aa",
+    "references": {
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77"
+    },
+    "classification": "reuse_aligned_tristate_helper_rc9_recursive_hardening_with_explicit_product_deviation",
+    "report": "docs/rc9-recursive-signature-comparison-20261107.md",
+    "changes": [
+      "Expose the existing tri-state adhoc helper through signatures.h without changing its behavior and reuse it in recursive collection.",
+      "Propagate reportable signature read, decode, hash, randomization and growth failures, stop traversal and discard partial output.",
+      "Bound count and size arithmetic, validate output and architecture arguments, preserve existing skip and final-hash policies.",
+      "Remove both companion installation rows, their private actions and jump helper, and unused link strings at the user's request."
+    ],
+    "validation": {
+      "python_test_suite": "175_passed",
+      "git_diff_check": "passed",
+      "native_test": "tests/test_rc9_recursive_signatures.py --native",
+      "native_asan_ubsan": "pending_CI",
+      "full_tipa_build": "pending_CI",
+      "package_identity": "pending_CI",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "Real production types, Foundation, files and path resolution are used; ChOma parsing, RootHide side effects, randomization and trustcache are mocked.",
+      "Count limit, Cryptex filter and no-upload consumer ordering are source-checked rather than fully executed in the native harness.",
+      "The fixed ChOma dependency and rpath enumerators discard status; lower-level load commands also silently skip some failures.",
+      "Missing paths, Fat initialization and unavailable slices retain existing skip behavior pending strong/weak dependency analysis.",
+      "No rollback of earlier file randomization or jbroot preparation is claimed.",
+      "Only the requested menu entries change; scrolling, glass, low-power schedule, mounts, injection defaults, version and iOS 16 compatibility scope are preserved."
+    ]
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -547,8 +582,8 @@
     {
       "id": "mount_and_trust_preferences",
       "classification": "rc9_and_zqbb_feature_overlap",
-      "status": "companion_links_aligned_source_checks_pass_external_manager_runtime_not_audited",
-      "evidence": "phase_eleven; fixed ZQBB package links and Sileo scheme reader are ported. Native regressions, full TIPA build and package identity passed in run 42368872578 at d080e2ea. RC9 custom mount configuration and independent manager trust preferences are not equivalent to these links; their existing behavior is preserved. UIKit/Sileo routing and external manager device validation remain pending."
+      "status": "optional_install_links_intentionally_removed_by_user_external_manager_runtime_not_audited",
+      "evidence": "phase_eleven records the historical port and successful run 42368872578 at d080e2ea. In phase_fifteen the user explicitly requested removal of both installation entries; their rows, private actions and jump helper are removed without uninstalling managers or changing configuration. The read-only Sileo scheme compatibility method remains. RC9 custom mount and independent manager trust preferences stay separate and unchanged."
     },
     {
       "id": "custom_fake_mounts",
@@ -590,8 +625,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "raw_collector_tristate_errors_and_cleanup_native_CI_full_build_passed_other_paths_open",
-      "evidence": "phase_three, phase_four, phase_ten, phase_twelve, phase_thirteen and phase_fourteen. Latest built code d140ebbf passed run 42373722237, including new raw-collection ASan/UBSan with real headers, existing native regressions, full TIPA and identity. Local source suite: 169 passed. Official and ZQBB raw collectors also silently skip null reads; the RC9 fix reuses the already aligned tri-state pattern rather than claiming an upstream raw fix. Legacy unsized callers, recursive dependency failures, CodeDirectory internals, concurrent mutation and device validation remain open."
+      "status": "recursive_reportable_failures_hardened_source_passed_native_CI_pending_parser_gaps_open",
+      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_fifteen. Previous built code d140ebbf passed run 42373722237. Phase_fifteen shares the existing tri-state helper with recursive collection, fails on reportable signature/randomization errors and cleans partial output; 175 local source tests pass, new native CI and full build pending. Fixed upstream recursive code has similar silent errors, so this is RC9 hardening rather than a claimed upstream fix. Actual ChOma enumeration status/skip gaps, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

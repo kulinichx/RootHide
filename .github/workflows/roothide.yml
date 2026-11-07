@@ -126,6 +126,9 @@ jobs:
       - name: Raw signature collection error regression
         run: python3 tests/test_rc9_signature_raw_collection.py --native
 
+      - name: Recursive signature collection error regression
+        run: python3 tests/test_rc9_recursive_signatures.py --native
+
       - name: Companion tool Sileo scheme regression
         run: python3 tests/test_rc9_companion_tools.py --native
 

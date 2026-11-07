@@ -111,7 +111,7 @@ static int macho_read_code_signature_checked(MachO *macho, CS_SuperBlob **superb
 }
 
 // 1: adhoc hash collected; 0: no trust needed; -1: malformed/unreadable signature.
-static int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut)
+int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut)
 {
 	if (!macho || !cdhashOut) return -1;
 	CS_SuperBlob *superblob = NULL;

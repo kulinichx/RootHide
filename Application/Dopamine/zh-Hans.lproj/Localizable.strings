@@ -217,7 +217,3 @@
 "LowPowerSchedule_SaveFailed" = "计划保存失败：%@";
 "LowPowerSchedule_Discard" = "放弃尚未保存的修改？";
 "LowPowerSchedule_DiscardButton" = "放弃修改";
-
-"Install Whitelist App" = "安装白名单管理器";
-"Install Mount App" = "安装挂载管理器";
-"Sileo_Open_Failed" = "无法打开 Sileo，请先安装 Sileo 并刷新软件源。";

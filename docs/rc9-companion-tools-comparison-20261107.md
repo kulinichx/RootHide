@@ -56,3 +56,11 @@
 两个固定 Dopamine 源码对象中未检出 `TrustedBindMountsV1`、
 `IgnoreVPNProxyWarningV1` 或 `newFakePath`；RC9 工具目录中的信任适配
 仍有独立来源、构建和验收记录，不合并为 Dopamine 本体的上游等价实现。
+
+## 后续用户决定：不保留安装入口
+
+2026-11-07，用户明确要求去除“安装白名单管理器”“安装挂载管理器”两项。
+第十五阶段删除设置行、专用 action / 跳转代码及失效翻译；保留独立管理器、
+已有名单与挂载配置。只读 scheme 兼容方法及原生回归暂保留。
+上文为第十一阶段的历史验收证据，不代表当前仍显示入口。
+详见 `docs/rc9-recursive-signature-comparison-20261107.md`。

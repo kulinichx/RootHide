@@ -1,4 +1,4 @@
-"""Pinned ZQBB companion links; --native runs the real Sileo scheme reader.
+"""Companion links intentionally removed; retain the pinned Sileo scheme reader.
 
 Foundation reads real temporary plists. Root mapping and jailbreak state are
 test boundaries; UIKit, Sileo routing and package installation are not executed.
@@ -30,43 +30,23 @@ class CompanionToolContracts(unittest.TestCase):
                          UPSTREAM_SCHEME_SHA256)
         self.assertIn(SCHEME_ANCHOR + ";", source(ENVIRONMENT + ".h"))
 
-    def test_tool_rows_are_jailbreak_only_and_use_existing_row_height(self):
+    def test_optional_install_rows_are_absent_and_existing_actions_remain(self):
         specifiers = extract(source(SETTINGS), "- (id)specifiers")
-        jailbroken = extract(specifiers, "if (envManager.isJailbroken) {")
-        start = jailbroken.index("for (NSDictionary *tool in @[")
-        end = jailbroken.index("PSSpecifier *refreshAppsSpecifier", start)
-        tools = jailbroken[start:end]
-        for title, action in (
-            ("Install Whitelist App", "installWhitelistAppPressed"),
-            ("Install Mount App", "installMountAppPressed"),
-        ):
-            self.assertIn(f'@{{@"title": @"{title}", @"action": @"{action}"}}', tools)
-        self.assertIn('[toolSpecifier setProperty:buttonHeight forKey:@"height"]', tools)
-        self.assertIn('[toolSpecifier setProperty:DOButtonCell.class forKey:@"cellClass"]', tools)
-        self.assertEqual(specifiers.count('@"Install Whitelist App"'), 1)
-        self.assertEqual(specifiers.count('@"Install Mount App"'), 1)
-        self.assertNotIn("pushViewController:", tools)
+        for token in ("Install Whitelist App", "Install Mount App",
+                      "installWhitelistAppPressed", "installMountAppPressed"):
+            self.assertNotIn(token, specifiers)
+        for action in ("rootHideHealthPressed", "lowPowerSchedulePressed",
+                       "refreshJailbreakAppsPressed"):
+            self.assertIn(action, specifiers)
 
-    def test_actions_only_route_to_pinned_package_identifiers(self):
+    def test_unused_install_handlers_and_package_jump_are_removed(self):
         settings = source(SETTINGS)
-        for action, identifier in (
-            ("installWhitelistAppPressed", "cn.zqbb.inject.manager"),
-            ("installMountAppPressed", "cn.zqbb.hello.mnt"),
-        ):
-            body = extract(settings, f"- (void){action}")
-            self.assertEqual(body.split("{", 1)[1].strip(),
-                             f'[self openSileoPackage:@"{identifier}"];\n}}')
-        open_package = extract(settings, "- (void)openSileoPackage:")
-        self.assertLess(open_package.index("if (!environment.isJailbroken) return;"),
-                        open_package.index("openURL:url"))
-        self.assertIn('@"%@://package/%@"', open_package)
-        self.assertIn("environment.sileoURLScheme", open_package)
-        self.assertIn("if (success) return;", open_package)
-        self.assertIn("dispatch_async(dispatch_get_main_queue()", open_package)
-        self.assertIn('DOLocalizedString(@"Sileo_Open_Failed")', open_package)
-        for forbidden in ("exec_cmd", "writeToFile:", "runAsRoot:",
-                          "cn.zqbb.inject.plist", "startAccessingSecurityScopedResource"):
-            self.assertNotIn(forbidden, open_package)
+        for token in ("installWhitelistAppPressed", "installMountAppPressed",
+                      "openSileoPackage:", "cn.zqbb.inject.manager", "cn.zqbb.hello.mnt"):
+            self.assertNotIn(token, settings)
+        # Removing shortcuts is not an uninstall or a configuration migration.
+        self.assertNotIn('@"roothideWhite.deb"', source(
+            "Application/Dopamine/Jailbreak/DOBootstrapper.m"))
 
     def test_scheme_lookup_is_read_only_and_has_no_background_work(self):
         body = extract(source(ENVIRONMENT + ".m"), SCHEME_ANCHOR)
@@ -74,11 +54,12 @@ class CompanionToolContracts(unittest.TestCase):
                           "runAsRoot:", "cn.zqbb.inject.plist", "addObserver"):
             self.assertNotIn(forbidden, body)
 
-    def test_titles_and_failure_message_are_localized_without_duplicate_keys(self):
+    def test_removed_link_strings_are_absent_and_shared_alert_strings_remain(self):
         for locale in ("en", "zh-Hans", "zh-CN"):
             text = source(f"Application/Dopamine/{locale}.lproj/Localizable.strings")
-            for key in ("Install Whitelist App", "Install Mount App",
-                        "Sileo_Open_Failed", "Log_Error", "Button_OK"):
+            for key in ("Install Whitelist App", "Install Mount App", "Sileo_Open_Failed"):
+                self.assertNotIn(f'"{key}"', text)
+            for key in ("Log_Error", "Button_OK"):
                 pattern = rf'^\s*"{re.escape(key)}"\s*=\s*"[^"]+"\s*;'
                 self.assertEqual(len(re.findall(pattern, text, re.MULTILINE)), 1,
                                  (locale, key))

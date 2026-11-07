@@ -17,6 +17,8 @@ struct siginfo {
 typedef uint8_t cdhash_t[CS_CDHASH_LEN];
 
 bool code_signature_calculate_adhoc_cdhash(CS_SuperBlob *superblob, cdhash_t cdhashOut);
+// 1: adhoc hash collected; 0: no trust needed; -1: signature read/decode/hash failure.
+int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut);
 int fat_collect_untrusted_cdhashes(Fat *fat, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);
 int file_collect_untrusted_cdhashes(int fd, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);
 int file_collect_untrusted_cdhashes_by_path(const char *path, cdhash_t **cdhashesOut, uint32_t *cdhashCountOut);

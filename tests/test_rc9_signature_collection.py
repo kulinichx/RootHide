@@ -24,7 +24,7 @@ class SignatureCollectionContracts(unittest.TestCase):
         self.assertIn("if (status != 0) return -1;", reader)
         self.assertIn("if (!hasSignature) return 0;", reader)
         self.assertIn("return *superblobOut ? 1 : -1;", reader)
-        body = extract(text, "static int macho_collect_adhoc_cdhash(")
+        body = extract(text, "int macho_collect_adhoc_cdhash(")
         self.assertIn("macho_read_code_signature_checked(macho, &superblob)", body)
         self.assertIn("if (signatureResult <= 0) return signatureResult;", body)
         self.assertIn("if (!decodedSuperblob) return -1;", body)
@@ -312,7 +312,7 @@ def native_tests():
         NATIVE_PREFIX,
         *(extract(source(SIGNATURES), anchor) for anchor in (
             "static int macho_read_code_signature_checked(",
-            "static int macho_collect_adhoc_cdhash(",
+            "int macho_collect_adhoc_cdhash(",
             "bool macho_parse_code_signature(",
             "int fat_collect_untrusted_cdhashes(",
             "int file_collect_untrusted_cdhashes(",
