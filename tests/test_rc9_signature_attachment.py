@@ -31,6 +31,14 @@ class SignatureAttachmentContracts(unittest.TestCase):
         workflow = source(".github/workflows/roothide.yml")
         self.assertIn("python3 tests/test_rc9_signature_attachment.py --native", workflow)
 
+    def test_hash_failure_stops_before_cache_lookup_or_attachment(self):
+        body = extract(source(SIGNATURES), "int trust_signatures(")
+        failure = body.index("if (csd_code_directory_calculate_hash(bestCDBlob, &cdhash) != 0)")
+        lookup = body.index("if (!is_cdhash_trustcached(cdhash))", failure)
+        for cleanup in ("csd_superblob_free(decodedSuperblob);", "free(cdhashes);",
+                        "free(sigInfosToAttach);", "return -1;"):
+            self.assertIn(cleanup, body[failure:lookup])
+
 
 NATIVE_PREFIX = r'''
 #include <assert.h>
@@ -59,7 +67,8 @@ struct siginfo {
     fsignatures_t signature;
 };
 
-static int outstanding, encodeFailure, trustCalls, attachCalls;
+static int outstanding, encodeFailure, hashFailure, trustCalls, attachCalls, cacheLookups;
+static bool txmEnabled = true;
 static uint32_t addedHashCount;
 
 static void *tracked_malloc(size_t size) {
@@ -130,12 +139,14 @@ static void csd_superblob_free(CS_DecodedSuperBlob *decoded) {
 }
 
 static int csd_code_directory_calculate_hash(CS_DecodedBlob *blob, void *hash) {
+    if (hashFailure) return -1;
     memset(hash, (int)blob->flags, sizeof(cdhash_t));
     return 0;
 }
 
 static bool is_cdhash_trustcached(cdhash_t hash) {
     (void)hash;
+    cacheLookups++;
     return false;
 }
 
@@ -148,7 +159,7 @@ static int jb_trustcache_add_cdhashes(cdhash_t *hashes, uint32_t count) {
 
 static int ksymbol(int symbol) {
     assert(symbol == SPTMArgs);
-    return 1;
+    return txmEnabled;
 }
 
 static uint32_t OSSwapBigToHostInt32(uint32_t value) {
@@ -204,8 +215,25 @@ int main(void) {
     tracked_free(info.signature.fs_blob_start);
     assert(outstanding == 0);
 
+    for (int txm = 0; txm < 2; txm++) {
+        txmEnabled = txm;
+        hashFailure = 1;
+        trustCalls = attachCalls = cacheLookups = 0;
+        original = tracked_malloc(sizeof(*original));
+        assert(original);
+        *original = (CS_SuperBlob){ .length = 24, .flags = 0, .adhoc = true };
+        info = (struct siginfo){ .source = SIGNATURE_SOURCE_ALLOCATION,
+            .signature = { original, sizeof(*original) } };
+        assert(trust_signatures(42, 12, &info, 1) == -1);
+        assert(trustCalls == 0 && attachCalls == 0 && cacheLookups == 0);
+        assert(outstanding == 1);
+        if (!txm) assert(info.signature.fs_blob_start == original);
+        tracked_free(info.signature.fs_blob_start);
+        assert(outstanding == 0);
+    }
+
     assert(trust_signatures(42, 12, NULL, 0) == 0);
-    puts("PASS: failed signature encoding preserves the original blob and returns an error");
+    puts("PASS: encoding failure preserves the original; hash failure stops trust and attachment");
     return 0;
 }
 '''

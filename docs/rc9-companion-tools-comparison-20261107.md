@@ -44,8 +44,13 @@
 - Foundation 原生用例抽取生产 scheme 方法，读写真正的临时 plist，
   检查重写 scheme、未越狱、缺失/错误类型/损坏配置及读取不改变文件。
   它不模拟或执行 Sileo、UIKit 页面跳转或外置包安装。
-- 原生用例作为独立步骤接入 macOS CI；当前 Windows 无 Clang/Foundation，
-  新原生用例、完整 TIPA 构建和新入口真机验收尚未执行，不标为通过。
+- 原生用例作为独立步骤接入 macOS CI。GitHub Run `42368872578` 对应提交
+  `d080e2ea93eb1840cf40358225e835eb12b0e604`，已完成且结果为成功：
+  源码回归、运行时原生回归、签名编码失败回归、新增 scheme 原生回归、
+  完整 TIPA 构建、包身份校验和制品上传均通过。
+- Windows 本机无 Clang/Foundation；上述原生结果来自 macOS CI。
+  新入口的 UIKit 跳转、Sileo 详情与外置包安装仍待真机验收，
+  不挪用 `7ad14162` 的用户反馈作为这些新入口的验证。
 
 本轮关闭的是配套工具入口缺口，不是外置管理器的运行时审计。
 两个固定 Dopamine 源码对象中未检出 `TrustedBindMountsV1`、

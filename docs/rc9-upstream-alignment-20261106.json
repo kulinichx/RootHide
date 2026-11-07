@@ -394,14 +394,45 @@
       "python_test_suite": "154_passed",
       "git_diff_check": "passed",
       "native_test": "tests/test_rc9_companion_tools.py --native",
-      "native_execution": "pending_macos_ci",
-      "full_tipa_build": "pending",
+      "native_execution": "passed_GitHub_run_42368872578",
+      "full_tipa_build": "passed_GitHub_run_42368872578",
+      "package_identity": "passed_GitHub_run_42368872578",
+      "ci_commit": "d080e2ea93eb1840cf40358225e835eb12b0e604",
       "device_acceptance": "pending_for_new_links"
     },
     "limits": [
       "Host native tests exercise the production Foundation scheme reader, not UIKit, Sileo routing or package installation.",
       "External mount manager implementation and independent trust-manager behavior are not certified by adding package links.",
       "This does not close full iOS 16 device coverage, trustcache reader lifetime or dyld/basebin interruption recovery."
+    ]
+  },
+  "phase_twelve": {
+    "date": "2026-11-07",
+    "scope": "Signature source positional reads and hash failure propagation.",
+    "rc9_baseline": "d080e2ea93eb1840cf40358225e835eb12b0e604",
+    "references": {
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77"
+    },
+    "classification": "shared_upstream_failure_gaps_rc9_local_hardening",
+    "report": "docs/rc9-signature-source-comparison-20261107.md",
+    "changes": [
+      "Use bounded positional reads without changing the shared file offset; retry EINTR and positive short reads, reject errors and incomplete reads.",
+      "Check negative file positions and subtraction-based file bounds before offset addition; reject null allocation sources.",
+      "Stop on code-directory hash failure before querying or publishing hashes; free temporary state and return the existing generic -1 failure."
+    ],
+    "validation": {
+      "python_test_suite": "158_passed",
+      "git_diff_check": "passed",
+      "native_source_read_regression": "pending_macos_ci",
+      "native_hash_failure_regression": "pending_macos_ci",
+      "full_tipa_build": "pending",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "The raw-byte resolver test does not validate ChOma parser layouts or iOS kernel ABI.",
+      "Internal blob validation, concurrent file-mutation consistency and other skipped failure branches remain open.",
+      "No UI, version, iOS support scope, injection defaults, low-power schedule or mount behavior changes."
     ]
   },
   "ledger": [
@@ -428,7 +459,7 @@
       "id": "mount_and_trust_preferences",
       "classification": "rc9_and_zqbb_feature_overlap",
       "status": "companion_links_aligned_source_checks_pass_external_manager_runtime_not_audited",
-      "evidence": "phase_eleven; fixed ZQBB package links and Sileo scheme reader are ported. RC9 custom mount configuration and independent manager trust preferences are not equivalent to these links; their existing behavior is preserved. New native/CI/device validation remains pending."
+      "evidence": "phase_eleven; fixed ZQBB package links and Sileo scheme reader are ported. Native regressions, full TIPA build and package identity passed in run 42368872578 at d080e2ea. RC9 custom mount configuration and independent manager trust preferences are not equivalent to these links; their existing behavior is preserved. UIKit/Sileo routing and external manager device validation remain pending."
     },
     {
       "id": "custom_fake_mounts",
@@ -470,8 +501,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "file_directory_collection_errors_backported_attachment_encode_failure_guarded_other_paths_open",
-      "evidence": "phase_three, phase_four and phase_ten; tests/test_rc9_signature_collection.py, tests/test_rc9_trustcache_directory.py and tests/test_rc9_signature_attachment.py. Native attachment fault injection, full TIPA build and package identity passed in GitHub run 42339703952 at 7ad14162. User reported normal installation and general use; other parser/attachment paths, full device acceptance and trustcache lifetime remain open."
+      "status": "collection_errors_and_encode_failure_guarded_source_reads_and_hash_failures_hardened_other_paths_open",
+      "evidence": "phase_three, phase_four, phase_ten and phase_twelve. Attachment fault injection/build/identity passed in run 42339703952 at 7ad14162; user reported normal installation and general use of that candidate. Phase twelve adds positional source reads and hash failure checks with 158 local source contracts passed; new native/build validation pending. Other parser/attachment paths, full device acceptance and trustcache lifetime remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <limits.h>
 #include <choma/MachO.h>
 #include <choma/Fat.h>
 #include <choma/MemoryStream.h>
@@ -348,21 +349,34 @@ CS_SuperBlob *siginfo_resolve_superblob(struct siginfo *siginfo, int pid, int fd
 
 	switch (siginfo->source) {
 		case SIGNATURE_SOURCE_ALLOCATION: {
+			if (!siginfo->signature.fs_blob_start) break;
 			memcpy(superblob, siginfo->signature.fs_blob_start, superblobSize);
 			success = true;
 			break;
 		}
 		case SIGNATURE_SOURCE_FILE: {
-			uintptr_t superblobStart = siginfo->signature.fs_file_start + (uintptr_t)siginfo->signature.fs_blob_start;
-			uintptr_t superblobEnd   = superblobStart + superblobSize;
 			struct stat st = {};
-
 			if (fstat(fd, &st) != 0) break;
-			if (superblobEnd > st.st_size) break;
-			if (lseek(fd, superblobStart, SEEK_SET) != superblobStart) break;
-			if (read(fd, superblob, superblobSize) != superblobSize) break;
+			if (siginfo->signature.fs_file_start < 0 || st.st_size < 0) break;
+			uint64_t fileStart = (uint64_t)siginfo->signature.fs_file_start;
+			uint64_t blobOffset = (uintptr_t)siginfo->signature.fs_blob_start;
+			uint64_t fileSize = (uint64_t)st.st_size;
+			if (fileStart > fileSize || blobOffset > fileSize - fileStart) break;
+			uint64_t superblobStart = fileStart + blobOffset;
+			if (superblobSize > fileSize - superblobStart) break;
 
-			success = true;
+			// Positional reads must not disturb the caller's shared file offset.
+			size_t bytesRead = 0;
+			while (bytesRead < superblobSize) {
+				size_t remaining = superblobSize - bytesRead;
+				if (remaining > SSIZE_MAX) remaining = SSIZE_MAX;
+				ssize_t r = pread(fd, (uint8_t *)superblob + bytesRead, remaining,
+					(off_t)(superblobStart + bytesRead));
+				if (r < 0 && errno == EINTR) continue;
+				if (r <= 0) break;
+				bytesRead += (size_t)r;
+			}
+			success = bytesRead == superblobSize;
 			break;
 		}
 		case SIGNATURE_SOURCE_PROC: {
@@ -461,7 +475,12 @@ int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfo
 						}
 
 						cdhash_t cdhash;
-						csd_code_directory_calculate_hash(bestCDBlob, &cdhash);
+						if (csd_code_directory_calculate_hash(bestCDBlob, &cdhash) != 0) {
+							csd_superblob_free(decodedSuperblob);
+							free(cdhashes);
+							free(sigInfosToAttach);
+							return -1;
+						}
 						if (!is_cdhash_trustcached(cdhash)) {
 							memcpy(&cdhashes[cdhashesCount++], &cdhash, sizeof(cdhash_t));
 						}
