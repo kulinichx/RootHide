@@ -18,14 +18,16 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
-      "run": 42389863977,
+      "code_commit": "8061130dfaa71cf53da571917efc7b89e29507d5",
+      "run": 42393588176,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-c3610a00_roothide.tipa",
-      "artifact_id": 13580254660,
-      "github_artifact_archive_digest": "sha256:8a6c2236bbe8f84a1d7ad0694c4a84de841039537b6689e552eae65edf0cd5a1",
-      "scope": "skip_unchanged_supporter_self_healing_writes_preserve_jetsam_verification_and_existing_opt_in_scroll_diagnostics",
-      "device_acceptance": "this_UI_candidate_pending_user_confirmed_jetsam_fixed_before_this_change_top_bounce_remains_open"
+      "package": "Dopamine_3.0.7-8061130d_roothide.tipa",
+      "artifact_id": 13583120775,
+      "github_artifact_archive_digest": "sha256:05d16b362e28d60bc8959118840a8059bd8d08b4116d18f33636854e64c60706",
+      "package_sha256": "a83b6efca7aeb5f2e5afc57a7a37c62d64116ea5663d9aaa23ac9ca49aef3fb5",
+      "package_identity": "CI_and_local_passed",
+      "scope": "preserve_original_settings_and_about_geometry_in_outer_host_with_Preferences_as_only_table_frame_owner",
+      "device_acceptance": "this_UI_candidate_pending_Settings_and_About_user_confirmed_jetsam_fixed_before_this_change"
     },
     "reported_device_regressions": [
       {
@@ -699,7 +701,7 @@
         "package_identity": "passed_GitHub_run_42382233488",
         "ci_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
         "device_trace_usability": "confirmed_settings_c3610a00_ios166_109_samples_no_drops",
-        "top_bounce_fix": "shared_frame_cycle_candidate_pending_ci_and_device_see_settings_native_frame_followup"
+        "top_bounce_fix": "original_geometry_host_CI_and_package_verified_device_pending_see_settings_native_frame_followup"
       },
       "privacy": "Geometry, app build and OS/controller metadata only; no screenshots, account details, installed app lists or injection configuration.",
       "limitations": "Source contracts and native export tests do not execute UIKit physics, alert/share lifecycle, Preferences layout or display-link sampling on iOS."
@@ -783,7 +785,8 @@
   "settings_native_frame_followup": {
     "date": "2026-11-08",
     "baseline": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
-    "status": "measured_frame_cycle_removed_with_original_geometry_host_pending_ci_and_device",
+    "status": "measured_frame_cycle_removed_with_original_geometry_host_CI_and_package_verified_device_pending",
+    "code_commit": "8061130dfaa71cf53da571917efc7b89e29507d5",
     "report": "docs/rc9-settings-native-frame-20261108.md",
     "runtime_evidence": {
       "controller": "DOSettingsController",
@@ -812,8 +815,14 @@
       "source_contracts": "215_passed",
       "fixture_comparison_to_original": "passed_all_nine_triplets_constants_and_SHA256",
       "git_diff_check": "passed",
-      "native": "pending_CI_counted_parent_and_table_not_UIKit",
-      "full_tipa": "pending",
+      "native": "passed_run_42393588176_counted_parent_and_table_not_UIKit",
+      "full_tipa": "passed_run_42393588176",
+      "package_identity": "CI_and_local_passed",
+      "ci_run": 42393588176,
+      "artifact_id": 13583120775,
+      "package_sha256": "a83b6efca7aeb5f2e5afc57a7a37c62d64116ea5663d9aaa23ac9ca49aef3fb5",
+      "github_artifact_archive_digest": "sha256:05d16b362e28d60bc8959118840a8059bd8d08b4116d18f33636854e64c60706",
+      "ci_local_comparison": "package_size_app_basebin_bundled_deb_hashes_eight_recorded_source_fingerprints_and_commit_match_not_reproducible_build_proof",
       "device": "pending_Settings_and_About"
     },
     "preserved": "Product 3.0.7, existing iOS 16 supported combinations, Jetsam, low-power UI/runtime, menus, licensing, injection and jailbreak runtime."
@@ -854,8 +863,8 @@
     {
       "id": "custom_glass_and_ui",
       "classification": "rc9_specific",
-      "status": "device_trace_identified_frame_cycle_original_geometry_host_candidate_pending_ci_and_device",
-      "evidence": "settings_native_frame_followup; docs/rc9-settings-native-frame-20261108.md. Actual c3610a00 iOS16.6 settings trace records nine parent/RC9 frame cycles and six negative-offset resets inside parent layout. Preserve the original list rectangle in an outer host and remove the post-parent table resize. The widening candidate was withdrawn; Settings and About device acceptance remains pending."
+      "status": "device_trace_identified_frame_cycle_original_geometry_host_CI_and_package_verified_device_pending",
+      "evidence": "settings_native_frame_followup; docs/rc9-settings-native-frame-20261108.md. Actual c3610a00 iOS16.6 settings trace records nine parent/RC9 frame cycles and six negative-offset resets inside parent layout. Commit 8061130d preserves the original list rectangle in an outer host and removes the post-parent table resize; native boundary regressions, full TIPA and CI/local package verification passed at run 42393588176. The widening candidate was withdrawn; Settings and About device acceptance remains pending."
     },
     {
       "id": "trustcache_kernel_reader_lifetime",
