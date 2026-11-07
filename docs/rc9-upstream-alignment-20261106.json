@@ -2,6 +2,16 @@
   "schema_version": 1,
   "date": "2026-11-06",
   "scope": "Incremental iOS 16 alignment: RC9 module isolation, UI integration, fork handshake, signature and trustcache failure handling.",
+  "active_comparison_policy": {
+    "date": "2026-11-07",
+    "requested_by_user": "Use official RootHide Dopamine only for this comparison.",
+    "repository": "roothide/Dopamine-roothide",
+    "release": "3.0.13-30",
+    "tag": "30",
+    "commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+    "reference_directory": "artifacts/worktrees/official-roothide-3.0.13-30-9617d75f",
+    "scope": "Existing supported iOS 16 device/firmware combinations; preserve RC9-specific features. Earlier zqbb entries are historical evidence, not the active porting baseline."
+  },
   "rc9": {
     "commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
     "product_version": "3.0.7",
@@ -15,7 +25,7 @@
       "artifact_id": 13578670362,
       "github_artifact_archive_digest": "sha256:5b80e1274c15c2a04b0ab72f22a98182d4b6bbae4f8653c6e1f746a3d35f7472",
       "scope": "jetsam_GET_descriptor_termination_and_checked_setter_plus_opt_in_scroll_diagnostics_no_top_bounce_fix_claimed",
-      "device_acceptance": "jetsam_retest_and_trace_usability_pending_top_bounce_remains_open"
+      "device_acceptance": "user_reports_jetsam_still_reverts_to_30_installed_build_and_reload_conditions_not_reconfirmed_top_bounce_remains_open"
     },
     "reported_device_regressions": [
       {
@@ -697,7 +707,7 @@
   },
   "jetsam_readback_followup": {
     "date": "2026-11-07",
-    "status": "confirmed_short_descriptor_array_overread_fixed_native_and_full_build_passed_device_pending",
+    "status": "user_reports_symptom_persists_root_cause_open_official_only_second_pass_in_progress",
     "report": "docs/rc9-jetsam-preference-readback-20261107.md",
     "baseline": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
     "user_report": "A group member selects a jetsam option other than 30 MB, returns, and sees the default 30 MB again.",
@@ -724,9 +734,29 @@
       "full_tipa_build": "passed_GitHub_run_42382233488",
       "package_identity": "passed_GitHub_run_42382233488",
       "ci_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
-      "device_acceptance": "pending"
+      "device_acceptance": "user_reports_still_reverts_to_30_installed_build_and_reload_conditions_not_reconfirmed"
     },
     "install_requirement": "Reboot and jailbreak with the new app to load the repaired launchdhook; app overwrite alone does not replace running launchd code.",
+    "official_only_second_pass": {
+      "report": "docs/rc9-jetsam-official-alignment-20261107.md",
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "rc9_baseline": "f40d95ba0b4677a43a18f5c7d8f2a944dd9ffb0b",
+      "source_comparison": "The original getter, option numbers, client GET/double/SET functions and platform permission handler match official function bodies after whitespace removal. RC9's earlier checked setter and GET terminator differ intentionally.",
+      "changes": [
+        "Require a dictionary reply with an explicit INT64 result in int range; initialize GET outputs and require a success value.",
+        "Add status-preserving double reads and verified write/read-back without changing wire IDs or server parameter layout.",
+        "Do not actively map failed reads to the recommended 30 MB choice; show read failure in the existing jetsam footer.",
+        "Only persist after a verified live write. Report atomic preference-file write failure separately and do not publish a false in-memory saved value.",
+        "Defer failed-choice reload and alert until the Preferences selection callback finishes."
+      ],
+      "validation": {
+        "source_contracts": "203_passed",
+        "diff_check": "passed",
+        "native": "pending_macOS_real_Darwin_XPC_objects_substituted_transport_and_actual_Foundation_storage",
+        "tipa": "pending",
+        "device": "not_tested_no_claim_that_the_reported_root_cause_is_proven"
+      }
+    },
     "preserved": "Product 3.0.7, original supported iOS 16 device/firmware combinations, low-power schedule, injection defaults, mounts and remaining menu entries."
   },
   "ledger": [

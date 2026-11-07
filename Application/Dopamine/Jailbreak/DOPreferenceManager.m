@@ -59,6 +59,18 @@
     [self savePreferences];
 }
 
+- (BOOL)setPreferenceValue:(NSObject *)obj forKey:(NSString *)key error:(NSError **)error
+{
+    // Publish the in-memory change only after the atomic file replacement succeeds.
+    NSMutableDictionary *updated = [_preferences mutableCopy];
+    [updated setObject:obj forKey:key];
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:updated
+        format:NSPropertyListXMLFormat_v1_0 options:0 error:error];
+    if (!data || ![data writeToFile:_preferencesPath options:NSDataWritingAtomic error:error]) return NO;
+    _preferences = updated;
+    return YES;
+}
+
 - (void)removePreferenceValueForKey:(NSString *)key
 {
     [_preferences removeObjectForKey:key];

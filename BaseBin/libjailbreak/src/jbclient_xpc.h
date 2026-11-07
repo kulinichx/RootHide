@@ -6,6 +6,12 @@
 #include <stdint.h>
 #include "signatures.h"
 
+enum {
+    JBCLIENT_SETTINGS_ERROR_INVALID_REPLY = -2,
+    JBCLIENT_SETTINGS_ERROR_INVALID_VALUE = -3,
+    JBCLIENT_SETTINGS_ERROR_READBACK_MISMATCH = -4,
+};
+
 void jbclient_xpc_set_custom_port(mach_port_t serverPort);
 
 xpc_object_t jbserver_xpc_send_dict(xpc_object_t xdict);
@@ -22,12 +28,16 @@ int jbclient_jbsettings_get(const char *key, xpc_object_t *valueOut);
 bool jbclient_jbsettings_get_bool(const char *key);
 uint64_t jbclient_jbsettings_get_uint64(const char *key);
 double jbclient_jbsettings_get_double(const char *key);
+// Unlike the legacy value-only getter, failures are distinguishable from zero.
+int jbclient_jbsettings_get_double_checked(const char *key, double *valueOut);
 int jbclient_platform_set_process_debugged(uint64_t pid, bool fullyDebugged);
 int jbclient_platform_stage_jailbreak_update(const char *updateTar);
 int jbclient_platform_jbsettings_set(const char *key, xpc_object_t value);
 int jbclient_platform_jbsettings_set_bool(const char *key, bool boolValue);
 int jbclient_platform_jbsettings_set_uint64(const char *key, uint64_t uint64Value);
 int jbclient_platform_jbsettings_set_double(const char *key, double doubleValue);
+// Confirms the running server's value; does not save app preferences.
+int jbclient_platform_jbsettings_set_double_verified(const char *key, double doubleValue, double *actualOut);
 //int jbclient_platform_set_systemwide_domain_enabled(bool enabled);
 int jbclient_watchdog_intercept_userspace_panic(const char *panicMessage);
 int jbclient_watchdog_get_last_userspace_panic(char **panicMessage);

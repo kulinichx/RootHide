@@ -21,6 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)boolPreferenceValueForKey:(NSString *)key fallback:(BOOL)fallback;
 
 - (void)setPreferenceValue:(NSObject *)obj forKey:(NSString *)key;
+- (BOOL)setPreferenceValue:(NSObject *)obj forKey:(NSString *)key error:(NSError * _Nullable * _Nullable)error;
 - (void)removePreferenceValueForKey:(NSString *)key;
 
 @end

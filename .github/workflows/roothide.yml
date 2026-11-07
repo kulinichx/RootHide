@@ -109,6 +109,7 @@ jobs:
           python3 tests/test_rc9_fake_mounts.py --native
           python3 tests/test_rc9_upstream_313.py --native
           python3 tests/test_rc9_ipc_dispatch.py --native
+          python3 tests/test_rc9_settings_client.py --native
           python3 tests/test_rc9_forkfix.py --native
           python3 tests/test_rc9_signature_collection.py --native
           python3 tests/test_rc9_trustcache_directory.py --native

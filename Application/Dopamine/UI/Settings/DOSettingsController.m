@@ -22,6 +22,7 @@
 #import "DOLowPowerScheduleController.h"
 #import "DOButtonCell.h"
 #import "../DOSupporterLicense.h"
+#include <math.h>
 
 #pragma mark - Custom Glass page appearance
 
@@ -1298,12 +1299,36 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
     }
 }
 
+- (void)presentJetsamErrorWithTitle:(NSString *)title message:(NSString *)message
+{
+    // Let Preferences finish its selection callback before reloading its rows.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self reloadSpecifiers];
+        UIViewController *presenter = self.navigationController.topViewController ?: self;
+        if ([presenter isKindOfClass:[DOPSJetsamListItemsController class]]) {
+            [(DOPSJetsamListItemsController *)presenter reloadSpecifiers];
+        }
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+            message:message preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK")
+            style:UIAlertActionStyleDefault handler:nil]];
+        [presenter presentViewController:alert animated:YES completion:nil];
+    });
+}
+
 - (id)readJetsamMultiplier:(PSSpecifier *)specifier
 {
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
     if (envManager.isJailbroken) {
-        double v = jbclient_jbsettings_get_double("jetsamMultiplier");
-        return @((v < 1 || isnan(v)) ? 6 : ceil(v * 2));
+        double v = 0;
+        int result = jbclient_jbsettings_get_double_checked("jetsamMultiplier", &v);
+        if (result != 0 || !isfinite(v) || (v != 0 && (v < 1 || v > 4))) {
+            NSLog(@"[RC9 Jetsam] read not confirmed: result=%d value=%g", result, v);
+            // Keep Preferences' numeric getter contract without selecting a real option.
+            return @(-1);
+        }
+        // A successfully read zero is the existing default; a failed read is not.
+        return @(v == 0 ? 6 : ceil(v * 2));
     }
     return [self readPreferenceValue:specifier];
 }
@@ -1312,21 +1337,26 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 {
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
     if (envManager.isJailbroken) {
-        int result = jbclient_platform_jbsettings_set_double("jetsamMultiplier", ((NSNumber *)value).doubleValue / 2);
+        double actual = NAN;
+        double requested = ((NSNumber *)value).doubleValue / 2;
+        int result = jbclient_platform_jbsettings_set_double_verified("jetsamMultiplier", requested, &actual);
+        NSLog(@"[RC9 Jetsam] apply result=%d requested=%g actual=%g", result, requested, actual);
         if (result != 0) {
-            [self reloadSpecifiers];
-            UIAlertController *alert = [UIAlertController
-                alertControllerWithTitle:DOLocalizedString(@"Jetsam_Apply_Failed_Title")
-                message:[NSString stringWithFormat:DOLocalizedString(@"Jetsam_Apply_Failed_Body"), result]
-                preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK")
-                style:UIAlertActionStyleDefault handler:nil]];
-            UIViewController *presenter = self.navigationController.topViewController ?: self;
-            [presenter presentViewController:alert animated:YES completion:nil];
+            NSString *message = [NSString stringWithFormat:DOLocalizedString(@"Jetsam_Apply_Failed_Body"), result];
+            if (result == JBCLIENT_SETTINGS_ERROR_READBACK_MISMATCH) {
+                message = [message stringByAppendingFormat:@"\n\n%@",
+                    [NSString stringWithFormat:DOLocalizedString(@"Jetsam_Readback_Mismatch_Body"), requested, actual]];
+            }
+            [self presentJetsamErrorWithTitle:DOLocalizedString(@"Jetsam_Apply_Failed_Title") message:message];
             return;
         }
     }
-    [self setPreferenceValue:value specifier:specifier];
+    NSError *saveError = nil;
+    if (![[DOPreferenceManager sharedManager] setPreferenceValue:value forKey:[specifier propertyForKey:@"key"] error:&saveError]) {
+        NSString *bodyKey = envManager.isJailbroken ? @"Jetsam_Save_Failed_Live_Body" : @"Jetsam_Save_Failed_Body";
+        NSString *message = [NSString stringWithFormat:DOLocalizedString(bodyKey), saveError.localizedDescription ?: @""];
+        [self presentJetsamErrorWithTitle:DOLocalizedString(@"Jetsam_Save_Failed_Title") message:message];
+    }
 }
 
 - (void)setRemoveJailbreakEnabled:(id)value specifier:(PSSpecifier *)specifier

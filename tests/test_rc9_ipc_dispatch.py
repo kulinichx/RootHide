@@ -81,15 +81,17 @@ class IPCDispatchContracts(unittest.TestCase):
     def test_jetsam_failed_live_update_does_not_persist_false_success(self):
         settings = source("Application/Dopamine/UI/Settings/DOSettingsController.m")
         setter = extract(settings, "- (void)setJetsamMultiplier:")
-        apply = setter.index('jbclient_platform_jbsettings_set_double("jetsamMultiplier"')
+        apply = setter.index('jbclient_platform_jbsettings_set_double_verified("jetsamMultiplier"')
         guard = setter.index("if (result != 0)")
-        persist = setter.index("[self setPreferenceValue:value specifier:specifier];")
+        persist = setter.index("setPreferenceValue:value forKey:")
         self.assertLess(apply, guard)
         self.assertLess(guard, setter.index("return;"))
         self.assertLess(setter.index("return;"), persist)
         self.assertIn('DOLocalizedString(@"Jetsam_Apply_Failed_Body"), result', setter)
-        self.assertIn("self.navigationController.topViewController ?: self", setter)
-        self.assertIn("[presenter presentViewController:alert", setter)
+        presenter = extract(settings, "- (void)presentJetsamErrorWithTitle:")
+        self.assertIn("self.navigationController.topViewController ?: self", presenter)
+        self.assertIn("[presenter presentViewController:alert", presenter)
+        self.assertIn("dispatch_async(dispatch_get_main_queue()", presenter)
         self.assertIn("((NSNumber *)value).doubleValue / 2", setter)
 
 

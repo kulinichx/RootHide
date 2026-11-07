@@ -7,8 +7,13 @@
 "ScrollDiagnostics_Armed" = "Recording enabled";
 "ScrollDiagnostics_Empty" = "No scroll gesture recorded";
 "ScrollDiagnostics_ExportFailed" = "Could not export the diagnostic record";
-"Jetsam_Apply_Failed_Title" = "Could Not Apply Memory Setting";
-"Jetsam_Apply_Failed_Body" = "The running jailbreak environment rejected this setting (error %d). This change was not saved. Try again after rebooting and jailbreaking with the updated app.";
+"Jetsam_Apply_Failed_Title" = "Memory Setting Not Confirmed";
+"Jetsam_Apply_Failed_Body" = "The memory setting could not be confirmed (error %d). This change was not saved. Keep this message for troubleshooting.";
+"Jetsam_Readback_Mismatch_Body" = "Requested internal value: %.1f. Read-back internal value: %.1f.";
+"Jetsam_Read_Failed_Body" = "The current running setting could not be read (error %d). The default must not be treated as a confirmed running value.";
+"Jetsam_Save_Failed_Title" = "Memory Setting Not Saved";
+"Jetsam_Save_Failed_Body" = "The preference could not be saved. The previous saved value is unchanged. Error: %@";
+"Jetsam_Save_Failed_Live_Body" = "The running setting was applied, but the preference could not be saved. It may return to the previous value after a reboot. Error: %@";
 
 // Jailbreak Button
 "Button_Jailbreak_Title" = "Jailbreak";
