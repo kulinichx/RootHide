@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-06",
-  "scope": "Incremental iOS 16 alignment: RC9 module isolation, UI integration, fork handshake and signature collection backports.",
+  "scope": "Incremental iOS 16 alignment: RC9 module isolation, UI integration, fork handshake, file and directory signature collection backports.",
   "rc9": {
     "commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
     "product_version": "3.0.7",
@@ -112,7 +112,7 @@
     }
   },
   "phase_three": {
-    "status": "source_regressions_passed_native_and_full_build_pending",
+    "status": "native_regressions_full_build_and_package_identity_passed_device_pending",
     "ui_integration": {
       "source_commit": "f2129c8f383c9998cc52f04aad9f1b65887fe6dc",
       "cherry_pick_commit_prefix": "6c18c06d",
@@ -140,10 +140,38 @@
       "project_tests": 125,
       "manager_package_tool_tests": 7,
       "diff_check": "passed",
+      "native_execution": "passed_GitHub_run_42247320032",
+      "full_tipa_build": "passed_GitHub_run_42247320032",
+      "local_package_identity": "passed_for_076105762f20609134ffba355cc9c9b910e4a907",
+      "device_acceptance": "pending"
+    }
+  },
+  "phase_four": {
+    "date": "2026-11-07",
+    "status": "source_regressions_passed_native_and_full_build_pending",
+    "module": "BaseBin/libjailbreak/src/trustcache_fs.c",
+    "source_commit": "15a075427c758eadd366260360c529a7762af4db",
+    "scope": "Propagate directory open/read/stat/allocation/parse/callback/close failures, reject partial collections, probe Mach-O magic with EINTR and short-read handling, and clean up all add-entrypoint outcomes.",
+    "preserved": [
+      "RC9 errno-style return values.",
+      "File collector path filtering and per-slice randomization.",
+      "Recursive toggle and no symlink or special-file traversal.",
+      "All UI, low-power scheduling, mount configuration and injection policy."
+    ],
+    "native_test": "tests/test_rc9_trustcache_directory.py --native",
+    "local_validation": {
+      "project_tests": 131,
+      "diff_check": "passed",
       "native_execution": "pending_macOS_CI",
       "full_tipa_build": "pending",
       "device_acceptance": "pending"
-    }
+    },
+    "limitations": [
+      "No other active in-tree callers of these exported directory-add APIs were found; not a confirmed root cause for reboot or UI symptoms.",
+      "The new native harness uses real host filesystem operations but mocks ChOma parsing, file hash collection and kernel insertion.",
+      "Does not provide a transaction across concurrently changing files or roll back earlier per-file randomization.",
+      "Kernel trustcache reader lifetime and remaining signature attachment/parser paths remain open."
+    ]
   },
   "ledger": [
     {
@@ -198,13 +226,13 @@
       "id": "forkfix_and_post_fork_locks",
       "classification": "pending_module_comparison",
       "status": "handshake_backported_post_fork_locks_and_remaining_lifetimes_open",
-      "evidence": "phase_three; tests/test_rc9_forkfix.py. Native execution and iOS validation pending."
+      "evidence": "phase_three; tests/test_rc9_forkfix.py. Native execution passed in run 42247320032; iOS validation pending."
     },
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "collection_error_handling_backported_other_signature_and_directory_paths_open",
-      "evidence": "phase_three; tests/test_rc9_signature_collection.py. Does not close trustcache lifetime or all parser/attachment paths."
+      "status": "file_and_directory_collection_errors_backported_other_signature_paths_open",
+      "evidence": "phase_three and phase_four; tests/test_rc9_signature_collection.py and tests/test_rc9_trustcache_directory.py. Directory native CI pending; does not close trustcache lifetime or all parser/attachment paths."
     }
   ]
 }
