@@ -338,6 +338,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     [backButton addTarget:self action:@selector(customGlassBackPressed)
          forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:backButton];
+    [self installScrollDiagnosticsForBackButton:backButton];
 
     [NSLayoutConstraint activateConstraints:@[
         [backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:10.0],

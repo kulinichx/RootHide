@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setupViewControllerStyle:(UIViewController*)vc;
 
 - (void)keepTableBackdropViewsBehindContent:(NSArray<UIView *> *)backdropViews;
+- (void)installScrollDiagnosticsForBackButton:(UIButton *)button;
 
 @end
 

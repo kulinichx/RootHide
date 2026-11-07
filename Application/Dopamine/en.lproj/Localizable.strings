@@ -3,6 +3,10 @@
 // Log
 "Status_Title_Jailbreaking" = "Jailbreaking";
 "Log_Error" = "Error";
+"ScrollDiagnostics_Title" = "Scroll Diagnostics";
+"ScrollDiagnostics_Armed" = "Recording enabled";
+"ScrollDiagnostics_Empty" = "No scroll gesture recorded";
+"ScrollDiagnostics_ExportFailed" = "Could not export the diagnostic record";
 
 // Jailbreak Button
 "Button_Jailbreak_Title" = "Jailbreak";

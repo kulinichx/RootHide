@@ -14,7 +14,7 @@
       "package": "Dopamine_3.0.7-1a7feb18_roothide.tipa",
       "artifact_id": 13575924938,
       "github_artifact_archive_digest": "sha256:78c70a695bbc1ac51bcaf9cd5e6dae3dd662618b27ba62f67314551f7e337faa",
-      "device_acceptance": "pending_for_this_candidate"
+      "device_acceptance": "failed_user_confirmed_settings_top_rebound_oscillation_bottom_normal"
     },
     "reported_device_regressions": [
       {
@@ -640,11 +640,22 @@
   "settings_bounce_followup": {
     "date": "2026-11-07",
     "runtime_baseline": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
-    "status": "scoped_order_guard_native_and_full_build_passed_device_bounce_acceptance_pending",
+    "status": "scoped_order_guard_build_passed_device_top_bounce_failed_opt_in_diagnostics_in_progress",
     "report": "docs/rc9-settings-bounce-audit-20261107.md",
     "finding": "Settings and Credits unconditionally reorder every section backdrop in every willDisplayCell callback; the normal low-power page does not.",
     "change": "Keep the existing foreground styling and repair backdrop order only when an attached backdrop is actually above table content.",
     "not_established": "Neither added menu count nor redundant ordering is established as the device bounce root cause.",
+    "latest_device_description": {
+      "date": "2026-11-07",
+      "source": "user_report",
+      "page": "Dopamine settings",
+      "top_boundary": "Repeated rebound or oscillation that looks like stutter.",
+      "bottom_boundary": "Normal rebound.",
+      "comparison_page": "Low-power schedule page was reported to rebound normally.",
+      "installed_build": "1a7feb18edffd787a10de0524b3e27a37535d7e9",
+      "relation_to_1a7feb18": "User explicitly confirmed 1a7feb18 as the installed build; its settings top-bounce acceptance failed.",
+      "cause": "unconfirmed_requires_runtime_geometry_or_other_direct_evidence"
+    },
     "preserved": [
       "All remaining menu entries, their actions and Preferences-backed behavior.",
       "Native scrolling, inset policy, modal frames, material parameters and the low-power page.",
@@ -659,7 +670,26 @@
       "full_tipa_build": "passed_GitHub_run_42378929588",
       "package_identity": "passed_GitHub_run_42378929588",
       "ci_commit": "1a7feb18edffd787a10de0524b3e27a37535d7e9",
-      "device_bounce_acceptance": "pending"
+      "device_bounce_acceptance": "failed_user_confirmed_1a7feb18_settings_top_rebound"
+    },
+    "runtime_diagnostics": {
+      "status": "observability_only_not_a_fix",
+      "scope": "Opt-in long press on the existing Settings or About back arrow; bounded geometry and Preferences/RC9 layout phase recording without scroll parameter changes.",
+      "default": "off_confirm_to_arm_next_pan_to_capture",
+      "limits": "1024 most recent samples; eight seconds maximum per gesture; stop after 0.5 seconds of settled idle or on page disappearance/application inactivity.",
+      "export": "RC9-scroll-UUID.json using the native share sheet with an iPad popover anchor.",
+      "source_test": "tests/test_rc9_scroll_diagnostics.py",
+      "native_export_test": "tests/test_rc9_scroll_diagnostics.py --native",
+      "validation": {
+        "source_tests": "193_passed_Windows_source_contracts_only",
+        "git_diff_check": "passed",
+        "native_export": "pending_macOS_CI",
+        "full_build": "pending_macOS_CI",
+        "device_trace_usability": "pending",
+        "top_bounce_fix": "not_claimed_runtime_evidence_required"
+      },
+      "privacy": "Geometry, app build and OS/controller metadata only; no screenshots, account details, installed app lists or injection configuration.",
+      "limitations": "Source contracts and native export tests do not execute UIKit physics, alert/share lifecycle, Preferences layout or display-link sampling on iOS."
     }
   },
   "ledger": [
@@ -698,8 +728,8 @@
     {
       "id": "custom_glass_and_ui",
       "classification": "rc9_specific",
-      "status": "scoped_backdrop_order_guard_device_bounce_root_cause_and_acceptance_open",
-      "evidence": "settings_bounce_followup; docs/rc9-settings-bounce-audit-20261107.md. Remove unconditional per-cell backdrop reordering while retaining occlusion repair. No inset, frame, menu or low-power change; UIKit bounce root cause is not established by source inspection."
+      "status": "scoped_backdrop_guard_device_top_bounce_failed_runtime_diagnostics_in_progress",
+      "evidence": "settings_bounce_followup; docs/rc9-settings-bounce-audit-20261107.md. User confirmed 1a7feb18 still oscillates at the settings top boundary while bottom rebound is normal. Add opt-in geometry observation, not another guessed scroll change; root cause and device fix remain open."
     },
     {
       "id": "trustcache_kernel_reader_lifetime",

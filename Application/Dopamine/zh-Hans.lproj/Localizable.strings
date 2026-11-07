@@ -3,6 +3,10 @@
 // Log
 "Status_Title_Jailbreaking" = "正在越狱";
 "Log_Error" = "发生错误";
+"ScrollDiagnostics_Title" = "滚动诊断";
+"ScrollDiagnostics_Armed" = "已开启记录";
+"ScrollDiagnostics_Empty" = "尚未记录到滚动";
+"ScrollDiagnostics_ExportFailed" = "无法导出诊断记录";
 
 // Jailbreak Button
 "Button_Jailbreak_Title" = "越狱";
