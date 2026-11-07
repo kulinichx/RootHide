@@ -8,14 +8,14 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
-      "run": 42381506909,
+      "code_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
+      "run": 42382233488,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-2a110d35_roothide.tipa",
-      "artifact_id": 13578270151,
-      "github_artifact_archive_digest": "sha256:8bd0813a5722971cbfa6608610803e6ecb78d76215a378a162e0d3755a3a8799",
-      "scope": "diagnostic_only_no_top_bounce_fix_claimed",
-      "device_acceptance": "trace_usability_pending_top_bounce_remains_open"
+      "package": "Dopamine_3.0.7-157ebf4c_roothide.tipa",
+      "artifact_id": 13578670362,
+      "github_artifact_archive_digest": "sha256:5b80e1274c15c2a04b0ab72f22a98182d4b6bbae4f8653c6e1f746a3d35f7472",
+      "scope": "jetsam_GET_descriptor_termination_and_checked_setter_plus_opt_in_scroll_diagnostics_no_top_bounce_fix_claimed",
+      "device_acceptance": "jetsam_retest_and_trace_usability_pending_top_bounce_remains_open"
     },
     "reported_device_regressions": [
       {
@@ -641,7 +641,7 @@
   "settings_bounce_followup": {
     "date": "2026-11-07",
     "runtime_baseline": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
-    "status": "scoped_order_guard_build_passed_device_top_bounce_failed_opt_in_diagnostics_in_progress",
+    "status": "scoped_order_guard_device_top_bounce_failed_diagnostic_build_passed_runtime_evidence_pending",
     "report": "docs/rc9-settings-bounce-audit-20261107.md",
     "finding": "Settings and Credits unconditionally reorder every section backdrop in every willDisplayCell callback; the normal low-power page does not.",
     "change": "Keep the existing foreground styling and repair backdrop order only when an attached backdrop is actually above table content.",
@@ -682,12 +682,12 @@
       "source_test": "tests/test_rc9_scroll_diagnostics.py",
       "native_export_test": "tests/test_rc9_scroll_diagnostics.py --native",
       "validation": {
-        "source_tests": "193_passed_Windows_source_contracts_only",
+        "source_tests": "195_passed_Windows_source_contracts_only",
         "git_diff_check": "passed",
-        "native_export": "passed_GitHub_run_42381506909",
-        "full_build": "passed_GitHub_run_42381506909",
-        "package_identity": "passed_GitHub_run_42381506909",
-        "ci_commit": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
+        "native_export": "passed_GitHub_run_42382233488",
+        "full_build": "passed_GitHub_run_42382233488",
+        "package_identity": "passed_GitHub_run_42382233488",
+        "ci_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
         "device_trace_usability": "pending",
         "top_bounce_fix": "not_claimed_runtime_evidence_required"
       },
@@ -697,7 +697,7 @@
   },
   "jetsam_readback_followup": {
     "date": "2026-11-07",
-    "status": "confirmed_short_descriptor_array_overread_fixed_native_and_build_pending",
+    "status": "confirmed_short_descriptor_array_overread_fixed_native_and_full_build_passed_device_pending",
     "report": "docs/rc9-jetsam-preference-readback-20261107.md",
     "baseline": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
     "user_report": "A group member selects a jetsam option other than 30 MB, returns, and sees the default 30 MB again.",
@@ -720,8 +720,10 @@
       "git_diff_check": "passed",
       "native_test": "tests/test_rc9_ipc_dispatch.py --native",
       "native_extension": "Extract actual GET/SET tables, dispatcher and server handlers; seven jetsam and two JIT round-trips with mocked XPC.",
-      "native_execution": "pending_macOS_CI",
-      "full_tipa_build": "pending_macOS_CI",
+      "native_execution": "passed_GitHub_run_42382233488",
+      "full_tipa_build": "passed_GitHub_run_42382233488",
+      "package_identity": "passed_GitHub_run_42382233488",
+      "ci_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
       "device_acceptance": "pending"
     },
     "install_requirement": "Reboot and jailbreak with the new app to load the repaired launchdhook; app overwrite alone does not replace running launchd code.",
@@ -763,7 +765,7 @@
     {
       "id": "custom_glass_and_ui",
       "classification": "rc9_specific",
-      "status": "scoped_backdrop_guard_device_top_bounce_failed_runtime_diagnostics_in_progress",
+      "status": "scoped_backdrop_guard_device_top_bounce_failed_diagnostic_build_passed_runtime_evidence_pending",
       "evidence": "settings_bounce_followup; docs/rc9-settings-bounce-audit-20261107.md. User confirmed 1a7feb18 still oscillates at the settings top boundary while bottom rebound is normal. Add opt-in geometry observation, not another guessed scroll change; root cause and device fix remain open."
     },
     {
