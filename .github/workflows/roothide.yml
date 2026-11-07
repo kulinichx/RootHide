@@ -71,6 +71,7 @@ jobs:
             shasum -a 256 .github/patches/XPF-roothide.patch .github/patches/opainject-build.patch
             shasum -a 256 .github/patches/ChOma-signature-boundaries.patch
             shasum -a 256 BaseBin/ChOma/src/CSBlob.c BaseBin/ChOma/src/CSBlob.h BaseBin/ChOma/src/BufferedStream.c
+            shasum -a 256 BaseBin/ChOma/src/MachO.c
           } > artifacts/source-provenance.txt
           cat artifacts/source-provenance.txt
 
@@ -128,6 +129,9 @@ jobs:
 
       - name: Recursive signature collection error regression
         run: python3 tests/test_rc9_recursive_signatures.py --native
+
+      - name: Fixed ChOma load-command regression
+        run: python3 tests/test_rc9_choma_load_commands.py --native
 
       - name: Companion tool Sileo scheme regression
         run: python3 tests/test_rc9_companion_tools.py --native

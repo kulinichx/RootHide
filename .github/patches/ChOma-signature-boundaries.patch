@@ -215,3 +215,171 @@ index cefb200..b96b9fb 100644
 -#endif // CS_BLOB_H
 \ No newline at end of file
 +#endif // CS_BLOB_H
+diff --git a/src/MachO.c b/src/MachO.c
+index f1a85d3..10b3601 100644
+--- a/src/MachO.c
++++ b/src/MachO.c
+@@ -204,6 +204,7 @@ int macho_write_at_vmaddr(MachO *macho, uint64_t vmaddr, size_t size, const void
+ 
+ int macho_enumerate_load_commands(MachO *macho, void (^enumeratorBlock)(struct load_command loadCommand, uint64_t offset, void *cmd, bool *stop))
+ {
++    if (!macho || !macho->stream || !enumeratorBlock) return -1;
+     if (macho->machHeader.ncmds < 1 || macho->machHeader.ncmds > 1000) {
+         printf("Error: invalid number of load commands (%d).\n", macho->machHeader.ncmds);
+         return -1;
+@@ -211,30 +212,44 @@ int macho_enumerate_load_commands(MachO *macho, void (^enumeratorBlock)(struct l
+ 
+     // First load command starts after mach header
+     uint64_t headerSize = macho_get_mach_header_size(macho);
++    size_t streamSize = memory_stream_get_size(macho->stream);
++    if (streamSize == MEMORY_STREAM_SIZE_INVALID || headerSize > streamSize ||
++        macho->machHeader.sizeofcmds > streamSize - headerSize) return -1;
++    uint64_t commandsEnd = headerSize + macho->machHeader.sizeofcmds;
+     uint64_t offset = headerSize;
+ 
+-    for (int j = 0; j < macho->machHeader.ncmds; j++) {
++    for (uint32_t j = 0; j < macho->machHeader.ncmds; j++) {
++        if (offset > commandsEnd || sizeof(struct load_command) > commandsEnd - offset) return -1;
+         struct load_command loadCommand;
+-        if (macho_read_at_offset(macho, offset, sizeof(loadCommand), &loadCommand) != 0) continue;
++        if (macho_read_at_offset(macho, offset, sizeof(loadCommand), &loadCommand) != 0) return -1;
+         LOAD_COMMAND_APPLY_BYTE_ORDER(&loadCommand, LITTLE_TO_HOST_APPLIER);
+         
+-        if ((offset + loadCommand.cmdsize) > (headerSize + macho->machHeader.sizeofcmds)) {
+-            printf("Warning: Stopped reading load commands of %p at %#llx, because offset (%#llx) exceeded sizeofcmds (%#x), only read %d load commands instead of %d\n", macho, offset, offset + loadCommand.cmdsize, macho->machHeader.sizeofcmds, j, macho->machHeader.ncmds);
+-            if (macho_read_at_offset(macho, offset, sizeof(loadCommand), &loadCommand) != 0) continue;
+-            break;
+-        }
++        if (loadCommand.cmdsize < sizeof(struct load_command) ||
++            loadCommand.cmdsize > commandsEnd - offset) return -1;
+ 
+         if (strcmp(load_command_to_string(loadCommand.cmd), "LC_UNKNOWN") == 0)
+         {
+             printf("Ignoring unknown command: 0x%x.\n", loadCommand.cmd);
+         }
+         else {
+-            // TODO: Check if cmdsize matches expected size for cmd
+-            uint8_t cmd[loadCommand.cmdsize];
+-            if (macho_read_at_offset(macho, offset, loadCommand.cmdsize, cmd) != 0) continue;
++            // Command size is file-controlled; do not allocate it on the stack.
++            void *cmd = malloc(loadCommand.cmdsize);
++            if (!cmd) return -1;
++            if (macho_read_at_offset(macho, offset, loadCommand.cmdsize, cmd) != 0) {
++                free(cmd);
++                return -1;
++            }
++            struct load_command readCommand;
++            memcpy(&readCommand, cmd, sizeof(readCommand));
++            LOAD_COMMAND_APPLY_BYTE_ORDER(&readCommand, LITTLE_TO_HOST_APPLIER);
++            if (readCommand.cmd != loadCommand.cmd || readCommand.cmdsize != loadCommand.cmdsize) {
++                free(cmd);
++                return -1;
++            }
+             bool stop = false;
+-            enumeratorBlock(loadCommand, offset, (void *)cmd, &stop);
+-            if (stop) break;
++            enumeratorBlock(loadCommand, offset, cmd, &stop);
++            free(cmd);
++            if (stop) return 0;
+         }
+         offset += loadCommand.cmdsize;
+     }
+@@ -447,26 +462,34 @@ int macho_enumerate_symbols(MachO *macho, void (^enumeratorBlock)(const char *na
+ 
+ int macho_enumerate_dependencies(MachO *macho, void (^enumeratorBlock)(const char *dylibPath, uint32_t cmd, struct dylib* dylib, bool *stop))
+ {
+-    macho_enumerate_load_commands(macho, ^(struct load_command loadCommand, uint64_t offset, void *cmd, bool *stop){
++    if (!enumeratorBlock) return -1;
++    __block int result = 0;
++    int status = macho_enumerate_load_commands(macho, ^(struct load_command loadCommand, uint64_t offset, void *cmd, bool *stop){
+         if (loadCommand.cmd == LC_LOAD_DYLIB || 
+             loadCommand.cmd == LC_LOAD_WEAK_DYLIB || 
+             loadCommand.cmd == LC_REEXPORT_DYLIB || 
+             loadCommand.cmd == LC_LAZY_LOAD_DYLIB ||
+             loadCommand.cmd == LC_LOAD_UPWARD_DYLIB) {
++            if (loadCommand.cmdsize < sizeof(struct dylib_command)) {
++                result = -1;
++                *stop = true;
++                return;
++            }
+             struct dylib_command *dylibCommand = (struct dylib_command *)cmd;
+             DYLIB_COMMAND_APPLY_BYTE_ORDER(dylibCommand, LITTLE_TO_HOST_APPLIER);
+             if (dylibCommand->dylib.name.offset >= loadCommand.cmdsize || dylibCommand->dylib.name.offset < sizeof(struct dylib_command)) {
+                 printf("WARNING: Malformed dependency at 0x%llx (Name offset out of bounds)\n", offset);
++                result = -1;
++                *stop = true;
+                 return;
+             }
+             char *dependencyPath = ((char *)cmd + dylibCommand->dylib.name.offset);
+-            size_t dependencyLength = strnlen(dependencyPath, loadCommand.cmdsize - dylibCommand->dylib.name.offset);
+-            if (!dependencyLength) {
+-                printf("WARNING: Malformed dependency at 0x%llx (Name has zero length)\n", offset);
+-                return;
+-            }
+-            if (dependencyPath[dependencyLength] != 0) {
+-                printf("WARNING: Malformed dependency at 0x%llx (Name has non NULL end byte)\n", offset);
++            size_t available = loadCommand.cmdsize - dylibCommand->dylib.name.offset;
++            size_t dependencyLength = strnlen(dependencyPath, available);
++            if (!dependencyLength || dependencyLength == available) {
++                printf("WARNING: Malformed dependency at 0x%llx (Empty or unterminated name)\n", offset);
++                result = -1;
++                *stop = true;
+                 return;
+             }
+ 
+@@ -478,29 +501,37 @@ int macho_enumerate_dependencies(MachO *macho, void (^enumeratorBlock)(const cha
+             }
+         }
+     });
+-    return 0;
++    return status != 0 ? status : result;
+ }
+ 
+ int macho_enumerate_rpaths(MachO *macho, void (^enumeratorBlock)(const char *rpath, bool *stop))
+ {
+-    macho_enumerate_load_commands(macho, ^(struct load_command loadCommand, uint64_t offset, void *cmd, bool *stop) {
++    if (!enumeratorBlock) return -1;
++    __block int result = 0;
++    int status = macho_enumerate_load_commands(macho, ^(struct load_command loadCommand, uint64_t offset, void *cmd, bool *stop) {
+         if (loadCommand.cmd == LC_RPATH) {
++            if (loadCommand.cmdsize < sizeof(struct rpath_command)) {
++                result = -1;
++                *stop = true;
++                return;
++            }
+             struct rpath_command *rpathCommand = (struct rpath_command *)cmd;
+             RPATH_COMMAND_APPLY_BYTE_ORDER(rpathCommand, LITTLE_TO_HOST_APPLIER);
+ 
+             if (rpathCommand->path.offset >= loadCommand.cmdsize || rpathCommand->path.offset < sizeof(struct rpath_command)) {
+                 printf("WARNING: Malformed rpath at 0x%llx (Path offset out of bounds)\n", offset);
++                result = -1;
++                *stop = true;
+                 return;
+             }
+ 
+             char *rpath = ((char *)cmd) + rpathCommand->path.offset;
+-            size_t rpathLength = strnlen(rpath, rpathCommand->cmdsize - rpathCommand->path.offset);
+-            if (!rpathLength) {
+-                printf("WARNING: Malformed rpath at 0x%llx (Path has zero length)\n", offset);
+-                return;
+-            }
+-            if (rpath[rpathLength] != 0) {
+-                printf("WARNING: Malformed rpath at 0x%llx (Name has non NULL end byte)\n", offset);
++            size_t available = loadCommand.cmdsize - rpathCommand->path.offset;
++            size_t rpathLength = strnlen(rpath, available);
++            if (!rpathLength || rpathLength == available) {
++                printf("WARNING: Malformed rpath at 0x%llx (Empty or unterminated path)\n", offset);
++                result = -1;
++                *stop = true;
+                 return;
+             }
+ 
+@@ -511,7 +542,7 @@ int macho_enumerate_rpaths(MachO *macho, void (^enumeratorBlock)(const char *rpa
+             }
+         }
+     });
+-    return 0;
++    return status != 0 ? status : result;
+ }
+ 
+ uint64_t macho_get_base_address(MachO *macho)

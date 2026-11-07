@@ -16,6 +16,29 @@
       "github_artifact_archive_digest": "sha256:6b67b950ba6e9009de9f366e9157c4c5c99ca1cac2b4fbd6556a29f3d9986568",
       "device_acceptance": "pending_for_this_candidate"
     },
+    "reported_device_regressions": [
+      {
+        "date": "2026-11-07",
+        "status": "early_stage_identified_exit_cause_pending_device_logs_not_fixed",
+        "device": "user_reported_iPad_7th_generation",
+        "system_version": "16.6",
+        "hardware_identifier_and_firmware_build": "not_provided",
+        "build_commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
+        "package": "Dopamine_3.0.7-fad8bbbd_roothide.tipa",
+        "package_sha256": "345b14de7f688bca28570c6ed45dc4de1704c8b9174cdcc4e457a9f3ab695c48",
+        "last_visible_stage": "Trying kernel exploit: kfd, landa (landa)",
+        "user_control": "official_package_succeeds_exact_official_build_and_kernel_choice_not_yet_confirmed",
+        "report": "docs/rc9-ipad7-ios166-landa-triage-20261107.md",
+        "findings": [
+          "Actual package contains an arm64 kfd binary and landa metadata covering 16.6.",
+          "The affected RC9 kfd source directory matches the fixed official reference; this does not establish binary or environment equivalence.",
+          "RC9 has a 120-second kernel-stage watchdog exit and shared kfd assertions exit after a 30-second delay; the screenshot does not distinguish them.",
+          "XPF pins differ and exact XPF dependency source comparison is not completed by this triage."
+        ],
+        "next_evidence": "verbose_log_tail_elapsed_time_and_if_available_same_attempt_system_termination_report",
+        "followup": "user_found_existing_verbose_logs_after_reboot_and_requested_other_fixes_continue_while_device_logs_are_pending"
+      }
+    ],
     "latest_device_feedback": {
       "date": "2026-11-07",
       "build_commit": "7ad14162d356f56a6bd585bdb503bfcbd3d9cdc2",
@@ -560,6 +583,52 @@
       "Only the requested menu entries change; scrolling, glass, low-power schedule, mounts, injection defaults, version and iOS 16 compatibility scope are preserved."
     ]
   },
+  "phase_sixteen": {
+    "date": "2026-11-07",
+    "status": "source_tests_and_patch_checks_passed_native_ci_and_full_build_pending",
+    "scope": "Fixed ChOma load-command boundaries and dependency/rpath failure propagation.",
+    "rc9_baseline": "ca342e467c77fa6d39b759de6a1437db2c7deba8",
+    "references": {
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "official_choma_commit": "7dccded6bc17081c08f5f5cdbd7a4b051543a825",
+      "official_dependency_inspection": "local_git_object_read_relevant_enumerators_share_failure_gaps",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77",
+      "zqbb_choma_commit": "4e4f8849e7a2025ab1717fe0a214d6363b9c1cc6",
+      "zqbb_dependency_inspection": "object_unavailable_exact_fetch_from_gitmodules_opa334_ChOma_returned_not_our_ref_not_claimed_inspected"
+    },
+    "dependency_commit": "ed99ac526142e78a5bc99793cf433775040f9d67",
+    "dependency_gitlink": "unchanged",
+    "patch": ".github/patches/ChOma-signature-boundaries.patch",
+    "patch_sha256": "7ad486dc9c33be88b53d827738f6854ce6a312e2089a33bb7d0b49c3beb443e7",
+    "classification": "source_grounded_rc9_local_hardening_not_claimed_upstream_backport",
+    "report": "docs/rc9-choma-load-commands-comparison-20261107.md",
+    "changes": [
+      "Validate actual stream and declared command bounds, stop on read failures, use checked heap allocation and reject cmd/cmdsize changes between reads.",
+      "Validate dependency and rpath typed headers before conversion and require a nonempty NUL-terminated path within the command.",
+      "Return parser errors to recursive collection, reject invalid UTF-8, avoid partial rpath cache insertion and prevent working-directory fallback after actual parser failure.",
+      "Keep both user-removed companion installation entries absent and preserve existing UI and RC9 feature behavior."
+    ],
+    "validation": {
+      "python_test_suite": "179_passed",
+      "git_diff_check": "passed",
+      "patch_reverse_check": "passed_against_applied_checkout",
+      "patch_forward_check": "passed_against_pristine_pinned_temporary_index",
+      "native_test": "tests/test_rc9_choma_load_commands.py --native",
+      "native_asan_ubsan": "pending_macos_ci",
+      "recursive_native_extension": "pending_macos_ci",
+      "full_tipa_build": "pending",
+      "package_identity": "pending",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "The real parser harness uses standalone MachO fixtures and buffered streams, not full initialization, segment/fileset parsing or DSC translation.",
+      "The recursive harness mocks ChOma calls; its new cases prove consumer error handling rather than end-to-end parser integration.",
+      "Command-specific segment/section/fileset validation and ignored subparser results in _macho_parse remain open.",
+      "CodeDirectory internals, concurrent whole-file consistency, remaining stream allocation paths and earlier side-effect rollback are not closed.",
+      "The unavailable exact ZQBB ChOma object is disclosed rather than inferred from its parent repository.",
+      "Product 3.0.7, iOS 16 supported combinations, low-power schedule, mounts, glass/scrolling and injection defaults remain unchanged."
+    ]
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -626,8 +695,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "recursive_reportable_failures_hardened_native_CI_and_full_build_passed_parser_gaps_open",
-      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_fifteen. Built code ca342e46 passed run 42375351008 on the first attempt, including new recursive ASan/UBSan with real headers and path resolution, previous native tests, full TIPA, identity and upload; 175 local source tests pass. The shared tri-state helper now propagates reportable signature/randomization errors and cleans partial output. Fixed upstream recursive code has similar silent errors, so this is RC9 hardening rather than a claimed upstream fix. Actual ChOma enumeration status/skip gaps, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
+      "status": "recursive_failures_ci_passed_load_command_and_path_parser_hardening_native_ci_pending",
+      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_sixteen. Previous built code ca342e46 passed run 42375351008. Phase sixteen now checks actual command bounds and read/allocation errors, bounded dependency/rpath names and consumer failure propagation; 179 local source tests and forward/reverse dependency patch checks pass, new native/full-build validation is pending. The official pinned ChOma object has the same relevant gaps; exact ZQBB ChOma is unavailable and not claimed inspected. Segment/fileset and other command payload parsing, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

@@ -74,7 +74,7 @@ static NSString *rpathCacheIdentity(const struct stat *st)
 		(long)st->st_ctimespec.tv_nsec];
 }
 
-static NSArray *cachedRpathsForLoader(NSString *loaderPath)
+static NSArray *cachedRpathsForLoader(NSString *loaderPath, bool *collectionFailed)
 {
 	if (!loaderPath) return nil;
 
@@ -104,18 +104,29 @@ static NSArray *cachedRpathsForLoader(NSString *loaderPath)
 	}
 
 	NSMutableArray *rpaths = [NSMutableArray array];
-	macho_enumerate_rpaths(macho, ^(const char *rpathCStr, bool *stop) {
-		(void)stop;
-		if (rpathCStr) [rpaths addObject:@(rpathCStr)];
+	__block bool invalidPath = false;
+	int status = macho_enumerate_rpaths(macho, ^(const char *rpathCStr, bool *stop) {
+		NSString *rpath = rpathCStr ? @(rpathCStr) : nil;
+		if (!rpath) {
+			invalidPath = true;
+			*stop = true;
+			return;
+		}
+		[rpaths addObject:rpath];
 	});
 	fat_free(fat);
+	if (status != 0 || invalidPath) {
+		JBLogError("Failed to enumerate rpaths: %s", loaderPath.fileSystemRepresentation);
+		if (collectionFailed) *collectionFailed = true;
+		return nil;
+	}
 
 	NSArray *snapshot = [NSArray arrayWithArray:rpaths];
 	[rpathCache setObject:@{ @"identity" : identity, @"rpaths" : snapshot } forKey:loaderPath];
 	return snapshot;
 }
 
-NSString* resolveRpaths(NSString *subPath, NSString *mainExecutablePath, NSArray* rpathStack)
+NSString* resolveRpaths(NSString *subPath, NSString *mainExecutablePath, NSArray* rpathStack, bool *collectionFailed)
 {
 @autoreleasepool {
 
@@ -125,7 +136,9 @@ NSString* resolveRpaths(NSString *subPath, NSString *mainExecutablePath, NSArray
 
 	for (NSString* loaderPath in rpathStack.reverseObjectEnumerator)
 	{
-		for (NSString *rpath in cachedRpathsForLoader(loaderPath)) {
+		NSArray *rpaths = cachedRpathsForLoader(loaderPath, collectionFailed);
+		if (collectionFailed && *collectionFailed) return nil;
+		for (NSString *rpath in rpaths) {
 			NSString* possiblePath = [rpath stringByAppendingPathComponent:subPath];
 			possiblePath = resolveLoaderExecutablePaths(possiblePath, loaderPath, mainExecutablePath) ?: possiblePath;
 			if(![possiblePath hasPrefix:@"/"]) { // dyld only supports relative path in rpath on macOS
@@ -148,12 +161,12 @@ NSString* resolveRpaths(NSString *subPath, NSString *mainExecutablePath, NSArray
 } //autoreleasepool
 }
 
-NSString *resolveLoadPath(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString* workingDir, NSArray* rpathStack)
+NSString *resolveLoadPath(NSString *loadPath, NSString *loaderPath, NSString *mainExecutablePath, NSString* workingDir, NSArray* rpathStack, bool *collectionFailed)
 {
 	if (!loadPath) return nil;
 
 	if ([loadPath hasPrefix:@"@rpath/"]) {
-		return resolveRpaths([loadPath substringFromIndex:(sizeof("@rpath/")-1)], mainExecutablePath, rpathStack);
+		return resolveRpaths([loadPath substringFromIndex:(sizeof("@rpath/")-1)], mainExecutablePath, rpathStack, collectionFailed);
 	}
 
 	NSString *expandedPath = resolveLoaderExecutablePaths(loadPath, loaderPath, mainExecutablePath);
@@ -171,7 +184,8 @@ NSString *resolveLoadPath(NSString *loadPath, NSString *loaderPath, NSString *ma
 		JBLogDebug("Resolving relative path: %s", loadPath.fileSystemRepresentation);
 
 		// non-@ path is treated as an implicit @rpath first
-		NSString* resolvedPath = resolveRpaths(loadPath, mainExecutablePath, rpathStack);
+		NSString* resolvedPath = resolveRpaths(loadPath, mainExecutablePath, rpathStack, collectionFailed);
+		if (collectionFailed && *collectionFailed) return nil;
 
 		if(!resolvedPath && workingDir) {
 			resolvedPath = [workingDir stringByAppendingPathComponent:loadPath];
@@ -225,7 +239,8 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 	};
 
 
-	NSString *resolvedLoadPath = resolveLoadPath(loadPath, loaderPath, mainExecutablePath, workingDir, rpathStack);
+	NSString *resolvedLoadPath = resolveLoadPath(loadPath, loaderPath, mainExecutablePath, workingDir, rpathStack, collectionFailed);
+	if (collectionFailed && *collectionFailed) return;
 	if(!resolvedLoadPath) {
 		JBLogError("Failed to resolve dependency library for %s (loader: %s, mainExecutable: %s)", loadPath.fileSystemRepresentation, loaderPath.fileSystemRepresentation, mainExecutablePath.fileSystemRepresentation);
 		return;
@@ -345,16 +360,27 @@ static void recurse_handler(NSString *loadPath, NSString *loaderPath, NSString *
 	}
 
 	// Recurse this block on all dependencies
-	macho_enumerate_dependencies(macho, ^(const char *pathCStr, uint32_t cmd, struct dylib* dylib, bool *stop) {
+	int dependencyStatus = macho_enumerate_dependencies(macho, ^(const char *pathCStr, uint32_t cmd, struct dylib* dylib, bool *stop) {
+		NSString *dependencyPath = pathCStr ? @(pathCStr) : nil;
+		if (!dependencyPath) {
+			JBLogError("Failed to decode dependency path: %s", realLoadPath.fileSystemRepresentation);
+			if (collectionFailed) *collectionFailed = true;
+			*stop = true;
+			return;
+		}
 
 		NSMutableArray* nextChain = rpathStack.mutableCopy;
 		[nextChain addObject:realLoadPath]; //Loading dependencies, add current macho itself to the rpath stack
 		
-		recurse_handler(@(pathCStr), realLoadPath, mainExecutablePath, workingDir, fileCaches, nextChain, preferredArch, cdhashesOut, cdhashCountOut, collectionFailed);
+		recurse_handler(dependencyPath, realLoadPath, mainExecutablePath, workingDir, fileCaches, nextChain, preferredArch, cdhashesOut, cdhashCountOut, collectionFailed);
 		if(collectionFailed && *collectionFailed) {
 			*stop = true;
 		}
 	});
+	if (dependencyStatus != 0) {
+		JBLogError("Failed to enumerate dependencies: %s", realLoadPath.fileSystemRepresentation);
+		if (collectionFailed) *collectionFailed = true;
+	}
 
 	fat_free(fat);
 	

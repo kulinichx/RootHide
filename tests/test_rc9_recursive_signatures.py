@@ -80,6 +80,20 @@ class RecursiveSignatureContracts(unittest.TestCase):
         self.assertIn("python3 tests/test_rc9_recursive_signatures.py --native",
                       source(".github/workflows/roothide.yml"))
 
+    def test_dependency_status_and_rpath_failures_reach_collection_failure(self):
+        text = source(RECURSIVE)
+        body = extract(text, "static void recurse_handler(")
+        failure = extract(body, "if (dependencyStatus != 0)")
+        self.assertIn("*collectionFailed = true;", failure)
+        cache = extract(text, "static NSArray *cachedRpathsForLoader(")
+        guard = cache.index("if (status != 0 || invalidPath)")
+        self.assertLess(guard, cache.index("[rpathCache setObject:"))
+        self.assertIn("*collectionFailed = true;", cache[guard:])
+        resolver = extract(text, "NSString *resolveLoadPath(")
+        self.assertIn("if (collectionFailed && *collectionFailed) return nil;", resolver)
+        self.assertLess(resolver.index("if (collectionFailed && *collectionFailed) return nil;"),
+                        resolver.index("if(!resolvedPath && workingDir)"))
+
 
 NATIVE_PREFIX = r'''
 #import <Foundation/Foundation.h>
@@ -103,7 +117,8 @@ typedef struct {
     CS_DecodedSuperBlob *decoded;
     bool hasSignature, adhoc, readFailure, decodeFailure, hashFailure;
     bool randomizeFailure, parseFailure, sliceFailure, removable, trollstore;
-    bool randomized;
+    bool randomized, badDependencyPath, badRpath;
+    int dependencyError, rpathError;
     int commandError, dependencies[4], dependencyCount, reads, walks;
     unsigned char initialHash, finalHash;
 } Node;
@@ -260,19 +275,24 @@ int macho_enumerate_dependencies(MachO *macho,
     Node *node = node_for_macho(macho);
     node->walks++;
     bool stop = false;
+    if (node->badDependencyPath) {
+        visit("\xff", LC_LOAD_DYLIB, NULL, &stop);
+        assert(stop);
+        return 0;
+    }
     for (int i = 0; i < node->dependencyCount && !stop; i++) {
         NSString *path = paths[node->dependencies[i]];
         if (useRpath) path = [@"@rpath/" stringByAppendingString:path.lastPathComponent];
         struct dylib dylib = {0};
         visit(path.fileSystemRepresentation, LC_LOAD_DYLIB, &dylib, &stop);
     }
-    return 0;
+    return node->dependencyError;
 }
 int macho_enumerate_rpaths(MachO *macho, void (^visit)(const char *, bool *)) {
-    node_for_macho(macho);
+    Node *node = node_for_macho(macho);
     bool stop = false;
-    visit("@loader_path", &stop);
-    return 0;
+    visit(node->badRpath ? "\xff" : "@loader_path", &stop);
+    return node->rpathError;
 }
 #define JBROOT_PATH(path) testRoot.fileSystemRepresentation
 #define _dyld_shared_cache_contains_path test_shared_cache
@@ -393,6 +413,29 @@ int main(void) { @autoreleasepool {
     assert(collect(&hashes, &count) == 0 && count == 4);
     release_hashes(hashes);
 
+    for (int position = 0; position < 4; position++) {
+        reset();
+        nodes[position].dependencyError = -1;
+        expect_failure();
+    }
+    reset();
+    nodes[1].badDependencyPath = true;
+    expect_failure();
+    assert(nodes[2].reads == 0 && nodes[3].reads == 0);
+
+    for (int invalid = 0; invalid < 2; invalid++) {
+        reset();
+        useRpath = true;
+        nodes[0].rpathError = invalid == 0 ? -1 : 0;
+        nodes[0].badRpath = invalid == 1;
+        expect_failure();
+        // An enumeration failure must not cache a partial path list.
+        nodes[0].rpathError = 0;
+        nodes[0].badRpath = false;
+        assert(collect(&hashes, &count) == 0 && count == 4);
+        release_hashes(hashes);
+    }
+
     reset();
     useRpath = true;
     assert(collect(&hashes, &count) == 0 && count == 4);
@@ -430,7 +473,7 @@ int main(void) { @autoreleasepool {
     assert(recurse_collect_untrusted_cdhashes(NULL, NULL, NULL, NULL, NULL, NULL, &count) == -1);
     assert(recurse_collect_untrusted_cdhashes(NULL, NULL, NULL, NULL, NULL, &hashes, NULL) == -1);
     assert([NSFileManager.defaultManager removeItemAtPath:testRoot error:nil]);
-    puts("PASS: recursive failures, partial cleanup, final hashes, trusted/duplicate traversal, cycles, real rpaths and headers");
+    puts("PASS: recursive and path-enumeration failures, no partial cache, final hashes, traversal, cycles, real rpaths and headers");
 } return 0; }
 '''
 
