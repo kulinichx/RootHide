@@ -8,12 +8,12 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "8e560fa34d6f91a2942aaf7fe8e1b8407d94b514",
-      "run": 42369906961,
+      "code_commit": "d173d36ea9b532877c79f0630bf5e94c26c4de5d",
+      "run": 42372494583,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-8e560fa3_roothide.tipa",
-      "artifact_id": 13573178519,
-      "github_artifact_archive_digest": "sha256:bb068d5b086677986c1f17c9be78e1c41d9b97330430999e3a023d8eb4c13619",
+      "package": "Dopamine_3.0.7-d173d36e_roothide.tipa",
+      "artifact_id": 13573798939,
+      "github_artifact_archive_digest": "sha256:ddfe9568b9313072743f456f7f018bc0e4abe69d43631fd0ff2fdf7ce2c51b4f",
       "device_acceptance": "pending_for_this_candidate"
     },
     "latest_device_feedback": {
@@ -450,6 +450,7 @@
   },
   "phase_thirteen": {
     "date": "2026-11-07",
+    "status": "real_fixed_codec_native_regressions_full_build_and_identity_passed_device_pending",
     "scope": "Fixed ChOma outer-container boundaries, real codec allocation failures and known-size trust consumer.",
     "rc9_baseline": "8e560fa34d6f91a2942aaf7fe8e1b8407d94b514",
     "dependency_commit": "ed99ac526142e78a5bc99793cf433775040f9d67",
@@ -467,7 +468,7 @@
     "validation": {
       "python_test_suite": "164_passed",
       "native_test": "tests/test_rc9_choma_boundaries.py --native",
-      "native_asan_ubsan": "pending_macOS_CI",
+      "native_asan_ubsan": "passed_GitHub_run_42372494583",
       "first_ci_attempt": {
         "run": 42372146566,
         "commit": "609084ead99391d27c4550d0a76beda79374eff6",
@@ -475,8 +476,9 @@
         "diagnostic": "The free instrumentation macro renamed MemoryStream callback uses after the header declaration was already parsed.",
         "correction": "Define allocation instrumentation before actual ChOma headers so callback declarations and implementation tokens are processed consistently without changing layout or production source."
       },
-      "full_tipa_build": "pending",
-      "package_identity": "pending",
+      "full_tipa_build": "passed_GitHub_run_42372494583",
+      "package_identity": "passed_GitHub_run_42372494583",
+      "ci_commit": "d173d36ea9b532877c79f0630bf5e94c26c4de5d",
       "device_acceptance": "pending"
     },
     "limits": [
@@ -553,8 +555,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "fixed_choma_outer_boundaries_and_codec_allocation_guards_added_native_CI_pending_other_paths_open",
-      "evidence": "phase_three, phase_four, phase_ten, phase_twelve and phase_thirteen. Latest built code is 8e560fa3, successful run 42369906961; user feedback applies only to 7ad14162. Phase thirteen adds real fixed-dependency outer bounds, codec allocation checks and sized trust decoding with 164 local contracts passed; its native execution and full build are pending. Previous mock encoding tests prove caller preservation, not internal library allocation safety. Legacy unsized callers, CodeDirectory internals, skipped collector failures, concurrent mutation and device validation remain open."
+      "status": "fixed_choma_outer_boundaries_and_real_codec_fault_tests_native_CI_full_build_passed_other_paths_open",
+      "evidence": "phase_three, phase_four, phase_ten, phase_twelve and phase_thirteen. Latest built code d173d36e passed run 42372494583, including real fixed ChOma ASan/UBSan, existing native regressions, full TIPA and identity. Local source suite: 164 passed. First new harness run 42372146566 failed due to macro/header ordering; corrected without a production code change. Previous mock encoding tests prove caller preservation, not internal library allocation safety. User feedback applies only to 7ad14162. Legacy unsized callers, CodeDirectory internals, skipped collector failures, concurrent mutation and current candidate device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

@@ -11,6 +11,16 @@
 补丁保存为 `.github/patches/ChOma-signature-boundaries.patch`，由构建工作流在
 检出固定子模块后应用，记录补丁和修改后源码的 SHA-256。父仓库 gitlink 不变。
 
+其他本地构建入口也必须先应用该补丁，不能只更新父仓库的 `signatures.c` 而链接
+未经修改的 ChOma。从仓库根目录对干净、已初始化的固定子模块执行：
+
+```sh
+git -C BaseBin/ChOma apply "$PWD/.github/patches/ChOma-signature-boundaries.patch"
+```
+
+已经应用过补丁的工作区不要重复应用；当前审计工作区的子模块源码改动与提交中的
+补丁一致。这不是未记录的另一个 ChOma 提交。
+
 原 `CSBlob.c` 的 Git blob 是 `4c298b9fb9841e22412f949227f3e099a40306c1`，
 原 `CSBlob.h` 是 `cefb2002d670feaa605354bf52615bfa511adcde`。
 检查发现：
@@ -72,6 +82,20 @@ Windows 本地完整源码/契约回归 **164 项通过**。本机无 macOS Clan
 回调名被改写而声明未同步。已将注入宏移到真实 ChOma 头文件之前，
 使声明与实现一致预处理；不复制结构体、不改变其布局，也不修改生产逻辑。
 后续构建在该失败后被跳过，不能把本次 run 记为成功或已有新包。
+
+### CI 验收补记
+
+修正测试注入顺序后的提交 `d173d36ea9b532877c79f0630bf5e94c26c4de5d`，
+GitHub Run `42372494583` 已完成并成功。源码回归、既有运行时原生回归、
+签名附加和来源读取原生回归、新增真实 ChOma ASan/UBSan 回归、
+配套工具 scheme 回归、完整 TIPA、包身份检查与上传均通过。
+此记录更新本轮前述 macOS CI 待验状态，不改变第一次失败的事实。
+
+制品 `Dopamine_3.0.7-d173d36e_roothide.tipa`，artifact ID `13573798939`。
+GitHub artifact 归档 digest：
+`sha256:ddfe9568b9313072743f456f7f018bc0e4abe69d43631fd0ff2fdf7ce2c51b4f`。
+这是制品归档的摘要，不是其中 TIPA 文件本身的 SHA-256。
+本候选尚未取得用户设备验收；不能沿用 `7ad14162` 的普通使用反馈。
 
 ## 仍未关闭
 
