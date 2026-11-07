@@ -8,12 +8,12 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "ca342e467c77fa6d39b759de6a1437db2c7deba8",
-      "run": 42375351008,
+      "code_commit": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
+      "run": 42377837439,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-ca342e46_roothide.tipa",
-      "artifact_id": 13575647431,
-      "github_artifact_archive_digest": "sha256:6b67b950ba6e9009de9f366e9157c4c5c99ca1cac2b4fbd6556a29f3d9986568",
+      "package": "Dopamine_3.0.7-8da71027_roothide.tipa",
+      "artifact_id": 13576258235,
+      "github_artifact_archive_digest": "sha256:bd427f3087dcb24a684109d9e1c5b29bbd4a6e01b7eacac83e5fda6d8de6e839",
       "device_acceptance": "pending_for_this_candidate"
     },
     "reported_device_regressions": [
@@ -585,7 +585,7 @@
   },
   "phase_sixteen": {
     "date": "2026-11-07",
-    "status": "source_tests_and_patch_checks_passed_native_ci_and_full_build_pending",
+    "status": "native_regressions_full_build_and_identity_passed_device_pending",
     "scope": "Fixed ChOma load-command boundaries and dependency/rpath failure propagation.",
     "rc9_baseline": "ca342e467c77fa6d39b759de6a1437db2c7deba8",
     "references": {
@@ -614,7 +614,7 @@
       "patch_reverse_check": "passed_against_applied_checkout",
       "patch_forward_check": "passed_against_pristine_pinned_temporary_index",
       "native_test": "tests/test_rc9_choma_load_commands.py --native",
-      "native_asan_ubsan": "pending_macos_ci",
+      "native_asan_ubsan": "passed_GitHub_run_42377837439",
       "first_ci_attempt": {
         "run": 42377573833,
         "commit": "bb4dda5f02831e38977030ef6213e2f79e1ac721",
@@ -622,9 +622,10 @@
         "diagnostic": "Existing MemoryStream int ret versus size_t size comparison triggers -Wsign-compare under the new harness -Wextra -Werror.",
         "correction": "Locally suppress that warning only around extracted unmodified MemoryStream helpers; production patch and strict parser warnings and sanitizers remain unchanged."
       },
-      "recursive_native_extension": "pending_macos_ci",
-      "full_tipa_build": "pending",
-      "package_identity": "pending",
+      "recursive_native_extension": "passed_GitHub_run_42377837439",
+      "full_tipa_build": "passed_GitHub_run_42377837439",
+      "package_identity": "passed_GitHub_run_42377837439",
+      "ci_commit": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
       "device_acceptance": "pending"
     },
     "limits": [
@@ -635,6 +636,29 @@
       "The unavailable exact ZQBB ChOma object is disclosed rather than inferred from its parent repository.",
       "Product 3.0.7, iOS 16 supported combinations, low-power schedule, mounts, glass/scrolling and injection defaults remain unchanged."
     ]
+  },
+  "settings_bounce_followup": {
+    "date": "2026-11-07",
+    "runtime_baseline": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
+    "status": "scoped_redundant_ordering_removed_source_tests_passed_native_and_build_pending",
+    "report": "docs/rc9-settings-bounce-audit-20261107.md",
+    "finding": "Settings and Credits unconditionally reorder every section backdrop in every willDisplayCell callback; the normal low-power page does not.",
+    "change": "Keep the existing foreground styling and repair backdrop order only when an attached backdrop is actually above table content.",
+    "not_established": "Neither added menu count nor redundant ordering is established as the device bounce root cause.",
+    "preserved": [
+      "All remaining menu entries, their actions and Preferences-backed behavior.",
+      "Native scrolling, inset policy, modal frames, material parameters and the low-power page.",
+      "The repair for newly displayed content appearing behind glass, which could blur text.",
+      "Product 3.0.7 and existing supported iOS 16 device/firmware combinations."
+    ],
+    "validation": {
+      "python_test_suite": "183_passed",
+      "git_diff_check": "passed",
+      "native_test": "tests/test_rc9_table_backdrops.py --native",
+      "native_ordering_test": "pending_macos_ci_uses_view_order_test_double_not_UIKit",
+      "full_tipa_build": "pending",
+      "device_bounce_acceptance": "pending"
+    }
   },
   "ledger": [
     {
@@ -672,8 +696,8 @@
     {
       "id": "custom_glass_and_ui",
       "classification": "rc9_specific",
-      "status": "preserved_not_refactored",
-      "evidence": "Keep the existing candidate layout pending device acceptance; no new bounce or rendering changes."
+      "status": "scoped_backdrop_order_guard_device_bounce_root_cause_and_acceptance_open",
+      "evidence": "settings_bounce_followup; docs/rc9-settings-bounce-audit-20261107.md. Remove unconditional per-cell backdrop reordering while retaining occlusion repair. No inset, frame, menu or low-power change; UIKit bounce root cause is not established by source inspection."
     },
     {
       "id": "trustcache_kernel_reader_lifetime",
@@ -702,8 +726,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "recursive_failures_ci_passed_load_command_and_path_parser_hardening_native_ci_pending",
-      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_sixteen. Previous built code ca342e46 passed run 42375351008. Phase sixteen now checks actual command bounds and read/allocation errors, bounded dependency/rpath names and consumer failure propagation; 179 local source tests and forward/reverse dependency patch checks pass, new native/full-build validation is pending. The official pinned ChOma object has the same relevant gaps; exact ZQBB ChOma is unavailable and not claimed inspected. Segment/fileset and other command payload parsing, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
+      "status": "recursive_failures_and_load_command_path_hardening_ci_passed_remaining_parser_and_device_work_open",
+      "evidence": "phase_three, phase_four, phase_ten and phase_twelve through phase_sixteen. Phase sixteen checks actual command bounds and read/allocation errors, bounded dependency/rpath names and consumer failure propagation; 179 local source tests, forward/reverse patch checks and native/full-build/identity validation passed at run 42377837439, commit 8da71027. The official pinned ChOma object has the same relevant gaps; exact ZQBB ChOma is unavailable and not claimed inspected. Segment/fileset and other command payload parsing, missing-dependency semantics, CodeDirectory internals, concurrent mutation, rollback and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

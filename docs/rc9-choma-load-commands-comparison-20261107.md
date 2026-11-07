@@ -73,6 +73,19 @@ Windows 无 Apple SDK；ASan/UBSan、完整 TIPA、包身份与制品上传待�
 新增枚举器与其余测试继续使用 `-Wall -Wextra -Werror` 和 ASan/UBSan。
 该修正仍需重新执行 macOS CI，不将编译警告处理冒充运行验证。
 
+### 重跑验收
+
+测试编译修正提交 `8da710271fb20399aeb5faab9c58aeaf7219ebe0` 的
+GitHub Run `42377837439` 已成功完成。新增真实 ChOma 命令枚举
+ASan/UBSan、扩展后的递归签名原生回归、其余原生与源码回归、
+完整 TIPA、包身份检查及上传均通过。
+
+实际制品 `Dopamine_3.0.7-8da71027_roothide.tipa`，
+artifact ID `13576258235`。GitHub artifact 外层归档 digest 为
+`sha256:bd427f3087dcb24a684109d9e1c5b29bbd4a6e01b7eacac83e5fda6d8de6e839`；
+这不是内层 TIPA 的 SHA-256。本记录覆盖上文的 CI 待验状态，
+不表示 UIKit 回弹、iPad 7 退出问题或 iOS 真机验收已经通过。
+
 ## 保留与剩余工作
 
 - 按用户要求移除的两个管理器安装入口保持移除，不卸载独立管理器，

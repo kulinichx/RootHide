@@ -387,8 +387,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
     if (DORHSupporterIsVerified()) {
-        for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
-            [tableView sendSubviewToBack:glass];
+        [self keepTableBackdropViewsBehindContent:self.customGlassSectionBackdropViews.allValues];
     }
 }
 

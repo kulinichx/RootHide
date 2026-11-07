@@ -16,6 +16,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (void)setupViewControllerStyle:(UIViewController*)vc;
 
+- (void)keepTableBackdropViewsBehindContent:(NSArray<UIView *> *)backdropViews;
+
 @end
 
 NS_ASSUME_NONNULL_END

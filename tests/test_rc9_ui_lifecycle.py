@@ -295,7 +295,8 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         settings_display = self.settings_method(
             "- (void)tableView:(UITableView *)tableView willDisplayCell:")
         self.assertIn("[self customGlassStyleVisibleCell:cell atIndexPath:indexPath];", settings_display)
-        self.assertIn("[tableView sendSubviewToBack:glass];", settings_display)
+        self.assertIn("[self keepTableBackdropViewsBehindContent:", settings_display)
+        self.assertNotIn("sendSubviewToBack:", settings_display)
         self.assertNotIn("dispatch_async", settings_display)
 
         layout = self.settings_method("- (void)viewDidLayoutSubviews")
@@ -320,7 +321,8 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
             text, "- (void)tableView:(UITableView *)tableView willDisplayCell:")
         self.assertIn("[self customGlassStyleVisibleCell:cell atIndexPath:indexPath];",
                       display)
-        self.assertIn("[tableView sendSubviewToBack:glass];", display)
+        self.assertIn("[self keepTableBackdropViewsBehindContent:", display)
+        self.assertNotIn("sendSubviewToBack:", display)
         self.assertNotIn("dispatch_async", display)
         self.assertNotIn("customGlassRefreshSectionBackdrops", display)
         self.assertNotIn("scrollViewDidScroll:", text)

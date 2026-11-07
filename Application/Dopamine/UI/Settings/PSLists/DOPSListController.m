@@ -46,6 +46,26 @@
     cell.backgroundColor = [UIColor clearColor];
 }
 
+- (void)keepTableBackdropViewsBehindContent:(NSArray<UIView *> *)backdropViews
+{
+    if (!backdropViews.count) return;
+    NSSet<UIView *> *backdrops = [NSSet setWithArray:backdropViews];
+    BOOL contentSeen = NO;
+    for (UIView *subview in _table.subviews) {
+        if ([backdrops containsObject:subview]) {
+            if (!contentSeen) continue;
+            // Reuse can insert content below a backdrop. Repair that case, but
+            // leave an already-correct hierarchy untouched during scrolling.
+            for (UIView *backdrop in backdropViews) {
+                if (backdrop.superview == _table)
+                    [_table sendSubviewToBack:backdrop];
+            }
+            return;
+        }
+        contentSeen = YES;
+    }
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGRect tableFrame = CGRectMake(12, 5, self.view.bounds.size.width - 24, self.view.bounds.size.height - 10);

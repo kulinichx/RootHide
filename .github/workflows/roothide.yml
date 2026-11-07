@@ -136,6 +136,9 @@ jobs:
       - name: Companion tool Sileo scheme regression
         run: python3 tests/test_rc9_companion_tools.py --native
 
+      - name: Table backdrop ordering regression
+        run: python3 tests/test_rc9_table_backdrops.py --native
+
       - name: Cache Theos
         id: cache-theos
         uses: actions/cache@v4

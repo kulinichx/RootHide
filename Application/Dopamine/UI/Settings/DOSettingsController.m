@@ -795,8 +795,7 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 {
     [self customGlassStyleVisibleCell:cell atIndexPath:indexPath];
     if (DORHSupporterIsVerified()) {
-        for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
-            [tableView sendSubviewToBack:glass];
+        [self keepTableBackdropViewsBehindContent:self.customGlassSectionBackdropViews.allValues];
     }
 }
 
