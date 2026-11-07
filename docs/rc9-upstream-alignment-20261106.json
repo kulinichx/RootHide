@@ -18,16 +18,16 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "8061130dfaa71cf53da571917efc7b89e29507d5",
-      "run": 42393588176,
+      "code_commit": "ca835b9e1d1457b2ed1ef40c00c5c01148351617",
+      "run": 42396269244,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-8061130d_roothide.tipa",
-      "artifact_id": 13583120775,
-      "github_artifact_archive_digest": "sha256:05d16b362e28d60bc8959118840a8059bd8d08b4116d18f33636854e64c60706",
-      "package_sha256": "a83b6efca7aeb5f2e5afc57a7a37c62d64116ea5663d9aaa23ac9ca49aef3fb5",
+      "package": "Dopamine_3.0.7-ca835b9e_roothide.tipa",
+      "artifact_id": 13583364617,
+      "github_artifact_archive_digest": "sha256:fbda55bcf9c202da00e87500c9e3128e6b3a00060b10400fd1b8281b9232cb36",
+      "package_sha256": "483e7322b533964f18e168bb49267c81a1658074a57886d43ece9c2554b8fc35",
       "package_identity": "CI_and_local_passed",
-      "scope": "preserve_original_settings_and_about_geometry_in_outer_host_with_Preferences_as_only_table_frame_owner",
-      "device_acceptance": "user_reported_scroll_problem_fixed_20261108_jetsam_recurrence_confirmed_on_8061130d"
+      "scope": "explicit_Jetsam_values_and_settings_owner_binding_preserving_8061130d_scroll_fix",
+      "device_acceptance": "pending_for_ca835b9e_prior_scroll_fix_confirmed_and_jetsam_recurrence_reported_on_8061130d"
     },
     "reported_device_regressions": [
       {
@@ -772,7 +772,7 @@
     "hosted_navigation_followup": {
       "date": "2026-11-08",
       "baseline": "8061130dfaa71cf53da571917efc7b89e29507d5",
-      "status": "explicit_jetsam_values_and_preferences_owner_binding_candidate_pending_CI_and_device",
+      "status": "explicit_jetsam_values_and_preferences_owner_binding_CI_passed_device_pending",
       "report": "docs/rc9-jetsam-hosted-navigation-20261108.md",
       "classification": "rc9_container_integration_not_a_claimed_upstream_patch_or_proven_device_root_cause",
       "changes": [
@@ -785,8 +785,14 @@
         "git_diff_check": "passed",
         "native_test": "tests/test_rc9_jetsam_navigation.py --native",
         "native_scope": "Production navigation methods, option arrays and getter/setter with actual Foundation persistence. Navigation, private selection and IPC are explicit doubles, not real Preferences or UIKit.",
-        "native": "pending_CI",
-        "full_tipa": "pending",
+        "native": "passed_GitHub_run_42396269244",
+        "full_tipa": "passed_GitHub_run_42396269244",
+        "package_identity": "CI_and_local_passed",
+        "ci_commit": "ca835b9e1d1457b2ed1ef40c00c5c01148351617",
+        "ci_run": 42396269244,
+        "artifact_id": 13583364617,
+        "package_sha256": "483e7322b533964f18e168bb49267c81a1658074a57886d43ece9c2554b8fc35",
+        "test_harness_followup": "Run 42395722276 failed compiling the localization macro and unparenthesized array assert. ca835b9e changes only those two test lines, retaining production code, workflow, Werror and address/undefined sanitizers.",
         "device": "pending_recurrence_remains_open"
       },
       "preserved": "User-confirmed Settings/About scroll implementation, low-power UI/runtime, runtime Jetsam arithmetic, IPC protocol, product 3.0.7 and existing supported iOS 16 combinations."
