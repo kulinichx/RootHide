@@ -8,12 +8,12 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
-      "run": 42377837439,
+      "code_commit": "1a7feb18edffd787a10de0524b3e27a37535d7e9",
+      "run": 42378929588,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-8da71027_roothide.tipa",
-      "artifact_id": 13576258235,
-      "github_artifact_archive_digest": "sha256:bd427f3087dcb24a684109d9e1c5b29bbd4a6e01b7eacac83e5fda6d8de6e839",
+      "package": "Dopamine_3.0.7-1a7feb18_roothide.tipa",
+      "artifact_id": 13575924938,
+      "github_artifact_archive_digest": "sha256:78c70a695bbc1ac51bcaf9cd5e6dae3dd662618b27ba62f67314551f7e337faa",
       "device_acceptance": "pending_for_this_candidate"
     },
     "reported_device_regressions": [
@@ -640,7 +640,7 @@
   "settings_bounce_followup": {
     "date": "2026-11-07",
     "runtime_baseline": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
-    "status": "scoped_redundant_ordering_removed_source_tests_passed_native_and_build_pending",
+    "status": "scoped_order_guard_native_and_full_build_passed_device_bounce_acceptance_pending",
     "report": "docs/rc9-settings-bounce-audit-20261107.md",
     "finding": "Settings and Credits unconditionally reorder every section backdrop in every willDisplayCell callback; the normal low-power page does not.",
     "change": "Keep the existing foreground styling and repair backdrop order only when an attached backdrop is actually above table content.",
@@ -655,8 +655,10 @@
       "python_test_suite": "183_passed",
       "git_diff_check": "passed",
       "native_test": "tests/test_rc9_table_backdrops.py --native",
-      "native_ordering_test": "pending_macos_ci_uses_view_order_test_double_not_UIKit",
-      "full_tipa_build": "pending",
+      "native_ordering_test": "passed_GitHub_run_42378929588_uses_view_order_test_double_not_UIKit",
+      "full_tipa_build": "passed_GitHub_run_42378929588",
+      "package_identity": "passed_GitHub_run_42378929588",
+      "ci_commit": "1a7feb18edffd787a10de0524b3e27a37535d7e9",
       "device_bounce_acceptance": "pending"
     }
   },

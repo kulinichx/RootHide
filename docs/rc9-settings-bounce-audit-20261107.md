@@ -71,3 +71,19 @@ contentOffset、contentInset / adjustedContentInset 和 contentSize
 在拖动 / 松手 / 回弹阶段的变化，不能继续靠随意切换 inset、加空白或
 修改模糊效果猜根因。本轮只确认并去除冗余层级重排，不声称已定位或
 彻底解决设备上的回弹症状。
+
+## CI 验收补记
+
+提交 `1a7feb18edffd787a10de0524b3e27a37535d7e9` 的
+GitHub Run `42378929588` 已成功完成：
+
+- 源码回归、新增层级顺序 ASan/UBSan 与既有原生回归通过。
+- 完整 TIPA 构建、包身份检查及上传通过。
+- 制品 `Dopamine_3.0.7-1a7feb18_roothide.tipa`，
+  artifact ID `13575924938`。
+- GitHub artifact 外层归档 digest：
+  `sha256:78c70a695bbc1ac51bcaf9cd5e6dae3dd662618b27ba62f67314551f7e337faa`。
+  这不是内层 TIPA 的 SHA-256。
+
+这更新上文待 CI 状态。回弹、文字清晰度、底部完整显示及其他真机行为
+仍待设备验收；后续文档提交不改变本候选代码 / 包身份。
