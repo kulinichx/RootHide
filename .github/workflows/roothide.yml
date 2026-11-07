@@ -114,6 +114,9 @@ jobs:
       - name: Signature attachment encoding failure regression
         run: python3 tests/test_rc9_signature_attachment.py --native
 
+      - name: Companion tool Sileo scheme regression
+        run: python3 tests/test_rc9_companion_tools.py --native
+
       - name: Cache Theos
         id: cache-theos
         uses: actions/cache@v4

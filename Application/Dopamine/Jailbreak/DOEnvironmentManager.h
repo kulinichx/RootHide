@@ -45,6 +45,7 @@ typedef NS_ENUM(NSUInteger, DOPackageManagerHealthState) {
 - (BOOL)isBootstrapped;
 - (NSString *)jailbrokenVersion;
 - (NSString *)systemVersion;
+- (NSString *)sileoURLScheme;
 
 - (BOOL)isSupported;
 - (BOOL)isArm64e;

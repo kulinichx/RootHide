@@ -1731,4 +1731,37 @@ static BOOL DOPackageManagerBundleInvalidIsReinstallable(NSString *displayName, 
     }
 }
 
+- (NSString *)sileoURLScheme {
+    if (!self.isJailbroken) {
+        return @"sileo";
+    }
+
+    NSString *path = JBROOT_PATH(@"/Applications/Sileo.app/Info.plist");
+    NSDictionary *info = path ? [NSDictionary dictionaryWithContentsOfFile:path] : nil;
+    id urlTypes = info[@"CFBundleURLTypes"];
+    if (![urlTypes isKindOfClass:NSArray.class]) {
+        return @"sileo";
+    }
+
+    for (id urlType in urlTypes) {
+        if (![urlType isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        id schemes = urlType[@"CFBundleURLSchemes"];
+        if (![schemes isKindOfClass:NSArray.class]) {
+            continue;
+        }
+        for (id scheme in schemes) {
+            if (![scheme isKindOfClass:NSString.class] || [scheme length] == 0) {
+                continue;
+            }
+            NSURL *url = [NSURL URLWithString:[scheme stringByAppendingString:@"://package"]];
+            if ([url.scheme isEqualToString:scheme] && [url.host isEqualToString:@"package"]) {
+                return scheme;
+            }
+        }
+    }
+    return @"sileo";
+}
+
 @end

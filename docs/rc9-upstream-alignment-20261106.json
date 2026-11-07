@@ -6,7 +6,20 @@
     "commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
     "product_version": "3.0.7",
     "minimum_ios": "16.0",
-    "device_acceptance": "pending"
+    "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
+    "latest_device_feedback": {
+      "date": "2026-11-07",
+      "build_commit": "7ad14162d356f56a6bd585bdb503bfcbd3d9cdc2",
+      "package": "Dopamine_3.0.7-7ad14162_roothide",
+      "source": "user_report",
+      "report": "安装使用了,没啥不正常",
+      "scope": "Installation and general use only; device model, firmware and specific test steps were not reconfirmed in this report.",
+      "not_established": [
+        "Reboot and fresh jailbreak acceptance.",
+        "On-device signature encoding failure injection.",
+        "Long-duration stability or the full supported iOS 16 device/firmware matrix."
+      ]
+    }
   },
   "compatibility_gate": {
     "primary_family": "iOS 16",
@@ -182,7 +195,7 @@
     "native_test": "tests/test_rc9_injection_defaults.py --native",
     "local_project_tests": 137,
     "native_execution": "pending_macOS_CI",
-    "unresolved": "No group-member device evidence establishes which component created their user whitelist file. RC9 has no matching optional Sileo installation entry yet."
+    "unresolved": "No group-member device evidence establishes which component created their user whitelist file. The optional Sileo entry was absent at this phase's baseline; phase_eleven adds it without changing injection mode."
   },
   "phase_six": {
     "date": "2026-11-07",
@@ -345,13 +358,50 @@
     "validation": {
       "python_test_suite": "148_passed",
       "git_diff_check": "passed",
-      "native_asan_ubsan": "runs_42337444155_and_42337862821_failed_on_test_stub_pointer_type_mismatch; stub_now_matches_zqbb_choma_int_void_pointer_api_pending_rerun",
-      "full_tipa_build": "skipped_after_native_step_failure_pending_rerun",
-      "device_acceptance": "pending"
+      "native_asan_ubsan": "passed_GitHub_run_42339703952_after_test_stub_API_correction",
+      "full_tipa_build": "passed_GitHub_run_42339703952",
+      "package_identity": "passed_GitHub_run_42339703952",
+      "ci_commit": "7ad14162d356f56a6bd585bdb503bfcbd3d9cdc2",
+      "device_acceptance": "user_reported_install_and_general_use_normal_not_device_failure_injection_or_full_matrix"
     },
     "limits": [
       "The added guard is a local failure-path hardening, not an upstream backport.",
       "It does not close remaining signature parser/attachment paths or trustcache kernel-reader lifetime."
+    ]
+  },
+  "phase_eleven": {
+    "date": "2026-11-07",
+    "scope": "Optional companion-tool Sileo links and ownership comparison for mount/trust preferences.",
+    "rc9_baseline": "7ad14162d356f56a6bd585bdb503bfcbd3d9cdc2",
+    "references": {
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77"
+    },
+    "report": "docs/rc9-companion-tools-comparison-20261107.md",
+    "changes": [
+      "Add jailbreak-only Sileo package-detail links for cn.zqbb.inject.manager and cn.zqbb.hello.mnt using existing DOButtonCell row heights.",
+      "Port the ZQBB sileoURLScheme method unchanged; read Sileo URL types from the active jbroot and fall back to sileo.",
+      "Keep the upstream open-failure message, use existing RC9 error/OK keys and explicitly dispatch alert presentation to the main queue."
+    ],
+    "sileo_scheme_body_sha256": "813c3faf48f5c6f9bde1f2e987ef895a163d84b20813b6fe83ea2313cba2019d",
+    "preserved": [
+      "Existing blacklist/whitelist selection and user configuration.",
+      "No automatic package installation, privilege change, new timer or daemon.",
+      "RC9 custom mount execution/persistence and independent manager trust preferences.",
+      "Existing iOS 16 deployment target, scrolling, bounce, glass rendering and menu hierarchy."
+    ],
+    "validation": {
+      "python_test_suite": "154_passed",
+      "git_diff_check": "passed",
+      "native_test": "tests/test_rc9_companion_tools.py --native",
+      "native_execution": "pending_macos_ci",
+      "full_tipa_build": "pending",
+      "device_acceptance": "pending_for_new_links"
+    },
+    "limits": [
+      "Host native tests exercise the production Foundation scheme reader, not UIKit, Sileo routing or package installation.",
+      "External mount manager implementation and independent trust-manager behavior are not certified by adding package links.",
+      "This does not close full iOS 16 device coverage, trustcache reader lifetime or dyld/basebin interruption recovery."
     ]
   },
   "ledger": [
@@ -377,8 +427,8 @@
     {
       "id": "mount_and_trust_preferences",
       "classification": "rc9_and_zqbb_feature_overlap",
-      "status": "pending_module_comparison",
-      "evidence": "Existing behavior is preserved; no equivalence or extraction is claimed in phase one."
+      "status": "companion_links_aligned_source_checks_pass_external_manager_runtime_not_audited",
+      "evidence": "phase_eleven; fixed ZQBB package links and Sileo scheme reader are ported. RC9 custom mount configuration and independent manager trust preferences are not equivalent to these links; their existing behavior is preserved. New native/CI/device validation remains pending."
     },
     {
       "id": "custom_fake_mounts",
@@ -421,7 +471,7 @@
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
       "status": "file_directory_collection_errors_backported_attachment_encode_failure_guarded_other_paths_open",
-      "evidence": "phase_three, phase_four and phase_ten; tests/test_rc9_signature_collection.py, tests/test_rc9_trustcache_directory.py and tests/test_rc9_signature_attachment.py. Native attachment fault injection is pending macOS CI; other parser/attachment paths and trustcache lifetime remain open."
+      "evidence": "phase_three, phase_four and phase_ten; tests/test_rc9_signature_collection.py, tests/test_rc9_trustcache_directory.py and tests/test_rc9_signature_attachment.py. Native attachment fault injection, full TIPA build and package identity passed in GitHub run 42339703952 at 7ad14162. User reported normal installation and general use; other parser/attachment paths, full device acceptance and trustcache lifetime remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

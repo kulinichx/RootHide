@@ -220,3 +220,7 @@
 "LowPowerSchedule_SaveFailed" = "Could not save the plan: %@";
 "LowPowerSchedule_Discard" = "Discard unsaved changes?";
 "LowPowerSchedule_DiscardButton" = "Discard";
+
+"Install Whitelist App" = "Install Whitelist Manager";
+"Install Mount App" = "Install Mount Manager";
+"Sileo_Open_Failed" = "Could not open Sileo. Install Sileo and refresh its package sources first.";
