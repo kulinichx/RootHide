@@ -468,6 +468,13 @@
       "python_test_suite": "164_passed",
       "native_test": "tests/test_rc9_choma_boundaries.py --native",
       "native_asan_ubsan": "pending_macOS_CI",
+      "first_ci_attempt": {
+        "run": 42372146566,
+        "commit": "609084ead99391d27c4550d0a76beda79374eff6",
+        "result": "failed_new_native_harness_compilation_full_build_skipped",
+        "diagnostic": "The free instrumentation macro renamed MemoryStream callback uses after the header declaration was already parsed.",
+        "correction": "Define allocation instrumentation before actual ChOma headers so callback declarations and implementation tokens are processed consistently without changing layout or production source."
+      },
       "full_tipa_build": "pending",
       "package_identity": "pending",
       "device_acceptance": "pending"

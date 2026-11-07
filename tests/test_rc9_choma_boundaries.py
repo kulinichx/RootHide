@@ -61,9 +61,6 @@ NATIVE_PREFIX = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "CSBlob.h"
-#include "CodeDirectory.h"
-#include "BufferedStream.h"
 
 static int outstanding, allocCalls, failAt = -1, readCalls;
 static uint8_t inputBytes[64];
@@ -81,6 +78,13 @@ static void *test_malloc(size_t size) {
 static void test_free(void *p) {
     if (p) { assert(outstanding > 0); outstanding--; free(p); }
 }
+
+// Instrument headers and implementations together: MemoryStream has a free callback.
+#define malloc test_malloc
+#define free test_free
+#include "CSBlob.h"
+#include "CodeDirectory.h"
+#include "BufferedStream.h"
 
 // Only Mach-O I/O is substituted; the codec and buffered streams are production.
 int macho_find_code_signature_bounds(MachO *macho, uint32_t *offset, uint32_t *size) {
@@ -114,8 +118,6 @@ int csd_code_directory_calculate_hash(CS_DecodedBlob *blob, void *out) {
     assert(!"A missing CodeDirectory must not be hashed");
     return -1;
 }
-#define malloc test_malloc
-#define free test_free
 '''
 
 NATIVE_MAIN = r'''
