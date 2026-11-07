@@ -538,3 +538,23 @@ collector 的其他静默跳过分支、并发变化及 stream 其他分配路�
 实际制品为 `Dopamine_3.0.7-d173d36e_roothide.tipa`，
 artifact ID `13573798939`。iOS 16 真机验收仍待完成。
 后续验收文档补记不修改运行时代码，候选源码/包身份继续对应 `d173d36e`。
+
+## 第十四阶段：原始签名收集的静默错误
+
+日期：2026-11-07，代码基线 `d173d36e`。对照固定官方 `9617d75f`
+和 ZQBB `7e14aa61`，两者 raw collector 都会把空读取当成跳过；
+ZQBB 的 adhoc helper 已有三态区分，RC9 先前也已移植该模式。
+详见 `docs/rc9-raw-signature-collection-comparison-20261107.md`。
+
+- 抽取共用三态读取函数，adhoc 行为不变；raw collector 区分正常无签名
+  与命令枚举/读取失败，错误时返回 `ENOEXEC` 并释放全部部分结果。
+- 补数量上限及 `size_t` 数组大小计算，保留正常结果的签名 source、buffer、
+  slice 文件起点与大小；现有上层失败返回约定不变。
+- 新增使用真实生产头文件的 raw-collection 原生故障注入；
+  覆盖首/中/末切片失败、各次数组扩展失败和正常跳过，另保留 adhoc 回归。
+- Windows 完整源码/契约回归 169 项通过，diff 检查通过；
+  新增原生执行、完整 TIPA 与包身份检查待本轮 macOS CI。
+
+这是复用上游检查模式的 RC9 本地扩展，不冒充上游已发布的 raw-collector 修复。
+递归依赖 collector 的失败传播、CodeDirectory 内部结构、并发快照与既有
+内核/中断恢复问题仍开放；本轮不改 UI、低电量计划、挂载、名单或 iOS 16 门槛。

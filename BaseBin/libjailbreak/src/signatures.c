@@ -90,10 +90,12 @@ bool code_signature_calculate_adhoc_cdhash(CS_SuperBlob *superblob, cdhash_t cdh
 	return isAdhocSigned;
 }
 
-// 1: adhoc hash collected; 0: no trust needed; -1: malformed/unreadable signature.
-static int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut)
+// 1: signature read; 0: no signature command; -1: command/read failure.
+static int macho_read_code_signature_checked(MachO *macho, CS_SuperBlob **superblobOut)
 {
-	if (!macho || !cdhashOut) return -1;
+	if (!superblobOut) return -1;
+	*superblobOut = NULL;
+	if (!macho) return -1;
 	__block bool hasSignature = false;
 	int status = macho_enumerate_load_commands(macho, ^(struct load_command command, uint64_t offset, void *data, bool *stop) {
 		if (command.cmd == LC_CODE_SIGNATURE) {
@@ -104,8 +106,17 @@ static int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut)
 	if (status != 0) return -1;
 	if (!hasSignature) return 0;
 
-	CS_SuperBlob *superblob = macho_read_code_signature(macho);
-	if (!superblob) return -1;
+	*superblobOut = macho_read_code_signature(macho);
+	return *superblobOut ? 1 : -1;
+}
+
+// 1: adhoc hash collected; 0: no trust needed; -1: malformed/unreadable signature.
+static int macho_collect_adhoc_cdhash(MachO *macho, cdhash_t cdhashOut)
+{
+	if (!macho || !cdhashOut) return -1;
+	CS_SuperBlob *superblob = NULL;
+	int signatureResult = macho_read_code_signature_checked(macho, &superblob);
+	if (signatureResult <= 0) return signatureResult;
 	CS_DecodedSuperBlob *decodedSuperblob = csd_superblob_decode(superblob);
 	free(superblob);
 	if (!decodedSuperblob) return -1;
@@ -266,9 +277,10 @@ int file_collect_untrusted_cdhashes_by_path(const char *path, cdhash_t **cdhashe
 
 int fat_collect_signatures(Fat *fat, struct siginfo **sigInfosOut, uint32_t *sigInfoCountOut)
 {
-	if (!fat || !sigInfosOut || !sigInfoCountOut) return EINVAL;
+	if (!sigInfosOut || !sigInfoCountOut) return EINVAL;
 	*sigInfosOut = NULL;
 	*sigInfoCountOut = 0;
+	if (!fat) return EINVAL;
 
 	__block struct siginfo *sigInfos = NULL;
 	__block uint32_t sigInfoCount = 0;
@@ -279,9 +291,21 @@ int fat_collect_signatures(Fat *fat, struct siginfo **sigInfosOut, uint32_t *sig
 			return;
 		}
 		if (macho_is_mappable(macho)) {
-			CS_SuperBlob *superblob = macho_read_code_signature(macho);
-			if (superblob) {
-				struct siginfo *newSigInfos = realloc(sigInfos, (sigInfoCount + 1) * sizeof(struct siginfo));
+			CS_SuperBlob *superblob = NULL;
+			int signatureResult = macho_read_code_signature_checked(macho, &superblob);
+			if (signatureResult < 0) {
+				status = ENOEXEC;
+				*stop = true;
+				return;
+			}
+			if (signatureResult > 0) {
+				if (sigInfoCount == UINT32_MAX) {
+					free(superblob);
+					status = EOVERFLOW;
+					*stop = true;
+					return;
+				}
+				struct siginfo *newSigInfos = realloc(sigInfos, ((size_t)sigInfoCount + 1) * sizeof(struct siginfo));
 				if (!newSigInfos) {
 					free(superblob);
 					status = ENOMEM;

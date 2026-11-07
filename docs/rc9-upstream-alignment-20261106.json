@@ -489,6 +489,40 @@
       "No UI, version, low-power schedule, mount or default injection changes; existing iOS 16 compatibility scope is preserved."
     ]
   },
+  "phase_fourteen": {
+    "date": "2026-11-07",
+    "status": "source_suite_passed_new_native_CI_and_device_validation_pending",
+    "scope": "Raw signature collection absence/failure distinction and complete-output ownership.",
+    "rc9_baseline": "d173d36ea9b532877c79f0630bf5e94c26c4de5d",
+    "references": {
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77"
+    },
+    "classification": "reuse_previously_aligned_tristate_pattern_rc9_raw_collector_hardening",
+    "report": "docs/rc9-raw-signature-collection-comparison-20261107.md",
+    "changes": [
+      "Share the existing load-command presence and checked-read pattern between adhoc and raw collection without changing adhoc policy.",
+      "Stop raw collection on command/read errors, release all partial buffers and keep outputs empty.",
+      "Guard raw signature count and widen growth arithmetic to size_t while preserving successful metadata and normal skips.",
+      "Keep existing live consumer failure propagation before trust and optional attachment."
+    ],
+    "validation": {
+      "python_test_suite": "169_passed",
+      "git_diff_check": "passed",
+      "native_test": "tests/test_rc9_signature_raw_collection.py --native",
+      "native_asan_ubsan": "pending_macOS_CI",
+      "full_tipa_build": "pending",
+      "package_identity": "pending",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "Native harness uses real headers but mocked ChOma and OS operations; the live consumer is source-checked rather than executed by this harness.",
+      "The maximum-count guard is source-checked, not exercised by allocating billions of slices.",
+      "The pointer-only ChOma reader cannot distinguish specific read failure causes.",
+      "Recursive dependency collector failures, CodeDirectory internals, concurrent file consistency and rollback remain open.",
+      "UI, version, iOS 16 supported combinations, low-power schedule, mount and injection defaults are unchanged."
+    ]
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -555,8 +589,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "fixed_choma_outer_boundaries_and_real_codec_fault_tests_native_CI_full_build_passed_other_paths_open",
-      "evidence": "phase_three, phase_four, phase_ten, phase_twelve and phase_thirteen. Latest built code d173d36e passed run 42372494583, including real fixed ChOma ASan/UBSan, existing native regressions, full TIPA and identity. Local source suite: 164 passed. First new harness run 42372146566 failed due to macro/header ordering; corrected without a production code change. Previous mock encoding tests prove caller preservation, not internal library allocation safety. User feedback applies only to 7ad14162. Legacy unsized callers, CodeDirectory internals, skipped collector failures, concurrent mutation and current candidate device validation remain open."
+      "status": "raw_collector_tristate_error_extension_added_source_suite_passed_new_native_CI_pending",
+      "evidence": "phase_three, phase_four, phase_ten, phase_twelve, phase_thirteen and phase_fourteen. Latest built code d173d36e passed run 42372494583. Phase fourteen extends the already aligned signature-presence tri-state pattern to raw collection, adds complete partial cleanup and count bounds, with 169 local source tests passed; new native/full-build validation pending. Official and ZQBB raw collectors also silently skip null reads, so this is not described as an existing upstream raw fix. Legacy unsized callers, recursive dependency failures, CodeDirectory internals, concurrent mutation and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

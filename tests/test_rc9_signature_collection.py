@@ -19,11 +19,14 @@ SIGNATURES = "BaseBin/libjailbreak/src/signatures.c"
 class SignatureCollectionContracts(unittest.TestCase):
     def test_parse_failure_is_distinct_from_no_signature_or_nonadhoc(self):
         text = source(SIGNATURES)
+        reader = extract(text, "static int macho_read_code_signature_checked(")
+        self.assertIn("LC_CODE_SIGNATURE", reader)
+        self.assertIn("if (status != 0) return -1;", reader)
+        self.assertIn("if (!hasSignature) return 0;", reader)
+        self.assertIn("return *superblobOut ? 1 : -1;", reader)
         body = extract(text, "static int macho_collect_adhoc_cdhash(")
-        self.assertIn("LC_CODE_SIGNATURE", body)
-        self.assertIn("if (status != 0) return -1;", body)
-        self.assertIn("if (!hasSignature) return 0;", body)
-        self.assertIn("if (!superblob) return -1;", body)
+        self.assertIn("macho_read_code_signature_checked(macho, &superblob)", body)
+        self.assertIn("if (signatureResult <= 0) return signatureResult;", body)
         self.assertIn("if (!decodedSuperblob) return -1;", body)
         self.assertIn("== 0 ? 1 : -1", body)
         wrapper = extract(text, "bool macho_parse_code_signature(")
@@ -308,6 +311,7 @@ def native_tests():
     code = "\n".join((
         NATIVE_PREFIX,
         *(extract(source(SIGNATURES), anchor) for anchor in (
+            "static int macho_read_code_signature_checked(",
             "static int macho_collect_adhoc_cdhash(",
             "bool macho_parse_code_signature(",
             "int fat_collect_untrusted_cdhashes(",

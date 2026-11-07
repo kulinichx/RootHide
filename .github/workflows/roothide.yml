@@ -123,6 +123,9 @@ jobs:
       - name: Fixed ChOma signature boundary regression
         run: python3 tests/test_rc9_choma_boundaries.py --native
 
+      - name: Raw signature collection error regression
+        run: python3 tests/test_rc9_signature_raw_collection.py --native
+
       - name: Companion tool Sileo scheme regression
         run: python3 tests/test_rc9_companion_tools.py --native
 
