@@ -46,7 +46,8 @@ class ScrollDiagnosticsContracts(unittest.TestCase):
         record = self.method("- (void)recordScrollDiagnosticsPhase:")
         for field in ("_table.frame", "_table.bounds", "_table.contentSize",
                       "_table.contentInset", "_table.adjustedContentInset",
-                      "self.view.safeAreaInsets", "_table.decelerating"):
+                      "self.view.safeAreaInsets", "_table.decelerating",
+                      "self.pageChromeView.bounds", "convertRect:_table.frame"):
             self.assertIn(field, record)
         diagnostics = source(BASE).split("#pragma mark - Opt-in scroll diagnostics", 1)[1]
         for forbidden in ("_table.frame =", "_table.bounds =", "_table.contentInset =",
@@ -73,7 +74,7 @@ class ScrollDiagnosticsContracts(unittest.TestCase):
         self.assertNotIn("displayLinkWithTarget:self", pan)
         tick = self.method("- (void)scrollDiagnosticsTick:")
         for guard in ("!self.viewIfLoaded.window", "UIApplicationStateActive",
-                      "topViewController != self", ">= 8.0", ">= 0.5"):
+                      "topViewController != [self listPageController]", ">= 8.0", ">= 0.5"):
             self.assertIn(guard, tick)
         stop = self.method("- (void)stopScrollDiagnosticsWithReason:")
         self.assertIn("self.scrollTraceCapturing = NO;", stop)
@@ -159,6 +160,8 @@ int main(void) { @autoreleasepool {
                 .timestamp = (double)i / 60.0, .phase = 2,
                 .offset = CGPointMake(0, (CGFloat)i),
                 .frame = CGRectMake(12, 5, 300, 600),
+                .hostBounds = CGRectMake(0, 0, 324, 610),
+                .tableFrameInHost = CGRectMake(12, 5, 300, 600),
                 .adjustedInset = {10, 20, 30, 40},
                 .decelerating = YES,
             };
@@ -171,6 +174,8 @@ int main(void) { @autoreleasepool {
             assert([record[@"offset_y"] unsignedIntegerValue] == written - count + i);
             assert([record[@"resting_top_y"] doubleValue] == -10.0);
             assert(([record[@"table_frame"] isEqualToArray:@[@12, @5, @300, @600]]));
+            assert(([record[@"host_bounds"] isEqualToArray:@[@0, @0, @324, @610]]));
+            assert(([record[@"table_frame_in_host"] isEqualToArray:@[@12, @5, @300, @600]]));
             assert(([record[@"adjusted_inset"] isEqualToArray:@[@10, @20, @30, @40]]));
             assert([record[@"decelerating"] boolValue]);
         }

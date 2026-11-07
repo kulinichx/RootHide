@@ -2225,7 +2225,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     //Action Menu
     DOActionMenuView *actionView = [[DOActionMenuView alloc] initWithActions:@[
         [UIAction actionWithTitle:DOLocalizedString(@"Menu_Settings_Title") image:[UIImage systemImageNamed:@"gearshape" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] identifier:@"settings" handler:^(__kindof UIAction * _Nonnull action) {
-            [self.navigationController pushViewController:[[DOSettingsController alloc] init] animated:YES];
+            [self.navigationController pushViewController:[DOSettingsController pageController] animated:YES];
         }],
         [UIAction actionWithTitle:DOLocalizedString(@"Menu_Restart_SpringBoard_Title") image:[UIImage systemImageNamed:@"arrow.clockwise" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] identifier:@"respring" handler:^(__kindof UIAction * _Nonnull action) {
             [self fadeToBlack:^{
@@ -2248,7 +2248,7 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
             [self presentViewController:confirmation animated:YES completion:nil];
         }],
         [UIAction actionWithTitle:DOLocalizedString(@"Menu_Credits_Title") image:[UIImage systemImageNamed:@"info.circle" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]] identifier:@"credits" handler:^(__kindof UIAction * _Nonnull action) {
-            [self.navigationController pushViewController:[[DOCreditsViewController alloc] init] animated:YES];
+            [self.navigationController pushViewController:[DOCreditsViewController pageController] animated:YES];
         }]
     ] delegate:self];
     
@@ -3072,10 +3072,10 @@ static void DOCustomGlassExportLivePhoto(PHLivePhoto *livePhoto,
     ]];
 
     UIAction *settingsAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [self.navigationController pushViewController:[[DOSettingsController alloc] init] animated:YES];
+        [self.navigationController pushViewController:[DOSettingsController pageController] animated:YES];
     }];
     UIAction *creditsAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        [self.navigationController pushViewController:[[DOCreditsViewController alloc] init] animated:YES];
+        [self.navigationController pushViewController:[DOCreditsViewController pageController] animated:YES];
     }];
 
     DOCustomLiquidGlassView *settingsCard = [self customGlassCardWithTitle:DOLocalizedString(@"Menu_Settings_Title") imageName:@"gearshape" action:settingsAction];

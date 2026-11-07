@@ -24,6 +24,52 @@ def layout_method():
 
 
 class ListLayoutContracts(unittest.TestCase):
+    def test_page_host_preserves_the_original_padding_with_standard_containment(self):
+        text = source(BASE)
+        self.assertIn("@implementation DOPSListPageController\n", text)
+        helper = extract(text, "static CGRect DOPSListPageContentFrame(")
+        self.assertIn("return CGRectInset(bounds, 12.0, 5.0);", helper)
+        host = text.split("@implementation DOPSListPageController\n", 1)[1].split("@end", 1)[0]
+        load = extract(host, "- (void)viewDidLoad")
+        self.assertLess(load.index("[self addChildViewController:listController];"),
+                        load.index("UIView *listView = listController.view;"))
+        self.assertIn("listView.frame = DOPSListPageContentFrame(self.view.bounds);", load)
+        self.assertIn("UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight", load)
+        self.assertLess(load.index("[self.view insertSubview:listView atIndex:0];"),
+                        load.index("[listController didMoveToParentViewController:self];"))
+        self.assertIn("self.view.backgroundColor = listView.backgroundColor;", load)
+        self.assertIn("self.view.layer.cornerRadius = listView.layer.cornerRadius;", load)
+        self.assertIn("listView.layer.cornerRadius = 0.0;", load)
+        self.assertIn("- (UIViewController *)childViewControllerForStatusBarStyle", host)
+        self.assertIn("return self.listController.shouldAutorotate;", host)
+        self.assertIn("return self.listController.supportedInterfaceOrientations;", host)
+        self.assertNotIn("viewDidLayoutSubviews", host)
+        self.assertNotIn("_table", host)
+        self.assertNotIn("beginAppearanceTransition", host)
+
+    def test_all_settings_and_about_entry_points_use_the_host(self):
+        main = source("Application/Dopamine/UI/DOMainViewController.m")
+        for name in ("DOSettingsController", "DOCreditsViewController"):
+            self.assertEqual(main.count(f"[{name} pageController]"), 2)
+            self.assertNotIn(f"[[{name} alloc] init]", main)
+        base = source(BASE).split("@implementation DOPSListController\n", 1)[1]
+        factory = extract(base, "+ (UIViewController *)pageController")
+        self.assertIn("initWithListController:[[self alloc] init]", factory)
+
+    def test_navigation_chrome_stays_in_the_original_outer_page(self):
+        for name in ("DOSettingsController", "DOCreditsViewController"):
+            text = source(f"Application/Dopamine/UI/Settings/{name}.m")
+            text = text.split(f"@implementation {name}\n", 1)[1]
+            install = extract(text, "- (void)customGlassInstallBackNavigation")
+            self.assertIn("UIView *chromeView = self.pageChromeView;", install)
+            self.assertIn("[chromeView addSubview:backButton];", install)
+            self.assertIn("chromeView.safeAreaLayoutGuide.leadingAnchor constant:10.0", install)
+            self.assertIn("chromeView.safeAreaLayoutGuide.topAnchor constant:6.0", install)
+            self.assertIn("[chromeView addGestureRecognizer:edgeGesture];", install)
+            self.assertNotIn("[self.view addSubview:backButton]", install)
+        visibility = extract(source(BASE), "- (UIViewController *)listPageController")
+        self.assertIn("isKindOfClass:DOPSListPageController.class", visibility)
+
     def test_rc9_does_not_resize_or_reposition_the_preferences_table(self):
         layout = layout_method()
         self.assertEqual(layout.count("[super viewDidLayoutSubviews];"), 1)
@@ -140,8 +186,6 @@ static BOOL UIEdgeInsetsEqualToEdgeInsets(UIEdgeInsets a, UIEdgeInsets b) {
 '''
 
 NATIVE_MAIN = r'''
-@end
-
 static CGRect rectFromArray(NSArray<NSNumber *> *a) {
     assert(a.count == 4);
     return CGRectMake(a[0].doubleValue, a[1].doubleValue,
@@ -160,10 +204,20 @@ int main(int argc, const char **argv) { @autoreleasepool {
     NSArray *frames = @[fixture[@"page_bounds"], @[@0, @0, @375, @600],
         @[@0, @0, @744, @500]];
     for (NSArray *frame in frames) {
+        CGRect outerBounds = rectFromArray(frame);
+        CGRect listFrame = DOPSListPageContentFrame(outerBounds);
+        assert(listFrame.origin.x == 12 && listFrame.origin.y == 5);
+        assert(listFrame.size.width == outerBounds.size.width - 24);
+        assert(listFrame.size.height == outerBounds.size.height - 10);
+        if (frame == frames.firstObject) {
+            assert(CGRectEqualToRect(listFrame,
+                rectFromArray(fixture[@"table_frame_before_each_layout"])));
+        }
         for (NSDictionary *cycle in fixture[@"layout_cycles"]) {
             DOPSListController *controller = [DOPSListController new];
             controller.view = [RCTestView new];
-            controller.view.bounds = rectFromArray(frame);
+            controller.view.bounds = CGRectMake(0, 0,
+                listFrame.size.width, listFrame.size.height);
             controller->_table = [RCTestTable new];
             RCTestTable *table = controller->_table;
             table.frame = controller.view.bounds;
@@ -180,6 +234,8 @@ int main(int argc, const char **argv) { @autoreleasepool {
                 [controller viewDidLayoutSubviews];
                 // No resize after the parent, and no second writer of frame.
                 assert(CGRectEqualToRect(table.frame, controller.view.bounds));
+                assert(CGRectEqualToRect(CGRectOffset(table.frame,
+                    listFrame.origin.x, listFrame.origin.y), listFrame));
                 assert(table.frameWrites == controller.parentLayouts);
                 assert(controller.parentLayouts == pass);
                 assert(CGPointEqualToPoint(table.contentOffset, incomingOffset));
@@ -190,7 +246,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
             }
         }
     }
-    puts("PASS: production layout keeps parent frame and offset, one-time bottom padding and trace ordering; nine measured offsets, three viewport sizes, 200 passes; no UIKit execution");
+    puts("PASS: original list rectangle preserved in the outer page, production layout keeps parent frame and offset, one-time bottom padding and trace ordering; nine measured offsets, three viewport sizes, 200 passes; no UIKit execution");
 } return 0; }
 '''
 
@@ -199,7 +255,8 @@ def native_tests():
     clang = shutil.which("clang")
     if sys.platform != "darwin" or not clang:
         raise SystemExit("--native requires macOS clang/Foundation; no native tests run")
-    code = "\n".join((NATIVE_PREFIX, layout_method(), NATIVE_MAIN))
+    helper = extract(source(BASE), "static CGRect DOPSListPageContentFrame(")
+    code = "\n".join((NATIVE_PREFIX, layout_method(), "@end", helper, NATIVE_MAIN))
     with tempfile.TemporaryDirectory(prefix="rc9-list-layout-") as directory:
         path = Path(directory) / "list_layout.m"
         binary = Path(directory) / "list_layout"

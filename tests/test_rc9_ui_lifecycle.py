@@ -215,7 +215,8 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
             self.assertIn(setting, load)
 
     def test_preferences_pages_keep_native_top_insets_and_bottom_scroll_room(self):
-        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
+        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m").split(
+            "@implementation DOPSListController\n", 1)[1]
         load = extract(base, "- (void)viewDidLoad")
         self.assertNotIn("contentInsetAdjustmentBehavior", load)
         self.assertNotIn("automaticallyAdjustsScrollIndicatorInsets", load)
@@ -238,7 +239,8 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
             self.assertNotIn("contentInsetAdjustmentBehavior", page)
 
     def test_preferences_keeps_native_height_estimation_and_bounce_policy(self):
-        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
+        base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m").split(
+            "@implementation DOPSListController\n", 1)[1]
         load = extract(base, "- (void)viewDidLoad")
         for override in ("_table.estimatedRowHeight =",
                          "_table.estimatedSectionHeaderHeight =",

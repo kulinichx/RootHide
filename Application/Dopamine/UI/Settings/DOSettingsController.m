@@ -689,9 +689,10 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
     for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
         [glass reloadMaterial];
 
-    UIView *backButton = [self.view viewWithTag:0xC653];
+    UIView *chromeView = self.pageChromeView;
+    UIView *backButton = [chromeView viewWithTag:0xC653];
     if (backButton)
-        [self.view bringSubviewToFront:backButton];
+        [chromeView bringSubviewToFront:backButton];
     if ([backButton isKindOfClass:[UIButton class]]) {
         ((UIButton *)backButton).tintColor = [self customGlassForegroundWithAlpha:0.96];
     }
@@ -729,9 +730,10 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
 - (void)customGlassInstallBackNavigation
 {
     static NSInteger const DOCustomGlassSettingsBackButtonTag = 0xC653;
-    UIView *existingBackButton = [self.view viewWithTag:DOCustomGlassSettingsBackButtonTag];
+    UIView *chromeView = self.pageChromeView;
+    UIView *existingBackButton = [chromeView viewWithTag:DOCustomGlassSettingsBackButtonTag];
     if (existingBackButton) {
-        [self.view bringSubviewToFront:existingBackButton];
+        [chromeView bringSubviewToFront:existingBackButton];
         return;
     }
 
@@ -746,12 +748,12 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
                 forState:UIControlStateNormal];
     [backButton addTarget:self action:@selector(customGlassBackPressed)
          forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:backButton];
+    [chromeView addSubview:backButton];
     [self installScrollDiagnosticsForBackButton:backButton];
 
     [NSLayoutConstraint activateConstraints:@[
-        [backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:10.0],
-        [backButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6.0],
+        [backButton.leadingAnchor constraintEqualToAnchor:chromeView.safeAreaLayoutGuide.leadingAnchor constant:10.0],
+        [backButton.topAnchor constraintEqualToAnchor:chromeView.safeAreaLayoutGuide.topAnchor constant:6.0],
         [backButton.widthAnchor constraintEqualToConstant:44.0],
         [backButton.heightAnchor constraintEqualToConstant:44.0]
     ]];
@@ -759,7 +761,7 @@ static void DOPlaceCustomGlassSettingsSection(UITableView *tableView, UIView *gl
     UIScreenEdgePanGestureRecognizer *edgeGesture =
         [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(customGlassEdgeBackGesture:)];
     edgeGesture.edges = UIRectEdgeLeft;
-    [self.view addGestureRecognizer:edgeGesture];
+    [chromeView addGestureRecognizer:edgeGesture];
 }
 
 - (void)customGlassInstallPageAppearance

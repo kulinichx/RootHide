@@ -283,7 +283,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     for (DOCustomLiquidGlassView *glass in self.customGlassSectionBackdropViews.allValues)
         [glass reloadMaterial];
 
-    UIView *backButton = [self.view viewWithTag:0xC654];
+    UIView *backButton = [self.pageChromeView viewWithTag:0xC654];
     if ([backButton isKindOfClass:[UIButton class]]) {
         ((UIButton *)backButton).tintColor = [self customGlassForegroundWithAlpha:0.96];
     }
@@ -320,9 +320,10 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
 - (void)customGlassInstallBackNavigation
 {
     static NSInteger const DOCustomGlassCreditsBackButtonTag = 0xC654;
-    UIView *existingBackButton = [self.view viewWithTag:DOCustomGlassCreditsBackButtonTag];
+    UIView *chromeView = self.pageChromeView;
+    UIView *existingBackButton = [chromeView viewWithTag:DOCustomGlassCreditsBackButtonTag];
     if (existingBackButton) {
-        [self.view bringSubviewToFront:existingBackButton];
+        [chromeView bringSubviewToFront:existingBackButton];
         return;
     }
 
@@ -337,12 +338,12 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
                 forState:UIControlStateNormal];
     [backButton addTarget:self action:@selector(customGlassBackPressed)
          forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:backButton];
+    [chromeView addSubview:backButton];
     [self installScrollDiagnosticsForBackButton:backButton];
 
     [NSLayoutConstraint activateConstraints:@[
-        [backButton.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:10.0],
-        [backButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:6.0],
+        [backButton.leadingAnchor constraintEqualToAnchor:chromeView.safeAreaLayoutGuide.leadingAnchor constant:10.0],
+        [backButton.topAnchor constraintEqualToAnchor:chromeView.safeAreaLayoutGuide.topAnchor constant:6.0],
         [backButton.widthAnchor constraintEqualToConstant:44.0],
         [backButton.heightAnchor constraintEqualToConstant:44.0]
     ]];
@@ -350,7 +351,7 @@ static NSInteger const DOCustomGlassCreditsSeparatorTag = 0xC652;
     UIScreenEdgePanGestureRecognizer *edgeGesture =
         [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(customGlassEdgeBackGesture:)];
     edgeGesture.edges = UIRectEdgeLeft;
-    [self.view addGestureRecognizer:edgeGesture];
+    [chromeView addGestureRecognizer:edgeGesture];
 }
 
 - (void)customGlassInstallPageAppearance

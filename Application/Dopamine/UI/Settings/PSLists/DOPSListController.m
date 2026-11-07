@@ -11,6 +11,68 @@
 #import <QuartzCore/QuartzCore.h>
 #include <math.h>
 
+static CGRect DOPSListPageContentFrame(CGRect bounds)
+{
+    return CGRectInset(bounds, 12.0, 5.0);
+}
+
+@interface DOPSListPageController : UIViewController
+@property(nonatomic, strong) DOPSListController *listController;
+- (instancetype)initWithListController:(DOPSListController *)listController;
+@end
+
+@implementation DOPSListPageController
+
+- (instancetype)initWithListController:(DOPSListController *)listController
+{
+    self = [super init];
+    if (self) _listController = listController;
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    DOPSListController *listController = self.listController;
+    [self addChildViewController:listController];
+    UIView *listView = listController.view;
+
+    // Keep the original outer appearance and chrome at the original page size.
+    self.overrideUserInterfaceStyle = listController.overrideUserInterfaceStyle;
+    self.view.backgroundColor = listView.backgroundColor;
+    self.view.opaque = listView.opaque;
+    self.view.layer.cornerRadius = listView.layer.cornerRadius;
+    self.view.layer.cornerCurve = listView.layer.cornerCurve;
+    self.view.layer.masksToBounds = listView.layer.masksToBounds;
+    listView.backgroundColor = UIColor.clearColor;
+    listView.layer.cornerRadius = 0.0;
+    listView.layer.masksToBounds = NO;
+
+    // The host owns the child frame; Preferences alone owns the table frame.
+    listView.translatesAutoresizingMaskIntoConstraints = YES;
+    listView.frame = DOPSListPageContentFrame(self.view.bounds);
+    listView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view insertSubview:listView atIndex:0];
+    [listController didMoveToParentViewController:self];
+}
+
+- (UIViewController *)childViewControllerForStatusBarStyle
+{
+    return self.listController;
+}
+
+- (BOOL)shouldAutorotate
+{
+    return self.listController.shouldAutorotate;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
+{
+    return self.listController.supportedInterfaceOrientations;
+}
+
+@end
+
 static NSUInteger const DOScrollTraceCapacity = 1024;
 
 typedef struct {
@@ -19,6 +81,8 @@ typedef struct {
     CGRect frame;
     CGRect bounds;
     CGRect pageBounds;
+    CGRect hostBounds;
+    CGRect tableFrameInHost;
     CGPoint offset;
     CGSize contentSize;
     UIEdgeInsets contentInset;
@@ -59,6 +123,8 @@ static NSArray *DOScrollTraceRecords(const DOScrollTraceSample *samples, NSUInte
             @"table_frame": DOScrollTraceRect(sample.frame),
             @"table_bounds": DOScrollTraceRect(sample.bounds),
             @"page_bounds": DOScrollTraceRect(sample.pageBounds),
+            @"host_bounds": DOScrollTraceRect(sample.hostBounds),
+            @"table_frame_in_host": DOScrollTraceRect(sample.tableFrameInHost),
             @"content_size": @[DOScrollTraceNumber(sample.contentSize.width),
                 DOScrollTraceNumber(sample.contentSize.height)],
             @"content_inset": DOScrollTraceInsets(sample.contentInset),
@@ -102,6 +168,22 @@ static NSArray *DOScrollTraceRecords(const DOScrollTraceSample *samples, NSUInte
 @end
 
 @implementation DOPSListController
+
++ (UIViewController *)pageController
+{
+    return [[DOPSListPageController alloc] initWithListController:[[self alloc] init]];
+}
+
+- (UIViewController *)listPageController
+{
+    UIViewController *parent = self.parentViewController;
+    return [parent isKindOfClass:DOPSListPageController.class] ? parent : self;
+}
+
+- (UIView *)pageChromeView
+{
+    return [self listPageController].view;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -197,6 +279,8 @@ static NSArray *DOScrollTraceRecords(const DOScrollTraceSample *samples, NSUInte
         .frame = _table.frame,
         .bounds = _table.bounds,
         .pageBounds = self.view.bounds,
+        .hostBounds = self.pageChromeView.bounds,
+        .tableFrameInHost = [_table.superview convertRect:_table.frame toView:self.pageChromeView],
         .offset = _table.contentOffset,
         .contentSize = _table.contentSize,
         .contentInset = _table.contentInset,
@@ -247,7 +331,8 @@ static NSArray *DOScrollTraceRecords(const DOScrollTraceSample *samples, NSUInte
     }
     if (!self.scrollTraceCapturing || !self.viewIfLoaded.window ||
         UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
-        (self.navigationController && self.navigationController.topViewController != self)) {
+        (self.navigationController &&
+         self.navigationController.topViewController != [self listPageController])) {
         [self stopScrollDiagnosticsWithReason:@"not_visible_or_active"];
         return;
     }

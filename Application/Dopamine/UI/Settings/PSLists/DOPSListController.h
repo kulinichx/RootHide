@@ -15,7 +15,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface DOPSListController : PSListController
 
 + (void)setupViewControllerStyle:(UIViewController*)vc;
++ (UIViewController *)pageController;
 
+@property(nonatomic, readonly) UIView *pageChromeView;
 - (void)keepTableBackdropViewsBehindContent:(NSArray<UIView *> *)backdropViews;
 - (void)installScrollDiagnosticsForBackButton:(UIButton *)button;
 
