@@ -61,7 +61,7 @@ class ScrollDiagnosticsContracts(unittest.TestCase):
         self.assertLess(layout.index("[super viewDidLayoutSubviews]"),
                         layout.index("recordScrollDiagnosticsPhase:4"))
         self.assertLess(layout.index("recordScrollDiagnosticsPhase:4"),
-                        layout.index("_table.frame = tableFrame;"))
+                        layout.index("_table.contentInset = insets;"))
         self.assertLess(layout.index("_table.contentInset = insets;"),
                         layout.index("recordScrollDiagnosticsPhase:5"))
 

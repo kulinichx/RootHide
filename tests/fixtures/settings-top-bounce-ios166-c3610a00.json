@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "provenance": "Numeric subset of the user-supplied on-device RC9 scroll trace; not a simulated trace.",
+  "source_sha256": "bb57c4345eab43ca105aef8dde8db2c8050fb0bf77a1d625218a5090885d50e7",
+  "source_commit": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
+  "system": "Version 16.6 (Build 20G75)",
+  "controller": "DOSettingsController",
+  "source_sample_count": 109,
+  "source_dropped_samples": 0,
+  "page_bounds": [0, 0, 333, 596.4],
+  "table_frame_before_each_layout": [12, 5, 309, 586.4],
+  "table_frame_after_preferences_each_layout": [0, 0, 333, 596.4],
+  "table_frame_after_rc9_each_layout": [12, 5, 309, 586.4],
+  "content_size_before_each_layout": [309, 948.3333333333333],
+  "content_size_after_preferences_each_layout": [333, 948.3333333333333],
+  "content_size_after_rc9_each_layout": [309, 948.3333333333333],
+  "content_inset_all_samples": [0, 0, 24, 0],
+  "adjusted_inset_all_samples": [0, 0, 24, 0],
+  "page_safe_area_all_samples": [0, 0, 0, 0],
+  "layout_cycles": [
+    {"seconds": 0.03349095833334559, "before_y": -35.666666666666664, "preferences_y": 0, "rc9_y": 0, "dragging": true, "decelerating": false},
+    {"seconds": 0.07429866666666385, "before_y": -81, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.08348899999998594, "before_y": 0, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.10752129166667146, "before_y": -42.333333333333336, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.11238754166663512, "before_y": 0, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.14875166666672612, "before_y": -37.333333333333336, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.1537140416667171, "before_y": 0, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.22420450000004166, "before_y": -33.333333333333336, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true},
+    {"seconds": 0.23262925000005907, "before_y": -2.3333333333333335, "preferences_y": 0, "rc9_y": 0, "dragging": false, "decelerating": true}
+  ]
+}

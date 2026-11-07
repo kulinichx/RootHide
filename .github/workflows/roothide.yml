@@ -144,6 +144,9 @@ jobs:
       - name: Scroll diagnostic export regression
         run: python3 tests/test_rc9_scroll_diagnostics.py --native
 
+      - name: Preferences list layout ownership regression
+        run: python3 tests/test_rc9_list_layout.py --native
+
       - name: Cache Theos
         id: cache-theos
         uses: actions/cache@v4

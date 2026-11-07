@@ -651,7 +651,7 @@
   "settings_bounce_followup": {
     "date": "2026-11-07",
     "runtime_baseline": "8da710271fb20399aeb5faab9c58aeaf7219ebe0",
-    "status": "scoped_order_guard_device_top_bounce_failed_diagnostic_build_passed_runtime_evidence_pending",
+    "status": "device_trace_identified_frame_cycle_native_frame_candidate_pending_ci_and_device",
     "report": "docs/rc9-settings-bounce-audit-20261107.md",
     "finding": "Settings and Credits unconditionally reorder every section backdrop in every willDisplayCell callback; the normal low-power page does not.",
     "change": "Keep the existing foreground styling and repair backdrop order only when an attached backdrop is actually above table content.",
@@ -698,8 +698,8 @@
         "full_build": "passed_GitHub_run_42382233488",
         "package_identity": "passed_GitHub_run_42382233488",
         "ci_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
-        "device_trace_usability": "pending",
-        "top_bounce_fix": "not_claimed_runtime_evidence_required"
+        "device_trace_usability": "confirmed_settings_c3610a00_ios166_109_samples_no_drops",
+        "top_bounce_fix": "shared_frame_cycle_candidate_pending_ci_and_device_see_settings_native_frame_followup"
       },
       "privacy": "Geometry, app build and OS/controller metadata only; no screenshots, account details, installed app lists or injection configuration.",
       "limitations": "Source contracts and native export tests do not execute UIKit physics, alert/share lifecycle, Preferences layout or display-link sampling on iOS."
@@ -780,6 +780,37 @@
       "device": "pending"
     }
   },
+  "settings_native_frame_followup": {
+    "date": "2026-11-08",
+    "baseline": "c3610a00bc461d7b9f1c73830eb6d7e74e679f6d",
+    "status": "measured_frame_cycle_removed_pending_ci_and_device",
+    "report": "docs/rc9-settings-native-frame-20261108.md",
+    "runtime_evidence": {
+      "controller": "DOSettingsController",
+      "system": "16.6 (20G75)",
+      "source_sha256": "bb57c4345eab43ca105aef8dde8db2c8050fb0bf77a1d625218a5090885d50e7",
+      "samples": 109,
+      "dropped_samples": 0,
+      "layout_cycles": 9,
+      "parent_layout_resets_from_negative_offset": 6,
+      "frame_cycle": "12,5,309,586.4 -> 0,0,333,596.4 -> 12,5,309,586.4",
+      "inset_and_safe_area": "constant_in_this_capture",
+      "fixture": "tests/fixtures/settings-top-bounce-ios166-c3610a00.json",
+      "about_page_trace": "not_supplied_same_shared_parent_not_independent_runtime_acceptance"
+    },
+    "change": "Remove RC9 table.frame reassignment after Preferences layout; keep super, diagnostics and guarded bottom padding. Let Preferences own the table frame.",
+    "intentional_upstream_difference": "Fixed official DOPSListController also shrinks the table. Remove this customization using measured RC9 evidence, not a claimed upstream port.",
+    "visible_geometry_change": "List uses parent-native dimensions instead of 12pt horizontal and 5pt vertical shrink; outer modal and glass materials unchanged.",
+    "validation": {
+      "source_contracts": "212_passed",
+      "fixture_comparison_to_original": "passed_all_nine_triplets_constants_and_SHA256",
+      "git_diff_check": "passed",
+      "native": "pending_CI_counted_parent_and_table_not_UIKit",
+      "full_tipa": "pending",
+      "device": "pending_Settings_and_About"
+    },
+    "preserved": "Product 3.0.7, existing iOS 16 supported combinations, Jetsam, low-power UI/runtime, menus, licensing, injection and jailbreak runtime."
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -816,8 +847,8 @@
     {
       "id": "custom_glass_and_ui",
       "classification": "rc9_specific",
-      "status": "scoped_backdrop_guard_device_top_bounce_failed_diagnostic_build_passed_runtime_evidence_pending",
-      "evidence": "settings_bounce_followup; docs/rc9-settings-bounce-audit-20261107.md. User confirmed 1a7feb18 still oscillates at the settings top boundary while bottom rebound is normal. Add opt-in geometry observation, not another guessed scroll change; root cause and device fix remain open."
+      "status": "device_trace_identified_frame_cycle_native_frame_candidate_pending_ci_and_device",
+      "evidence": "settings_native_frame_followup; docs/rc9-settings-native-frame-20261108.md. Actual c3610a00 iOS16.6 settings trace records nine parent/RC9 frame cycles and six negative-offset resets inside parent layout. Remove the post-parent resize; Settings and About device acceptance remains pending."
     },
     {
       "id": "trustcache_kernel_reader_lifetime",

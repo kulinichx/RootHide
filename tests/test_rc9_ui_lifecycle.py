@@ -302,11 +302,12 @@ class SettingsScrollLayoutContracts(unittest.TestCase):
         layout = self.settings_method("- (void)viewDidLayoutSubviews")
         self.assertNotIn("customGlassCleanupTableHairlines", layout)
 
-    def test_base_list_does_not_reassign_an_unchanged_table_frame(self):
+    def test_base_list_leaves_table_frame_owned_by_preferences(self):
         base = source("Application/Dopamine/UI/Settings/PSLists/DOPSListController.m")
         layout = extract(base, "- (void)viewDidLayoutSubviews")
-        self.assertIn("if (!CGRectEqualToRect(_table.frame, tableFrame))", layout)
-        self.assertIn("_table.frame = tableFrame;", layout)
+        self.assertEqual(layout.count("[super viewDidLayoutSubviews];"), 1)
+        self.assertNotIn("_table.frame", layout)
+        self.assertNotIn("setFrame:", layout)
         self.assertNotIn("contentOffset", layout)
 
     def test_about_scroll_layout_does_not_queue_material_or_hairline_work(self):

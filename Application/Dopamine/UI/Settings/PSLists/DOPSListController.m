@@ -159,9 +159,8 @@ static NSArray *DOScrollTraceRecords(const DOScrollTraceSample *samples, NSUInte
     [self recordScrollDiagnosticsPhase:3];
     [super viewDidLayoutSubviews];
     [self recordScrollDiagnosticsPhase:4];
-    CGRect tableFrame = CGRectMake(12, 5, self.view.bounds.size.width - 24, self.view.bounds.size.height - 10);
-    if (!CGRectEqualToRect(_table.frame, tableFrame))
-        _table.frame = tableFrame;
+    // Preferences owns the table's frame. Shrinking it here makes the next
+    // superclass layout expand it again and reset an active top overscroll.
 
     // Keep UIKit's automatic top safe-area adjustment for Preferences lists.
     // The raw 24pt bottom inset adds scroll room; UIKit adds the device safe area.
