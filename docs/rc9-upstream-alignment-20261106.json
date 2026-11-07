@@ -345,7 +345,7 @@
     "validation": {
       "python_test_suite": "148_passed",
       "git_diff_check": "passed",
-      "native_asan_ubsan": "run_42337444155_found_test_stub_pointer_type_mismatch_now_fixed_pending_rerun",
+      "native_asan_ubsan": "runs_42337444155_and_42337862821_failed_on_test_stub_pointer_type_mismatch; stub_now_matches_zqbb_choma_int_void_pointer_api_pending_rerun",
       "full_tipa_build": "skipped_after_native_step_failure_pending_rerun",
       "device_acceptance": "pending"
     },

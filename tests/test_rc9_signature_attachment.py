@@ -129,8 +129,9 @@ static void csd_superblob_free(CS_DecodedSuperBlob *decoded) {
     tracked_free(decoded);
 }
 
-static void csd_code_directory_calculate_hash(CS_DecodedBlob *blob, uint8_t *hash) {
+static int csd_code_directory_calculate_hash(CS_DecodedBlob *blob, void *hash) {
     memset(hash, (int)blob->flags, sizeof(cdhash_t));
+    return 0;
 }
 
 static bool is_cdhash_trustcached(cdhash_t hash) {
