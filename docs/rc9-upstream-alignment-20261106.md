@@ -558,3 +558,13 @@ ZQBB 的 adhoc helper 已有三态区分，RC9 先前也已移植该模式。
 这是复用上游检查模式的 RC9 本地扩展，不冒充上游已发布的 raw-collector 修复。
 递归依赖 collector 的失败传播、CodeDirectory 内部结构、并发快照与既有
 内核/中断恢复问题仍开放；本轮不改 UI、低电量计划、挂载、名单或 iOS 16 门槛。
+
+### 第十四阶段验收补记
+
+提交 `d140ebbf417148e1a46522b71e2c3aa01b8635aa` 的 GitHub Run
+`42373722237` 已成功完成。新增使用真实头文件的 raw-collection ASan/UBSan、
+原 adhoc 及其余既有原生回归、源码回归、完整 TIPA、包身份检查和上传均通过。
+没有以原生替身测试的通过替代真实解析器或设备验证。
+
+实际制品为 `Dopamine_3.0.7-d140ebbf_roothide.tipa`，
+artifact ID `13575075586`。真机验收仍待完成；后续文档补记不改变此候选代码身份。

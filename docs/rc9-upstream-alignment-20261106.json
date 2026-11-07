@@ -8,12 +8,12 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "d173d36ea9b532877c79f0630bf5e94c26c4de5d",
-      "run": 42372494583,
+      "code_commit": "d140ebbf417148e1a46522b71e2c3aa01b8635aa",
+      "run": 42373722237,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-d173d36e_roothide.tipa",
-      "artifact_id": 13573798939,
-      "github_artifact_archive_digest": "sha256:ddfe9568b9313072743f456f7f018bc0e4abe69d43631fd0ff2fdf7ce2c51b4f",
+      "package": "Dopamine_3.0.7-d140ebbf_roothide.tipa",
+      "artifact_id": 13575075586,
+      "github_artifact_archive_digest": "sha256:6474a54863ac3e2873ae0d38fbdd0ad0774869ffc697eb442e8b979cb685fc4e",
       "device_acceptance": "pending_for_this_candidate"
     },
     "latest_device_feedback": {
@@ -491,7 +491,7 @@
   },
   "phase_fourteen": {
     "date": "2026-11-07",
-    "status": "source_suite_passed_new_native_CI_and_device_validation_pending",
+    "status": "native_regressions_full_build_and_identity_passed_device_pending",
     "scope": "Raw signature collection absence/failure distinction and complete-output ownership.",
     "rc9_baseline": "d173d36ea9b532877c79f0630bf5e94c26c4de5d",
     "references": {
@@ -510,9 +510,10 @@
       "python_test_suite": "169_passed",
       "git_diff_check": "passed",
       "native_test": "tests/test_rc9_signature_raw_collection.py --native",
-      "native_asan_ubsan": "pending_macOS_CI",
-      "full_tipa_build": "pending",
-      "package_identity": "pending",
+      "native_asan_ubsan": "passed_GitHub_run_42373722237",
+      "full_tipa_build": "passed_GitHub_run_42373722237",
+      "package_identity": "passed_GitHub_run_42373722237",
+      "ci_commit": "d140ebbf417148e1a46522b71e2c3aa01b8635aa",
       "device_acceptance": "pending"
     },
     "limits": [
@@ -589,8 +590,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "raw_collector_tristate_error_extension_added_source_suite_passed_new_native_CI_pending",
-      "evidence": "phase_three, phase_four, phase_ten, phase_twelve, phase_thirteen and phase_fourteen. Latest built code d173d36e passed run 42372494583. Phase fourteen extends the already aligned signature-presence tri-state pattern to raw collection, adds complete partial cleanup and count bounds, with 169 local source tests passed; new native/full-build validation pending. Official and ZQBB raw collectors also silently skip null reads, so this is not described as an existing upstream raw fix. Legacy unsized callers, recursive dependency failures, CodeDirectory internals, concurrent mutation and device validation remain open."
+      "status": "raw_collector_tristate_errors_and_cleanup_native_CI_full_build_passed_other_paths_open",
+      "evidence": "phase_three, phase_four, phase_ten, phase_twelve, phase_thirteen and phase_fourteen. Latest built code d140ebbf passed run 42373722237, including new raw-collection ASan/UBSan with real headers, existing native regressions, full TIPA and identity. Local source suite: 169 passed. Official and ZQBB raw collectors also silently skip null reads; the RC9 fix reuses the already aligned tri-state pattern rather than claiming an upstream raw fix. Legacy unsized callers, recursive dependency failures, CodeDirectory internals, concurrent mutation and device validation remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

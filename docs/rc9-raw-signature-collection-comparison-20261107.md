@@ -64,6 +64,22 @@ Cryptex/TrollStore 过滤及随机化策略。调用方停止信任/附加的顺
 新增 ASan/UBSan、既有原生回归、完整 TIPA 和包身份检查待本轮 CI，
 真机验收仍单独记录。
 
+### CI 验收补记
+
+代码提交 `d140ebbf417148e1a46522b71e2c3aa01b8635aa` 的 GitHub Run
+`42373722237` 已成功完成，更新本轮前述 CI 待验状态：
+源码回归、既有运行时原生回归、签名附加/来源读取、真实 ChOma、
+新增 raw-collection ASan/UBSan、配套工具 scheme、完整 TIPA、
+包身份检查与制品上传均通过。这是 macOS CI 结果，不是 Windows 本机原生执行。
+
+制品名 `Dopamine_3.0.7-d140ebbf_roothide.tipa`，artifact ID `13575075586`。
+GitHub artifact 归档 digest：
+`sha256:6474a54863ac3e2873ae0d38fbdd0ad0774869ffc697eb442e8b979cb685fc4e`。
+该值不冒充归档内 TIPA 文件本身的 SHA-256。新包设备验收尚未完成；
+此前 `7ad14162` 的普通安装/使用反馈不转移到本候选。
+
+验收补记只修改文档；本轮包和代码身份保持为 `d140ebbf`。
+
 ## 未关闭事项
 
 本轮替代第十三阶段记录中 raw collector 空读取静默跳过这一项，不表示整个
