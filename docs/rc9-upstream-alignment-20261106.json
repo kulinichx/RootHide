@@ -148,7 +148,7 @@
   },
   "phase_four": {
     "date": "2026-11-07",
-    "status": "source_regressions_passed_native_and_full_build_pending",
+    "status": "native_regressions_full_build_and_CI_identity_passed_device_pending",
     "module": "BaseBin/libjailbreak/src/trustcache_fs.c",
     "source_commit": "15a075427c758eadd366260360c529a7762af4db",
     "scope": "Propagate directory open/read/stat/allocation/parse/callback/close failures, reject partial collections, probe Mach-O magic with EINTR and short-read handling, and clean up all add-entrypoint outcomes.",
@@ -162,8 +162,8 @@
     "local_validation": {
       "project_tests": 131,
       "diff_check": "passed",
-      "native_execution": "pending_macOS_CI",
-      "full_tipa_build": "pending",
+      "native_execution": "passed_GitHub_run_42322009089",
+      "full_tipa_build": "passed_GitHub_run_42322009089",
       "device_acceptance": "pending"
     },
     "limitations": [
@@ -172,6 +172,17 @@
       "Does not provide a transaction across concurrently changing files or roll back earlier per-file randomization.",
       "Kernel trustcache reader lifetime and remaining signature attachment/parser paths remain open."
     ]
+  },
+  "phase_five": {
+    "date": "2026-11-07",
+    "scope": "Default injection mode, optional manager installation and existing verbose-log switch audit.",
+    "runtime_change": "none_existing_default_is_blacklist_without_user_mode_file",
+    "preserved": "Existing whitelist file and user choices are not deleted, rewritten or forcibly disabled.",
+    "report": "docs/rc9-injection-defaults-and-logs-20261107.md",
+    "native_test": "tests/test_rc9_injection_defaults.py --native",
+    "local_project_tests": 137,
+    "native_execution": "pending_macOS_CI",
+    "unresolved": "No group-member device evidence establishes which component created their user whitelist file. RC9 has no matching optional Sileo installation entry yet."
   },
   "ledger": [
     {
@@ -232,7 +243,13 @@
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
       "status": "file_and_directory_collection_errors_backported_other_signature_paths_open",
-      "evidence": "phase_three and phase_four; tests/test_rc9_signature_collection.py and tests/test_rc9_trustcache_directory.py. Directory native CI pending; does not close trustcache lifetime or all parser/attachment paths."
+      "evidence": "phase_three and phase_four; tests/test_rc9_signature_collection.py and tests/test_rc9_trustcache_directory.py. Directory native CI passed in run 42322009089; does not close trustcache lifetime or all parser/attachment paths."
+    },
+    {
+      "id": "default_injection_mode_and_verbose_logs",
+      "classification": "existing_behavior_verified_with_regressions",
+      "status": "source_and_archive_audit_complete_native_defaults_test_pending_device_case_open",
+      "evidence": "phase_five; docs/rc9-injection-defaults-and-logs-20261107.md. Default selector matches fixed zqbb source; no destructive migration or UI change."
     }
   ]
 }
