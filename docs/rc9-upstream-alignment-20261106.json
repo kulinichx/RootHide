@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-06",
-  "scope": "Incremental iOS 16 alignment: RC9 module isolation, UI integration, fork handshake, file and directory signature collection backports.",
+  "scope": "Incremental iOS 16 alignment: RC9 module isolation, UI integration, fork handshake, signature and trustcache failure handling.",
   "rc9": {
     "commit": "fad8bbbd6d8ef0b23a0b7d5d47d666243ae02182",
     "product_version": "3.0.7",
@@ -301,6 +301,59 @@
       "No product version, minimum iOS target or device support claim changed."
     ]
   },
+  "phase_nine": {
+    "date": "2026-11-07",
+    "status": "source_suite_passed_native_kernel_fault_injection_and_device_validation_pending",
+    "module": "BaseBin/libjailbreak/src/trustcache.c",
+    "references": {
+      "rc9_baseline": "24e43c7e",
+      "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+      "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77",
+      "zqbb_fix_commit": "8167d0aa2c7590b4f0e8358eb765225ff6b5c75e"
+    },
+    "changes": [
+      "Propagate kernel reads and writes through trustcache list traversal and mutation.",
+      "Conditionally roll back failed pointer writes; retain allocations when list publication state is uncertain.",
+      "Preserve RC9 locking, deduplication and cross-page behavior while checking dynamic cache bounds and I/O."
+    ],
+    "validation": {
+      "python_source_suite": "146_passed_before_phase_ten",
+      "native_kernel_fault_injection": "pending_macos_ci",
+      "apple_toolchain_build": "pending",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "The 10ms retirement delay is not proof that kernel trustcache readers have quiesced.",
+      "The fix targets the iOS 16 PPL trustcache path and shared list operations; no iOS 17-only strategy was ported."
+    ]
+  },
+  "phase_ten": {
+    "date": "2026-11-07",
+    "module": "BaseBin/libjailbreak/src/signatures.c",
+    "scope": "Guard signature re-encoding failure in trust_signatures without changing the successful attachment path.",
+    "finding": {
+      "id": "signature_attachment_encode_failure",
+      "classification": "shared_upstream_failure_gap_rc9_preservation_bug",
+      "references": {
+        "official_commit": "9617d75f476423fdfd33477299c8a1349eb6f375",
+        "zqbb_roothide_commit": "7e14aa6155ce867e9052a88a8c17c632f4c30d77"
+      },
+      "evidence": "Both comparison paths dereference the result of csd_superblob_encode without checking it. RC9 additionally frees the original signature buffer before encoding, so an allocation failure could cause a null dereference and discard the original buffer.",
+      "change": "Encode to a temporary first; preserve the original allocation on failure, clean up local state and return the existing -2 allocation-failure status. Replace the original only after successful encoding.",
+      "test": "tests/test_rc9_signature_attachment.py extracts the production trust_signatures function and injects encode failure and success."
+    },
+    "validation": {
+      "python_test_suite": "148_passed",
+      "git_diff_check": "passed",
+      "native_asan_ubsan": "added_to_macos_ci_not_run_locally_clang_unavailable",
+      "full_tipa_build": "pending_ci",
+      "device_acceptance": "pending"
+    },
+    "limits": [
+      "The added guard is a local failure-path hardening, not an upstream backport.",
+      "It does not close remaining signature parser/attachment paths or trustcache kernel-reader lifetime."
+    ]
+  },
   "ledger": [
     {
       "id": "low_power_app_bridge",
@@ -367,8 +420,8 @@
     {
       "id": "signature_collection_remaining_differences",
       "classification": "partially_backported",
-      "status": "file_and_directory_collection_errors_backported_other_signature_paths_open",
-      "evidence": "phase_three and phase_four; tests/test_rc9_signature_collection.py and tests/test_rc9_trustcache_directory.py. Directory native CI passed in run 42322009089; does not close trustcache lifetime or all parser/attachment paths."
+      "status": "file_directory_collection_errors_backported_attachment_encode_failure_guarded_other_paths_open",
+      "evidence": "phase_three, phase_four and phase_ten; tests/test_rc9_signature_collection.py, tests/test_rc9_trustcache_directory.py and tests/test_rc9_signature_attachment.py. Native attachment fault injection is pending macOS CI; other parser/attachment paths and trustcache lifetime remain open."
     },
     {
       "id": "default_injection_mode_and_verbose_logs",

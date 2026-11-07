@@ -435,10 +435,17 @@ int trust_signatures(int pid, int fd, struct siginfo *sigInfos, uint32_t sigInfo
 										csd_code_directory_set_flags(bestCDBlob, flags | CS_ADHOC);
 									}
 
+									CS_SuperBlob *encodedSuperblob = csd_superblob_encode(decodedSuperblob);
+									if (!encodedSuperblob) {
+										csd_superblob_free(decodedSuperblob);
+										free(cdhashes);
+										free(sigInfosToAttach);
+										return -2;
+									}
+
 									free(curSigInfo->signature.fs_blob_start);
-									superblob = csd_superblob_encode(decodedSuperblob);
-									curSigInfo->signature.fs_blob_start = superblob;
-									curSigInfo->signature.fs_blob_size = OSSwapBigToHostInt32(superblob->length);
+									curSigInfo->signature.fs_blob_start = encodedSuperblob;
+									curSigInfo->signature.fs_blob_size = OSSwapBigToHostInt32(encodedSuperblob->length);
 
 									sigInfosToAttach[sigInfosToAttachCount++] = curSigInfo;
 								}
