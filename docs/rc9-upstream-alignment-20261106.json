@@ -18,14 +18,14 @@
     "minimum_ios": "16.0",
     "device_acceptance": "user_reported_install_and_general_use_normal_full_acceptance_pending",
     "latest_ci": {
-      "code_commit": "157ebf4c7be0787dcc998b7990749d78c446dbac",
-      "run": 42382233488,
+      "code_commit": "a379623825bc8043775be577218f6d2c73bf5d51",
+      "run": 42386083984,
       "conclusion": "success",
-      "package": "Dopamine_3.0.7-157ebf4c_roothide.tipa",
-      "artifact_id": 13578670362,
-      "github_artifact_archive_digest": "sha256:5b80e1274c15c2a04b0ab72f22a98182d4b6bbae4f8653c6e1f746a3d35f7472",
-      "scope": "jetsam_GET_descriptor_termination_and_checked_setter_plus_opt_in_scroll_diagnostics_no_top_bounce_fix_claimed",
-      "device_acceptance": "user_reports_jetsam_still_reverts_to_30_installed_build_and_reload_conditions_not_reconfirmed_top_bounce_remains_open"
+      "package": "Dopamine_3.0.7-a3796238_roothide.tipa",
+      "artifact_id": 13579916221,
+      "github_artifact_archive_digest": "sha256:45162737d8c90c83017c43949e2b2fb2a233f2264175c3536428c2e74722bb0d",
+      "scope": "verified_jetsam_write_readback_and_checked_preference_storage_plus_existing_opt_in_scroll_diagnostics",
+      "device_acceptance": "user_confirmed_jetsam_fixed_2026_11_08_top_bounce_remains_open"
     },
     "reported_device_regressions": [
       {
@@ -707,7 +707,7 @@
   },
   "jetsam_readback_followup": {
     "date": "2026-11-07",
-    "status": "user_reports_symptom_persists_root_cause_open_official_only_second_pass_in_progress",
+    "status": "user_confirmed_fixed_2026_11_08_after_official_only_second_pass",
     "report": "docs/rc9-jetsam-preference-readback-20261107.md",
     "baseline": "2a110d35e82bf839ae9f9630c8dfa9a2288e1b17",
     "user_report": "A group member selects a jetsam option other than 30 MB, returns, and sees the default 30 MB again.",
@@ -752,12 +752,30 @@
       "validation": {
         "source_contracts": "203_passed",
         "diff_check": "passed",
-        "native": "pending_macOS_real_Darwin_XPC_objects_substituted_transport_and_actual_Foundation_storage",
-        "tipa": "pending",
-        "device": "not_tested_no_claim_that_the_reported_root_cause_is_proven"
+        "native": "passed_GitHub_run_42386083984_real_Darwin_XPC_objects_substituted_transport_and_actual_Foundation_storage",
+        "tipa": "passed_GitHub_run_42386083984",
+        "ci_commit": "a379623825bc8043775be577218f6d2c73bf5d51",
+        "device": "user_confirmed_jetsam_fixed_2026_11_08_no_full_device_matrix_claim"
       }
     },
     "preserved": "Product 3.0.7, original supported iOS 16 device/firmware combinations, low-power schedule, injection defaults, mounts and remaining menu entries."
+  },
+  "settings_scroll_self_healing_followup": {
+    "date": "2026-11-08",
+    "baseline": "a379623825bc8043775be577218f6d2c73bf5d51",
+    "classification": "rc9_specific_performance_fix_not_an_upstream_port",
+    "status": "source_regressions_passed_native_full_build_and_device_pending",
+    "report": "docs/rc9-settings-scroll-self-healing-20261108.md",
+    "source_finding": "Settings and About layout and cell display callbacks reach supporter verification, whose self-healing previously rewrote an unchanged external license and synchronized unchanged defaults.",
+    "changes": "Skip equal nonempty persistent string writes and equal verified-license defaults synchronization. Keep real verification, removal priority, migration, explicit clears and failed-write retries.",
+    "not_established": "This is a proven redundant-write path, not proof of the reported top-boundary oscillation root cause. Low-power UI also uses the same verifier; no new runtime trace was supplied.",
+    "validation": {
+      "source_contracts": "207_passed",
+      "new_source_checks_reject_unfixed_baseline": "2_of_2",
+      "native": "pending_macOS_Foundation_counted_persistence_and_verifier_boundaries_not_Security_or_UIKit",
+      "tipa": "pending",
+      "device": "pending"
+    }
   },
   "ledger": [
     {

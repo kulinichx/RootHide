@@ -1427,10 +1427,15 @@ static inline BOOL DORHSupporterSetPersistentString(NSString *key, NSString *val
     NSMutableDictionary<NSString *, id> *state =
         DORHSupporterReadPersistentState();
 
-    if (value.length != 0)
+    if (value.length != 0) {
+        if ([state[key] isEqual:value]) {
+            return YES;
+        }
         state[key] = value;
-    else
+    }
+    else {
         [state removeObjectForKey:key];
+    }
 
     return DORHSupporterWritePersistentState(state);
 }
@@ -1731,11 +1736,12 @@ static inline NSDictionary<NSString *, id> *DORHSupporterCurrentLicenseInfo(void
             DORHSupporterPersistentLicenseCodeKey,
             license);
 
-        [NSUserDefaults.standardUserDefaults
-            setObject:license
-               forKey:DORHSupporterLicenseDefaultsKey];
-
-        [NSUserDefaults.standardUserDefaults synchronize];
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        if (![[defaults stringForKey:DORHSupporterLicenseDefaultsKey]
+                isEqualToString:license]) {
+            [defaults setObject:license forKey:DORHSupporterLicenseDefaultsKey];
+            [defaults synchronize];
+        }
 
         return info;
     }
